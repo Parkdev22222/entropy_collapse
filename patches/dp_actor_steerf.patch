@@ -1,0 +1,56 @@
+--- a/verl/workers/actor/dp_actor.py	2026-08-15 03:52:01.145880660 +0000
++++ b/verl/workers/actor/dp_actor.py	2026-08-15 03:53:14.333823403 +0000
+@@ -404,6 +404,10 @@
+         multi_turn = data.meta_info.get("multi_turn", False)
+ 
+         select_keys = ["responses", "input_ids", "attention_mask", "position_ids", "old_log_probs", "advantages", "max_prob_log_probs", "entropys"]
++        # STEER-F: A_H is precomputed in ray_trainer (it needs the whole rollout
++        # group to build the sibling baseline, which a micro-batch cannot see).
++        if "a_h" in data.batch.keys():
++            select_keys.append("a_h")
+         if multi_turn:
+             select_keys.append("loss_mask")
+         if self.config.get("use_kl_loss", False):
+@@ -530,7 +534,14 @@
+                         token_weight_max = self.config.get("policy_loss", {}).get("token_weight_max", 1.05)
+                         linear = self.config.get("policy_loss", {}).get("linear", True)  # get linear parameter
+                         entropy_control_mode = self.config.get("policy_loss", {}).get("entropy_control_mode", "symmetric")
+-                        
++
++                        # STEER-F knobs; steerf_lam=0.0 reproduces stock STEER exactly.
++                        steerf_lam = self.config.get("policy_loss", {}).get("steerf_lam", 0.0)
++                        steerf_eta = self.config.get("policy_loss", {}).get("steerf_eta", 1.0)
++                        steerf_clip_c = self.config.get("policy_loss", {}).get("steerf_clip_c", 1.0)
++                        steerf_norm = self.config.get("policy_loss", {}).get("steerf_norm", "scale")
++                        a_h = data.get("a_h", None) if steerf_lam != 0.0 else None
++
+                         result = compute_policy_loss_with_entropy(
+                             old_log_prob=old_log_prob,
+                             log_prob=log_prob,
+@@ -546,6 +557,11 @@
+                             token_weight_max=token_weight_max,
+                             linear=linear,  # linear parameter
+                             entropy_control_mode=entropy_control_mode,
++                            a_h=a_h,
++                            steerf_lam=steerf_lam,
++                            steerf_eta=steerf_eta,
++                            steerf_clip_c=steerf_clip_c,
++                            steerf_norm=steerf_norm,
+                         )
+                         # Now returns 9 values, directly unpack
+                         pg_loss, pg_clipfrac, ppo_kl, pg_clipfrac_lower, pg_clipfrac_high, pg_clipfrac_low, clipped_by_high, clipped_by_low, clip_stats = result
+@@ -754,7 +770,13 @@
+                             "actor/token_weights_min": float(clip_stats["token_weights_min"]),
+                             "actor/token_weights_max": float(clip_stats["token_weights_max"]),
+                         })
+-                    
++
++                    # STEER-F diagnostics ride along in clip_stats under a "steerf/" prefix.
++                    micro_batch_metrics.update(
++                        {k: float(v) for k, v in clip_stats.items() if k.startswith("steerf/")}
++                    )
++
++
+                     micro_batch_metrics.update(
+                         {
+                             "actor/pg_loss": pg_loss.detach().item(),
