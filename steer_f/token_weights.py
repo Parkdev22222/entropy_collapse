@@ -39,6 +39,7 @@ def compute_token_weights_steerf(
     eta: float = 1.0,
     clip_c: float = 1.0,
     steerf_norm: str = "z",
+    steerf_local_scale: float = 1.0,
     return_stats: bool = False,
 ):
     """원본과 동일한 (B, T) 토큰 가중치. STEER-F 인자를 주면 Ω→Ω̃로 교체된다."""
@@ -91,6 +92,7 @@ def compute_token_weights_steerf(
             lam=lam,
             clip_c=clip_c,
             norm=steerf_norm,
+            local_scale=steerf_local_scale,
             return_stats=True,
         )
         # ================================================================

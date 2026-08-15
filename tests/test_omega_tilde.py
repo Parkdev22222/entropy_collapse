@@ -156,3 +156,22 @@ def test_invalid_mode():
             omega_local=torch.randn(2, 2), w=torch.randn(2, 2), pi_sampled=torch.rand(2, 2),
             h_togo_vals=torch.rand(2, 2), baseline_h_togo=torch.rand(2, 2), lam=1.0, mode="bogus",
         )
+
+
+def test_local_scale_zero_leaves_only_future_term():
+    """Ablation A4: local_scale=0 이면 Ω̃가 미래 항만으로 결정된다."""
+    b, t = 4, 6
+    kw = dict(
+        w=torch.randn(b, t),
+        pi_sampled=torch.rand(b, t) * 0.8 + 0.1,
+        h_togo_vals=torch.rand(b, t) * 3,
+        baseline_h_togo=torch.rand(b, t) * 3,
+        response_mask=torch.ones(b, t),
+        lam=1.0,
+    )
+    a = compute_omega_tilde(omega_local=torch.randn(b, t), local_scale=0.0, **kw)
+    b_ = compute_omega_tilde(omega_local=torch.randn(b, t) * 100, local_scale=0.0, **kw)
+    torch.testing.assert_close(a, b_)
+    # local_scale=1 이면 로컬 항이 실제로 영향을 준다
+    c = compute_omega_tilde(omega_local=torch.randn(b, t), local_scale=1.0, **kw)
+    assert not torch.allclose(a, c)

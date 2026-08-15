@@ -38,6 +38,7 @@ class SteerFConfig:
     beta_mtp: float = 0.05      # MTP CE 보조 손실 계수.
     drift_kl_threshold: float = 0.5   # 예보-정책 표류 문턱. 초과 시 λ 감쇠.
     drift_lam_decay: float = 0.5      # 초과 시 λ에 곱할 값.
+    local_scale: float = 1.0          # z(Ω) 계수. 0 = 미래 항만 (Ablation A4).
 
     def __post_init__(self):
         if self.lam < 0:
@@ -91,6 +92,7 @@ def compute_omega_tilde(
     lam: float = 0.0,
     clip_c: float = 1.0,
     norm: str = "z",
+    local_scale: float = 1.0,
     return_stats: bool = False,
 ):
     """Ω̃ 계산.
@@ -105,10 +107,16 @@ def compute_omega_tilde(
         response_mask: (B, T) 0/1.
         mode: "symmetric" | "asymmetric".
         eta, lam, clip_c, norm: SteerFConfig 참조.
+        local_scale: 로컬 항 z(Ω)의 계수. 0으로 두면 미래 항만 남는다
+            (Ablation A4: 두 항의 개별 기여 분해). 기본 1.0.
         return_stats: True면 (omega_tilde, stats) 반환.
 
     Returns:
         (B, T) Ω̃ — 또는 return_stats=True면 (Ω̃, stats dict).
+
+    Note:
+        λ=0 우회는 `local_scale` 보다 우선한다 — λ=0이면 미래 항이 없어
+        `local_scale`만 남고, 그것은 min-max 매핑에서 아핀 불변이라 무의미하다.
     """
     if mode not in {"symmetric", "asymmetric"}:
         raise ValueError(f"unknown mode: {mode}")
@@ -132,7 +140,7 @@ def compute_omega_tilde(
 
     visit_term = torch.where(torch.isfinite(visit_term), visit_term, torch.zeros_like(visit_term))
 
-    z_local = normalize(omega_local, response_mask, norm)
+    z_local = local_scale * normalize(omega_local, response_mask, norm)
     z_future = normalize(visit_term, response_mask, norm)
     omega_tilde = z_local + lam * z_future
 
