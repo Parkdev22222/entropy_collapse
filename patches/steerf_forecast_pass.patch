@@ -1,0 +1,264 @@
+STEER-F: produce the future-entropy forecast and turn it into A_H.
+
+  dp_actor.py       one extra no-grad forward per micro-batch with
+                    output_hidden_states=True -> H_togo; compute_log_prob now
+                    returns 4 values.
+  fsdp_workers.py   unpack the 4th value and ship "h_togo" in the DataProto.
+                    (This also fixes an upstream latent bug: line ~772 already
+                    unpacked 4 values from the 3-tuple, so any run with a
+                    standalone reference policy -- use_kl_loss=True or
+                    use_kl_in_reward=True -- crashed before this patch.)
+  ray_trainer.py    build A_H with the sibling baseline, which needs the whole
+                    prompt group and therefore cannot live in the actor.
+
+SCOPE NOTE: unlike the other patches in this directory, this one could not be
+executed during development -- it needs a GPU, and the environment it was
+written in has none. The logic it calls is unit-tested (tests/), but the FSDP
+parameter-gathering path in _steerf_unembedding() is untested. Read the
+docstring there before the first multi-GPU run.
+
+--- a/verl/workers/actor/dp_actor.py	2026-08-15 04:03:06.975868553 +0000
++++ b/verl/workers/actor/dp_actor.py	2026-08-15 04:03:47.297861028 +0000
+@@ -301,8 +301,124 @@
+             self.actor_optimizer.step()
+         return grad_norm
+ 
++    # ------------------------------------------------------------------
++    # STEER-F: future-entropy forecast
++    # ------------------------------------------------------------------
++    def _steerf_config(self):
++        return self.config.get("policy_loss", {})
++
++    def _steerf_enabled(self) -> bool:
++        return float(self._steerf_config().get("steerf_lam", 0.0)) != 0.0
++
++    def _steerf_load_heads(self):
++        """Lazily load the MTP heads and calibration onto this rank."""
++        if getattr(self, "_steerf_heads_cache", None) is not None:
++            return self._steerf_heads_cache
++
++        import json
++
++        from steer_f.entropy_forecast import HeadCalibration
++        from steer_f.mtp_heads import MTPHeads
++
++        cfg = self._steerf_config()
++        heads_path = cfg.get("steerf_heads_path")
++        if not heads_path:
++            raise ValueError(
++                "STEER-F is enabled (steerf_lam != 0) but policy_loss.steerf_heads_path is unset. "
++                "Train heads with scripts/phase1_warmup_heads.py first."
++            )
++        ckpt = torch.load(heads_path, map_location="cpu")
++        heads = MTPHeads(**ckpt["config"])
++        heads.load_state_dict(ckpt["state_dict"])
++        param = next(self.actor_module.parameters())
++        heads = heads.to(device=param.device, dtype=param.dtype).eval()
++        heads.requires_grad_(False)
++
++        calib = None
++        calib_path = cfg.get("steerf_calib_path")
++        if calib_path and os.path.exists(calib_path):
++            calib = HeadCalibration.from_dict(json.load(open(calib_path)))
++        else:
++            print(
++                "[STEER-F] no calibration file; distant heads will over-estimate entropy "
++                "(ablation A6 measures this). Pass policy_loss.steerf_calib_path to fix."
++            )
++
++        self._steerf_heads_cache = (heads, calib)
++        return self._steerf_heads_cache
++
++    def _steerf_unembedding(self):
++        """The policy's output embedding, reached through any FSDP wrapper.
++
++        KNOWN RISK — this is the one part of STEER-F that could not be tested
++        without multi-GPU hardware. Under FSDP the unembedding parameters are
++        sharded outside a forward pass, so calling it directly here can fail or
++        silently see a shard. If a run dies here, the two documented fixes are
++        (a) wrap the forecast in `FSDP.summon_full_params(..., writeback=False)`,
++        or (b) set `steerf_forecast_device=cpu` and keep an unsharded copy of
++        the unembedding. See docs/experiment_log.md "Phase 2 open risks".
++        """
++        module = self.actor_module
++        for _ in range(4):  # unwrap FSDP / compile / PEFT layers
++            if hasattr(module, "get_output_embeddings"):
++                emb = module.get_output_embeddings()
++                if emb is not None:
++                    return emb
++            module = getattr(module, "module", module)
++        raise RuntimeError(
++            "could not reach the policy's output embedding for the STEER-F forecast"
++        )
++
++    @torch.no_grad()
++    def _steerf_forecast(self, micro_batch, temperature):
++        """H_togo for one micro-batch, or None when STEER-F is off.
++
++        Runs one extra no-grad forward with output_hidden_states=True. verl's
++        own pass discards hidden states, and re-deriving them from the packed
++        (remove_padding) path is far more fragile than paying for one forward,
++        so the cost is accepted deliberately: roughly +1 forward per rollout
++        batch, no backward.
++        """
++        if not self._steerf_enabled():
++            return None
++
++        from steer_f.omega_tilde import SteerFConfig
++        from steer_f.verl_integration import forecast_h_togo
++
++        cfg = self._steerf_config()
++        heads, calib = self._steerf_load_heads()
++        sf_cfg = SteerFConfig(
++            kappa=int(cfg.get("steerf_kappa", 4)),
++            gamma_h=float(cfg.get("steerf_gamma_h", 0.85)),
++        )
++
++        response_length = micro_batch["responses"].size(1)
++        position_ids = micro_batch["position_ids"]
++        if position_ids.dim() == 3:  # qwen2vl mrope
++            position_ids = position_ids.transpose(0, 1)
++
++        output = self.actor_module(
++            input_ids=micro_batch["input_ids"],
++            attention_mask=micro_batch["attention_mask"],
++            position_ids=position_ids,
++            output_hidden_states=True,
++            use_cache=False,
++        )
++        hidden = output.hidden_states[-1]
++
++        return forecast_h_togo(
++            hidden_states=hidden,
++            lm_head=self._steerf_unembedding(),
++            heads=heads,
++            response_length=response_length,
++            cfg=sf_cfg,
++            calib=calib,
++            temperature=temperature,  # match verl's entropys scale
++            chunk_size=int(cfg.get("steerf_chunk_size", 4096)),
++        )
++
+     @GPUMemoryLogger(role="dp actor", logger=logger)
+-    def compute_log_prob(self, data: DataProto, calculate_entropy=False) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
++    def compute_log_prob(self, data: DataProto, calculate_entropy=False) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+         """Compute the log probability of the responses given input_ids, attention_mask and position_ids
+ 
+         Args:
+@@ -367,15 +483,20 @@
+         entropy_lst = []
+         max_prob_log_probs_lst = []  # collect max_prob_log_probs
+         
++        h_togo_lst = []  # STEER-F
++
+         for micro_batch in micro_batches:
+             if isinstance(micro_batch, DataProto):
+                 micro_batch = {**micro_batch.batch, **micro_batch.non_tensor_batch}
+             with torch.no_grad():
+                 entropy, log_probs, max_prob_log_probs = self._forward_micro_batch(micro_batch, temperature=temperature, calculate_entropy=calculate_entropy)
++                h_togo_mb = self._steerf_forecast(micro_batch, temperature)  # STEER-F
+             log_probs_lst.append(log_probs)
+             max_prob_log_probs_lst.append(max_prob_log_probs)  # collect max_prob_log_probs
+             if calculate_entropy and entropy is not None:
+                 entropy_lst.append(entropy)
++            if h_togo_mb is not None:
++                h_togo_lst.append(h_togo_mb)
+ 
+         log_probs = torch.concat(log_probs_lst, dim=0)
+         max_prob_log_probs = torch.concat(max_prob_log_probs_lst, dim=0)  # concat max_prob_log_probs
+@@ -383,7 +504,9 @@
+         entropys = None
+         if calculate_entropy and entropy_lst:
+             entropys = torch.concat(entropy_lst, dim=0)
+-            
++
++        h_togo_vals = torch.concat(h_togo_lst, dim=0) if h_togo_lst else None  # STEER-F
++
+         if use_dynamic_bsz:
+             indices = list(itertools.chain.from_iterable(indices))
+             assert len(indices) == log_probs.size(0), f"{len(indices)} vs. {log_probs.size()}"
+@@ -392,8 +515,10 @@
+             max_prob_log_probs = max_prob_log_probs[revert_indices]  # handle max_prob_log_probs
+             if calculate_entropy and entropys is not None:
+                 entropys = entropys[revert_indices]
++            if h_togo_vals is not None:  # STEER-F
++                h_togo_vals = h_togo_vals[revert_indices]
+ 
+-        return log_probs, entropys, max_prob_log_probs
++        return log_probs, entropys, max_prob_log_probs, h_togo_vals
+ 
+     @GPUMemoryLogger(role="dp actor", logger=logger)
+     def update_policy(self, data: DataProto):
+--- a/verl/workers/fsdp_workers.py	2026-08-15 04:03:06.975906567 +0000
++++ b/verl/workers/fsdp_workers.py	2026-08-15 04:03:57.241861619 +0000
+@@ -722,11 +722,14 @@
+         with self.ulysses_sharding_manager:
+             data = self.ulysses_sharding_manager.preprocess_data(data)
+             with adapter_ctx:
+-                output, entropys, max_prob_log_probs = self.actor.compute_log_prob(data=data, calculate_entropy=True)
+-            
++                output, entropys, max_prob_log_probs, h_togo = self.actor.compute_log_prob(data=data, calculate_entropy=True)
++
+             # Prepare tensors dictionary
+             tensors = {"old_log_probs": output, "entropys": entropys, "max_prob_log_probs": max_prob_log_probs}
+-            
++            if h_togo is not None:  # STEER-F
++                tensors["h_togo"] = h_togo
++
++
+             output = DataProto.from_dict(
+                 tensors=tensors,
+                 meta_info={"temperature": self.config.rollout.temperature},
+--- a/verl/trainer/ppo/ray_trainer.py	2026-08-15 04:03:06.975978010 +0000
++++ b/verl/trainer/ppo/ray_trainer.py	2026-08-15 04:04:09.273862334 +0000
+@@ -1213,10 +1213,48 @@
+                         # add entropys and max_prob_log_probs to batch for update_policy use
+                         batch.batch["entropys"] = entropys
+                         batch.batch["max_prob_log_probs"] = max_prob_log_probs
+-                        
++
++                        # STEER-F: turn the per-token forecast into the entropy
++                        # advantage A_H. This must happen here, not in the actor:
++                        # the sibling baseline needs every rollout of a prompt
++                        # group at once, and a micro-batch only sees a slice.
++                        if "h_togo" in old_log_prob.batch.keys():
++                            from steer_f.monitors import branch_recall_at_k
++                            from steer_f.omega_tilde import SteerFConfig
++                            from steer_f.verl_integration import compute_a_h
++
++                            steerf_cfg_src = self.config.actor_rollout_ref.actor.policy_loss
++                            steerf_cfg = SteerFConfig(
++                                lam=float(steerf_cfg_src.get("steerf_lam", 0.0)),
++                                baseline=str(steerf_cfg_src.get("steerf_baseline", "sibling")),
++                            )
++                            a_h = compute_a_h(
++                                h_togo_vals=old_log_prob.batch["h_togo"],
++                                responses=batch.batch["responses"],
++                                response_mask=response_masks,
++                                uid=batch.non_tensor_batch["uid"],
++                                cfg=steerf_cfg,
++                            )
++                            batch.batch["a_h"] = a_h
++                            recall = branch_recall_at_k(
++                                a_h, batch.batch["responses"], response_masks,
++                                batch.non_tensor_batch["uid"],
++                            )
++                            metrics.update({
++                                "steerf/h_togo_mean": float(
++                                    old_log_prob.batch["h_togo"][response_masks.bool()].mean()
++                                ),
++                                "steerf/a_h_abs_mean": float(a_h[response_masks.bool()].abs().mean()),
++                                "steerf/branch_recall": recall["recall"],
++                                "steerf/branch_lift": recall["lift"],
++                                "steerf/n_branch_points": float(recall["n_branch"]),
++                            })
++                            old_log_prob.batch.pop("h_togo")
++
+                         old_log_prob.batch.pop("entropys")
+                         old_log_prob.batch.pop("max_prob_log_probs")  # remove max_prob_log_probs
+-                        
++
++
+                         batch = batch.union(old_log_prob)
+ 
+ 

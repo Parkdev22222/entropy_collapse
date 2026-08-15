@@ -1,13 +1,15 @@
-"""Phase 1 지표·게이트 로직 테스트 (GPU 불필요)."""
+"""Gate-G1 statistics.  Spearman/binomial are cross-checked against scipy."""
 
 import math
+import sys
+from pathlib import Path
 
-import numpy as np
 import pytest
 
-from steer_f.validation import (
-    GridResult,
-    branch_recall_at_k,
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from steer_f.validation import (  # noqa: E402
+    binomial_test_greater,
     evaluate_gate_g1,
     fisher_z_mean,
     select_kappa_gamma,
@@ -15,170 +17,220 @@ from steer_f.validation import (
     within_problem_spearman,
 )
 
+scipy_stats = pytest.importorskip("scipy.stats", reason="cross-check needs scipy")
 
-# ------------------------------------------------------------ spearman
-def test_spearman_monotone():
+
+# ----------------------------------------------------------------------
+# spearman
+# ----------------------------------------------------------------------
+def test_spearman_perfect_monotone():
     assert spearman([1, 2, 3, 4, 5], [10, 20, 30, 40, 50]) == pytest.approx(1.0)
     assert spearman([1, 2, 3, 4, 5], [50, 40, 30, 20, 10]) == pytest.approx(-1.0)
 
 
 def test_spearman_is_rank_based_not_linear():
-    """비선형 단조 변환에도 ρ = 1 이어야 한다."""
-    x = [1, 2, 3, 4, 5, 6]
-    y = [math.exp(v) for v in x]
-    assert spearman(x, y) == pytest.approx(1.0)
+    """Monotone but wildly non-linear must still score 1.0."""
+    assert spearman([1, 2, 3, 4], [1, 10, 1000, 1e6]) == pytest.approx(1.0)
 
 
-def test_spearman_handles_ties():
-    rho = spearman([1, 1, 2, 2, 3, 3], [1, 1, 2, 2, 3, 3])
-    assert rho == pytest.approx(1.0)
+def test_spearman_matches_scipy():
+    import random
+
+    rng = random.Random(0)
+    for _ in range(20):
+        n = rng.randint(5, 40)
+        x = [rng.gauss(0, 1) for _ in range(n)]
+        y = [xi * rng.gauss(1, 1) + rng.gauss(0, 1) for xi in x]
+        assert spearman(x, y) == pytest.approx(float(scipy_stats.spearmanr(x, y).statistic), abs=1e-9)
 
 
-def test_spearman_constant_or_short_is_nan():
+def test_spearman_handles_ties_like_scipy():
+    x = [1, 1, 2, 2, 3, 3]
+    y = [5, 5, 1, 9, 2, 2]
+    assert spearman(x, y) == pytest.approx(float(scipy_stats.spearmanr(x, y).statistic), abs=1e-9)
+
+
+def test_spearman_constant_input_is_nan():
     assert math.isnan(spearman([1, 1, 1, 1], [1, 2, 3, 4]))
+
+
+def test_spearman_too_few_points_is_nan():
     assert math.isnan(spearman([1, 2], [3, 4]))
 
 
-def test_spearman_drops_non_finite():
-    assert spearman([1, 2, 3, float("nan")], [1, 2, 3, 99]) == pytest.approx(1.0)
-
-
-# ------------------------------------------------------------- fisher z
-def test_fisher_z_mean_between_min_and_max():
-    v = fisher_z_mean([0.1, 0.5, 0.9])
-    assert 0.1 < v < 0.9
-
-
-def test_fisher_z_mean_pulls_above_arithmetic_mean():
-    """Fisher z 평균은 큰 상관에 더 무게를 준다."""
-    rhos = [0.1, 0.9]
-    assert fisher_z_mean(rhos) > float(np.mean(rhos))
-
-
-def test_fisher_z_mean_ignores_nan():
-    assert fisher_z_mean([float("nan"), 0.4]) == pytest.approx(0.4, abs=1e-6)
-    assert math.isnan(fisher_z_mean([float("nan")]))
-
-
-def test_fisher_z_mean_handles_perfect_correlation():
-    assert fisher_z_mean([1.0, 1.0]) == pytest.approx(1.0, abs=1e-4)
-
-
-# -------------------------------------------------- within-problem rho
-def test_within_problem_beats_pooled_when_offsets_differ():
-    """문제마다 오프셋이 다르면 pooled 상관은 부풀거나 깨진다 — 그래서 문제 내에서 잰다."""
-    rng = np.random.default_rng(0)
-    pids, pred, tgt = [], [], []
-    for p, offset in enumerate([0.0, 50.0, 100.0]):
-        x = rng.normal(size=20)
-        pids += [p] * 20
-        pred += list(x + offset)
-        tgt += list(-x + offset * 3)  # 문제 내에서는 음의 상관
-    rho, per = within_problem_spearman(pids, pred, tgt)
-    assert rho < -0.9
-    assert len(per) == 3
-    pooled = spearman(pred, tgt)
-    assert pooled > 0  # pooled는 부호마저 뒤집힌다
-
-
-def test_within_problem_skips_small_groups():
-    pids = [0] * 10 + [1] * 2
-    pred = list(range(10)) + [0.0, 1.0]
-    tgt = list(range(10)) + [1.0, 0.0]
-    rho, per = within_problem_spearman(pids, pred, tgt, min_prefixes=5)
-    assert list(per) == [0]
-    # Fisher z 변환에서 ±1은 발산하므로 ±0.999999로 클리핑된다.
-    assert rho == pytest.approx(1.0, abs=1e-5)
-
-
-# ------------------------------------------------------------- recall
-def test_branch_recall_perfect_ranking():
-    scores = list(range(100))
-    is_branch = [i >= 90 for i in range(100)]
-    out = branch_recall_at_k(scores, is_branch, top_frac=0.1, n_permutations=500)
-    assert out["recall"] == pytest.approx(1.0)
-    assert out["baseline"] == pytest.approx(0.1)
-    assert out["lift"] == pytest.approx(10.0)
-    assert out["p_value"] < 0.05
-
-
-def test_branch_recall_random_ranking_not_significant():
-    rng = np.random.default_rng(3)
-    scores = rng.normal(size=400)
-    is_branch = rng.random(400) < 0.1
-    out = branch_recall_at_k(scores, is_branch, top_frac=0.1, n_permutations=1000, seed=1)
-    assert out["p_value"] > 0.05
-
-
-def test_branch_recall_no_branch_tokens():
-    out = branch_recall_at_k([1.0, 2.0, 3.0], [False, False, False])
-    assert math.isnan(out["recall"])
-    assert out["n_branch"] == 0
-
-
-def test_branch_recall_is_deterministic():
-    rng = np.random.default_rng(5)
-    s, b = rng.normal(size=200), rng.random(200) < 0.2
-    a1 = branch_recall_at_k(s, b, seed=7, n_permutations=300)
-    a2 = branch_recall_at_k(s, b, seed=7, n_permutations=300)
-    assert a1 == a2
-
-
-# --------------------------------------------------------- grid select
-def test_select_kappa_prefers_smaller_at_equal_rho():
-    results = [
-        GridResult(kappa=2, gamma_h=0.85, rho=0.295),
-        GridResult(kappa=4, gamma_h=0.85, rho=0.300),
-        GridResult(kappa=8, gamma_h=0.85, rho=0.301),
-    ]
-    best = select_kappa_gamma(results, elbow_tol=0.01)
-    assert best.kappa == 2
-
-
-def test_select_kappa_picks_clear_winner():
-    results = [
-        GridResult(kappa=2, gamma_h=0.85, rho=0.10),
-        GridResult(kappa=4, gamma_h=0.85, rho=0.30),
-    ]
-    assert select_kappa_gamma(results, elbow_tol=0.01).kappa == 4
-
-
-def test_select_kappa_ties_break_on_rho():
-    results = [
-        GridResult(kappa=4, gamma_h=0.7, rho=0.30),
-        GridResult(kappa=4, gamma_h=1.0, rho=0.305),
-    ]
-    assert select_kappa_gamma(results).gamma_h == 1.0
-
-
-def test_select_kappa_requires_finite():
+def test_spearman_rejects_length_mismatch():
     with pytest.raises(ValueError):
-        select_kappa_gamma([GridResult(kappa=1, gamma_h=1.0, rho=float("nan"))])
+        spearman([1, 2, 3], [1, 2])
 
 
-# --------------------------------------------------------------- gate
-def test_gate_g1_passes():
-    g = evaluate_gate_g1(0.25, {"p_value": 0.01, "lift": 2.0})
-    assert g.passed and "Phase 2" in g.summary()
+# ----------------------------------------------------------------------
+# fisher z
+# ----------------------------------------------------------------------
+def test_fisher_z_mean_of_identical_values_is_that_value():
+    assert fisher_z_mean([0.3, 0.3, 0.3]) == pytest.approx(0.3)
 
 
-def test_gate_g1_fails_on_low_rho():
-    g = evaluate_gate_g1(0.15, {"p_value": 0.01, "lift": 2.0})
-    assert not g.passed
-    assert any("rho" in r for r in g.reasons)
+def test_fisher_z_mean_exceeds_the_arithmetic_mean():
+    """The reason the plan asks for Fisher z rather than a plain average."""
+    rhos = [0.1, 0.9]
+    assert fisher_z_mean(rhos) > sum(rhos) / len(rhos)
 
 
-def test_gate_g1_fails_on_insignificant_recall():
-    g = evaluate_gate_g1(0.4, {"p_value": 0.30, "lift": 1.1})
-    assert not g.passed
-    assert any("p-value" in r for r in g.reasons)
+def test_fisher_z_drops_nan_problems():
+    assert fisher_z_mean([0.5, float("nan"), 0.5]) == pytest.approx(0.5)
 
 
-def test_gate_g1_fails_on_lift_below_one():
-    g = evaluate_gate_g1(0.4, {"p_value": 0.001, "lift": 0.8})
-    assert not g.passed
+def test_fisher_z_all_nan_is_nan():
+    assert math.isnan(fisher_z_mean([float("nan"), float("nan")]))
 
 
-def test_gate_g1_threshold_is_the_plan_value():
-    assert evaluate_gate_g1(0.2, {"p_value": 0.01, "lift": 2.0}).passed
-    assert not evaluate_gate_g1(0.199, {"p_value": 0.01, "lift": 2.0}).passed
+def test_fisher_z_survives_a_perfect_correlation():
+    """rho=1 must not send the mean to infinity."""
+    out = fisher_z_mean([1.0, 0.0])
+    assert math.isfinite(out) and 0.0 < out < 1.0
+
+
+def test_fisher_z_weighting_favours_larger_problems():
+    unweighted = fisher_z_mean([0.1, 0.9])
+    weighted = fisher_z_mean([0.1, 0.9], weights=[100, 1])
+    assert weighted < unweighted
+
+
+def test_fisher_z_empty_is_nan():
+    assert math.isnan(fisher_z_mean([]))
+
+
+# ----------------------------------------------------------------------
+# within-problem aggregation
+# ----------------------------------------------------------------------
+def test_within_problem_separates_a_simpson_reversal():
+    """The exact confound the within-problem design exists to remove.
+
+    Inside each problem the relationship is negative, but the problems sit at
+    different offsets so the pooled correlation comes out positive.  Pooling
+    would report a useful forecaster where there is none.
+    """
+    forecasts = [1, 2, 3, 11, 12, 13, 21, 22, 23]
+    truths = [3, 2, 1, 13, 12, 11, 23, 22, 21]
+    pids = ["a"] * 3 + ["b"] * 3 + ["c"] * 3
+    out = within_problem_spearman(forecasts, truths, pids, min_per_problem=3)
+    assert out["rho_mean"] == pytest.approx(-1.0, abs=1e-3)
+    assert out["rho_pooled"] > 0.7
+
+
+def test_within_problem_skips_undersized_problems():
+    out = within_problem_spearman(
+        [1, 2, 3, 4, 5, 6, 1, 2], [1, 2, 3, 4, 5, 6, 1, 2],
+        ["a"] * 6 + ["b"] * 2, min_per_problem=5,
+    )
+    assert out["n_problems"] == 1
+
+
+def test_within_problem_reports_counts():
+    out = within_problem_spearman(list(range(10)), list(range(10)), ["a"] * 10)
+    assert out["n_observations"] == 10 and out["n_problems"] == 1
+
+
+def test_within_problem_rejects_length_mismatch():
+    with pytest.raises(ValueError):
+        within_problem_spearman([1, 2], [1, 2, 3], ["a", "a", "a"])
+
+
+# ----------------------------------------------------------------------
+# binomial test
+# ----------------------------------------------------------------------
+def test_binomial_matches_scipy():
+    for successes, trials, p in [(8, 10, 0.1), (15, 100, 0.1), (3, 5, 0.5), (0, 10, 0.3)]:
+        expected = float(scipy_stats.binomtest(successes, trials, p, alternative="greater").pvalue)
+        assert binomial_test_greater(successes, trials, p) == pytest.approx(expected, rel=1e-9)
+
+
+def test_binomial_at_chance_is_not_significant():
+    assert binomial_test_greater(10, 100, 0.1) > 0.05
+
+
+def test_binomial_far_above_chance_is_significant():
+    assert binomial_test_greater(40, 100, 0.1) < 1e-9
+
+
+def test_binomial_zero_trials_is_nan():
+    assert math.isnan(binomial_test_greater(0, 0, 0.1))
+
+
+def test_binomial_rejects_impossible_counts():
+    with pytest.raises(ValueError):
+        binomial_test_greater(11, 10, 0.1)
+
+
+# ----------------------------------------------------------------------
+# gate G1
+# ----------------------------------------------------------------------
+def test_gate_passes_when_both_criteria_hold():
+    res = evaluate_gate_g1(rho_mean=0.25, recall=0.4, n_branch=200, n_hit=80, selection_rate=0.1)
+    assert res.passed
+    assert "PASS" in res.summary()
+
+
+def test_gate_fails_on_weak_correlation():
+    res = evaluate_gate_g1(rho_mean=0.15, recall=0.4, n_branch=200, n_hit=80, selection_rate=0.1)
+    assert not res.passed
+
+
+def test_gate_fails_on_chance_level_recall():
+    res = evaluate_gate_g1(rho_mean=0.5, recall=0.1, n_branch=200, n_hit=20, selection_rate=0.1)
+    assert not res.passed
+
+
+def test_gate_fails_on_nan_correlation():
+    res = evaluate_gate_g1(rho_mean=float("nan"), recall=0.9, n_branch=100, n_hit=90,
+                           selection_rate=0.1)
+    assert not res.passed
+    assert any("nan" in n for n in res.notes)
+
+
+def test_gate_warns_when_underpowered():
+    """A FAIL on 12 branch points is not evidence of absence — say so."""
+    res = evaluate_gate_g1(rho_mean=0.3, recall=0.3, n_branch=12, n_hit=4, selection_rate=0.1)
+    assert any("power" in n for n in res.notes)
+
+
+def test_gate_tests_against_the_realised_selection_rate():
+    """Chance is the realised top-decile size, not the nominal 0.1."""
+    tight = evaluate_gate_g1(rho_mean=0.3, recall=0.2, n_branch=100, n_hit=20, selection_rate=0.1)
+    loose = evaluate_gate_g1(rho_mean=0.3, recall=0.2, n_branch=100, n_hit=20, selection_rate=0.19)
+    assert tight.passed and not loose.passed
+
+
+# ----------------------------------------------------------------------
+# (kappa, gamma_H) selection
+# ----------------------------------------------------------------------
+def _grid(entries):
+    return [{"kappa": k, "gamma_h": g, "rho_mean": r} for k, g, r in entries]
+
+
+def test_selection_prefers_the_shortest_tied_horizon():
+    """kappa=2 and kappa=8 are statistically tied, so take kappa=2."""
+    grid = _grid([(2, 0.85, 0.300), (4, 0.85, 0.305), (8, 0.85, 0.307)])
+    out = select_kappa_gamma(grid, elbow_tolerance=0.01)
+    assert out["kappa"] == 2
+    assert out["rho_giveup"] == pytest.approx(0.007)
+
+
+def test_selection_takes_a_longer_horizon_when_it_really_helps():
+    grid = _grid([(2, 0.85, 0.10), (4, 0.85, 0.20), (8, 0.85, 0.35)])
+    assert select_kappa_gamma(grid, elbow_tolerance=0.01)["kappa"] == 8
+
+
+def test_selection_picks_the_best_gamma():
+    grid = _grid([(4, 0.7, 0.10), (4, 0.85, 0.30), (4, 1.0, 0.12)])
+    assert select_kappa_gamma(grid)["gamma_h"] == 0.85
+
+
+def test_selection_ignores_nan_entries():
+    grid = _grid([(2, 0.85, float("nan")), (4, 0.85, 0.30)])
+    assert select_kappa_gamma(grid)["kappa"] == 4
+
+
+def test_selection_rejects_an_all_nan_grid():
+    with pytest.raises(ValueError):
+        select_kappa_gamma(_grid([(2, 0.85, float("nan"))]))

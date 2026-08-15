@@ -1,14 +1,17 @@
-"""STEER 원본 `compute_token_weights` 의 검증용 사본.
+"""Verbatim copy of STEER's `compute_token_weights` for equivalence testing.
 
-verl/trainer/ppo/core_algos.py:580-713 에서 **자동 추출**한 것이다 (수작업 편집 금지).
-tests/test_lambda_zero_equiv.py가 STEER-F 구현과 이 사본을 대조해 λ=0 동치성을 강제한다.
+Source: https://github.com/zz-haooo/STEER
+        verl/trainer/ppo/core_algos.py, lines 580-713 (commit 08add1cc).
+Licensed Apache-2.0 by the STEER / verl authors.
 
-재추출:
-    python scripts/extract_reference.py --steer-root <STEER clone> --out tests/reference_steer.py
+DO NOT EDIT.  The whole point of this file is that it is untouched upstream
+code; `tests/test_lambda_zero_equiv.py` asserts that STEER-F reproduces it
+exactly at lambda=0.  If upstream changes, re-extract rather than hand-patch:
+
+    sed -n '580,713p' <steer>/verl/trainer/ppo/core_algos.py
 """
 
 import torch
-
 
 def compute_token_weights(
     advantages: torch.Tensor,

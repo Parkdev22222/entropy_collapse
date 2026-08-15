@@ -1,166 +1,230 @@
 #!/usr/bin/env python3
-"""Phase 3: MTP 헤드를 다른 모델 패밀리(Llama, EXAONE 등)로 이식.
+# Copyright 2026 STEER-F authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+"""Phase 3 — port the MTP heads to another model family.
 
-모듈 자체는 공용이고 hidden_size/vocab만 다르므로, 이식은 (1) 새 모델 크기로
-헤드를 재생성하고 (2) 워밍업을 다시 돌리는 것이 전부다. 하이퍼파라미터
-(λ, κ, γ_H)는 **Qwen 값을 그대로 쓰는 것이 1차 시도** — "그대로 작동"이 주장
-포인트이므로 재튜닝은 최소화하고, 캘리브레이션만 모델별로 재산출한다.
+`MTPHeads` is architecture-agnostic: it consumes the final hidden state and
+borrows the body's unembedding, so only `hidden_size` and `vocab_size` change
+between Qwen, Llama and EXAONE.  This script does three things:
 
-부가 기능: 학습 데이터의 그룹 pass rate 분포를 확인한다. 소형 Llama는 수학
-baseline이 약해 전부-오답 그룹이 과다할 수 있고, 그러면 GRPO advantage가 0이라
-STEER/STEER-F 모두 신호를 못 받는다 (계획서 §5.4). 조정이 필요하면 보고서에
-명시할 것.
+1. reads the target model's dims and emits a correctly-shaped head checkpoint
+   (freshly initialised — head weights are not transferable across families,
+   the hidden spaces are unrelated);
+2. checks the things that actually differ and can silently break a run —
+   tied vs. untied embeddings, vocab/embedding-matrix mismatch, dtype;
+3. reports the training-set pass-rate distribution, because plan §4 warns that
+   a weak base model produces mostly all-wrong groups, which gives GRPO no
+   gradient at all and would make a STEER-F comparison meaningless.
 
-사용 예:
-    # 1) 헤드 스캐폴드 점검 (형상만 확인, 학습 없음)
-    python scripts/phase3_port_model.py inspect --model meta-llama/Llama-3.2-3B-Instruct
+    python scripts/phase3_port_model.py \
+        --model meta-llama/Llama-3.2-3B-Instruct \
+        --out checkpoints/mtp_heads_llama3b_init.pt \
+        --reference-heads checkpoints/mtp_heads_qwen7b.pt
 
-    # 2) 그룹 pass rate 분포 점검
-    python scripts/phase3_port_model.py passrate \\
-        --model meta-llama/Llama-3.2-3B-Instruct \\
-        --prompts datasets/DAPO-Math-17k.parquet --n-prompts 200 --group-size 8
-
-    # 3) 이후는 Qwen과 동일:
-    #    phase1_warmup_heads.py generate/train → phase1_validate.py (축소판)
+Per plan §5, hyper-parameters (lambda, kappa, gamma_H, norm) are carried over
+from Qwen unchanged — "it just works" is the claim being tested.  Only the
+per-head calibration is refit, since it is a property of the head, not of the
+method.
 """
 
 from __future__ import annotations
 
 import argparse
-import collections
 import json
-import pathlib
 import sys
+from pathlib import Path
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
+import torch
 
-from scripts._common import GenerationBackend, apply_chat_template, load_prompts_from_parquet  # noqa: E402
-from scripts.phase1_validate import answers_match, extract_answer  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from steer_f.mtp_heads import MTPHeads  # noqa: E402
 
 
-def cmd_inspect(args) -> int:
-    from transformers import AutoConfig
-
-    cfg = AutoConfig.from_pretrained(args.model, trust_remote_code=True)
-    hidden_size = getattr(cfg, "hidden_size", None) or getattr(cfg, "n_embd")
-    vocab_size = cfg.vocab_size
-
-    heads = MTPHeads(
-        hidden_size=hidden_size,
-        num_heads=args.num_heads,
-        head_hidden=args.head_hidden,
-        vocab_size=vocab_size,
-    )
-    n_params = sum(p.numel() for p in heads.parameters())
-    tied = getattr(cfg, "tie_word_embeddings", None)
-
-    print(json.dumps(
-        {
-            "model": args.model,
-            "model_type": getattr(cfg, "model_type", "?"),
-            "hidden_size": hidden_size,
-            "vocab_size": vocab_size,
-            "tie_word_embeddings": tied,
-            "num_heads": args.num_heads,
-            "head_hidden": args.head_hidden,
-            "head_params_M": round(n_params / 1e6, 2),
-            "head_params_pct_of_hidden_matmul": None,
-        },
-        indent=2,
-    ))
-    print(
-        "\nunembedding 공유(tie_unembedding=True)를 쓰므로 헤드는 lm_head 파라미터를 "
-        "복제하지 않는다. 위 head_params_M 만 새로 학습된다."
-    )
-    if vocab_size > 128_000:
-        print(
-            f"주의: vocab={vocab_size} 이 크다. forward_entropy 의 chunk_size 를 "
-            "줄여 (K, chunk, V) 로짓 피크를 관리할 것."
-        )
-    return 0
-
-
-def cmd_passrate(args) -> int:
-    """그룹 pass rate 분포 — 전부-오답 그룹 비율이 신호 빈약의 직접 지표."""
-    from transformers import AutoTokenizer
-
-    tok = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
-    problems = load_prompts_from_parquet(args.prompts, limit=args.n_prompts)
-    texts = [apply_chat_template(tok, p["messages"]) for p in problems]
-
-    backend = GenerationBackend(args.model, prefer_vllm=not args.no_vllm, tensor_parallel_size=args.tp)
-    outs = backend.generate(
-        texts,
-        n=args.group_size,
-        temperature=args.temperature,
-        top_p=args.top_p,
-        max_tokens=args.max_response_length,
-        seed=args.seed,
-    )
-
-    rates = []
-    for p, completions in zip(problems, outs):
-        n_ok = sum(answers_match(extract_answer(c), p["ground_truth"]) for c in completions)
-        rates.append(n_ok / max(len(completions), 1))
-
-    hist = collections.Counter(round(r, 3) for r in rates)
-    all_wrong = sum(1 for r in rates if r == 0.0) / len(rates)
-    all_right = sum(1 for r in rates if r == 1.0) / len(rates)
-    useful = 1.0 - all_wrong - all_right
-
-    summary = {
-        "model": args.model,
-        "n_prompts": len(rates),
-        "group_size": args.group_size,
-        "mean_pass_rate": sum(rates) / len(rates),
-        "all_wrong_frac": all_wrong,
-        "all_correct_frac": all_right,
-        "informative_frac": useful,
-        "histogram": dict(sorted(hist.items())),
+def inspect_model(model):
+    """Dims and the embedding facts that break a naive port."""
+    cfg = model.config
+    lm_head = model.get_output_embeddings()
+    input_emb = model.get_input_embeddings()
+    return {
+        "hidden_size": cfg.hidden_size,
+        "config_vocab_size": cfg.vocab_size,
+        "lm_head_out": lm_head.weight.shape[0],
+        "embedding_rows": input_emb.weight.shape[0],
+        "tied_embeddings": bool(getattr(cfg, "tie_word_embeddings", False)),
+        "lm_head_has_bias": lm_head.bias is not None,
+        "dtype": str(next(model.parameters()).dtype),
+        "n_layers": getattr(cfg, "num_hidden_layers", None),
+        "architecture": type(model).__name__,
     }
-    print(json.dumps(summary, indent=2))
 
-    if all_wrong > 0.5:
-        print(
-            "\n경고: 전부-오답 그룹이 50%를 넘습니다 (계획서 §9 'Llama 신호 빈약').\n"
-            "      GRPO advantage가 0이 되어 STEER/STEER-F 모두 신호를 못 받습니다.\n"
-            "      난이도 하위 서브셋으로 조정하고, 그 사실을 보고서에 명시하세요."
+
+def check_port(info, reference=None):
+    """Return warnings for everything that would bite later."""
+    problems = []
+    if info["lm_head_out"] != info["config_vocab_size"]:
+        problems.append(
+            f"lm_head outputs {info['lm_head_out']} logits but config.vocab_size is "
+            f"{info['config_vocab_size']}. Padded vocabularies are common; STEER-F sizes "
+            "the heads from lm_head, so entropies stay correct, but any code indexing by "
+            "config.vocab_size will be off."
         )
+    if info["lm_head_out"] != info["embedding_rows"]:
+        problems.append(
+            f"lm_head rows ({info['lm_head_out']}) != input embedding rows "
+            f"({info['embedding_rows']}); tie_unembedding=True assumes one shared matrix."
+        )
+    if info["lm_head_has_bias"]:
+        problems.append(
+            "lm_head carries a bias. entropy_from_logits handles it, but a fused "
+            "linear+CE kernel taking only the weight would silently drop it."
+        )
+    if reference is not None:
+        if reference["hidden_size"] != info["hidden_size"]:
+            problems.append(
+                f"hidden_size differs from the reference ({reference['hidden_size']} -> "
+                f"{info['hidden_size']}): head weights cannot be reused, only the recipe."
+            )
+        if reference["lm_head_out"] != info["lm_head_out"]:
+            problems.append(
+                f"vocabulary differs ({reference['lm_head_out']} -> {info['lm_head_out']}): "
+                "the reference calibration is invalid here — refit it (plan §5.2)."
+            )
+    return problems
+
+
+def group_pass_rate_report(path, uid_column="uid", reward_column="reward"):
+    """Distribution of per-prompt pass rates — the plan §5.4 pre-flight check."""
+    import pandas as pd
+
+    df = pd.read_parquet(path)
+    if uid_column not in df.columns or reward_column not in df.columns:
+        return {"error": f"need columns {uid_column!r} and {reward_column!r}; "
+                         f"found {list(df.columns)}"}
+    rates = df.groupby(uid_column)[reward_column].mean()
+    n = len(rates)
+    all_wrong = float((rates <= 0).mean())
+    all_right = float((rates >= 1).mean())
+    return {
+        "n_groups": int(n),
+        "frac_all_wrong": all_wrong,
+        "frac_all_correct": all_right,
+        "frac_informative": 1.0 - all_wrong - all_right,
+        "mean_pass_rate": float(rates.mean()),
+        "verdict": (
+            "TOO HARD — over half the groups give no gradient; move to an easier subset "
+            "and say so in the report (plan §5.4)"
+            if all_wrong > 0.5 else
+            "TOO EASY — most groups are saturated; the entropy question barely arises"
+            if all_right > 0.5 else "OK"
+        ),
+    }
+
+
+def build_argparser():
+    p = argparse.ArgumentParser(description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--model", required=True, help="target model id or path")
+    p.add_argument("--out", help="write a freshly initialised head checkpoint here")
+    p.add_argument("--reference-heads", help="Qwen checkpoint, for a compatibility diff")
+    p.add_argument("--num-heads", type=int, default=None,
+                   help="defaults to the reference's K, else 8")
+    p.add_argument("--head-hidden", type=int, default=None,
+                   help="defaults to the reference's, else 1024")
+    p.add_argument("--rollout-parquet", help="run the group pass-rate check on this file")
+    p.add_argument("--uid-column", default="uid")
+    p.add_argument("--reward-column", default="reward")
+    p.add_argument("--dtype", default="bfloat16", choices=["float32", "bfloat16", "float16"])
+    p.add_argument("--report", help="write the findings as JSON")
+    return p
+
+
+def main(argv=None):
+    args = build_argparser().parse_args(argv)
+    from transformers import AutoModelForCausalLM
+
+    reference = None
+    num_heads, head_hidden = args.num_heads or 8, args.head_hidden or 1024
+    if args.reference_heads:
+        ref = torch.load(args.reference_heads, map_location="cpu")
+        reference = {
+            "hidden_size": ref["config"]["hidden_size"],
+            "lm_head_out": ref["config"]["vocab_size"],
+            "model": ref.get("model"),
+        }
+        num_heads = args.num_heads or ref["config"]["num_heads"]
+        head_hidden = args.head_hidden or ref["config"]["head_hidden"]
+        print(f"[port] reference: {reference['model']} "
+              f"H={reference['hidden_size']} V={reference['lm_head_out']} K={num_heads}")
+
+    print(f"[port] loading {args.model}")
+    model = AutoModelForCausalLM.from_pretrained(
+        args.model, torch_dtype=getattr(torch, args.dtype), trust_remote_code=True
+    )
+    info = inspect_model(model)
+    print("[port] target model:")
+    for k, v in info.items():
+        print(f"         {k}: {v}")
+
+    problems = check_port(info, reference)
+    if problems:
+        print("\n[port] ATTENTION:")
+        for msg in problems:
+            print(f"       - {msg}")
+    else:
+        print("\n[port] no compatibility issues found")
+
+    report = {"model": args.model, "info": info, "warnings": problems}
 
     if args.out:
-        pathlib.Path(args.out).parent.mkdir(parents=True, exist_ok=True)
-        pathlib.Path(args.out).write_text(json.dumps(summary, indent=2))
-    return 0
+        heads = MTPHeads(
+            hidden_size=info["hidden_size"],
+            vocab_size=info["lm_head_out"],  # lm_head is the authority, not config
+            num_heads=num_heads,
+            head_hidden=head_hidden,
+            tie_unembedding=True,
+            dtype=getattr(torch, args.dtype),
+        )
+        out_path = Path(args.out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(
+            {
+                "state_dict": heads.state_dict(),
+                "config": {
+                    "hidden_size": info["hidden_size"],
+                    "vocab_size": info["lm_head_out"],
+                    "num_heads": num_heads,
+                    "head_hidden": head_hidden,
+                    "tie_unembedding": True,
+                },
+                "model": args.model,
+                "note": "freshly initialised — run phase1_warmup_heads.py before use",
+            },
+            out_path,
+        )
+        n_params = sum(p.numel() for p in heads.parameters())
+        print(f"\n[port] wrote {out_path} ({n_params/1e6:.1f}M params, untrained)")
+        print("[port] next: scripts/phase1_warmup_heads.py, then a reduced phase1_validate "
+              "(10 problems / 200 prefixes) to refit calibration only.")
+        report["checkpoint"] = str(out_path)
 
+    if args.rollout_parquet:
+        stats = group_pass_rate_report(args.rollout_parquet, args.uid_column, args.reward_column)
+        print("\n[port] training-set group pass rates:")
+        for k, v in stats.items():
+            print(f"         {k}: {v}")
+        report["group_pass_rates"] = stats
 
-def build_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    sub = ap.add_subparsers(dest="cmd", required=True)
-
-    i = sub.add_parser("inspect", help="새 모델의 헤드 형상/비용 점검")
-    i.add_argument("--model", required=True)
-    i.add_argument("--num-heads", type=int, default=8)
-    i.add_argument("--head-hidden", type=int, default=1024)
-    i.set_defaults(func=cmd_inspect)
-
-    p = sub.add_parser("passrate", help="그룹 pass rate 분포 점검")
-    p.add_argument("--model", required=True)
-    p.add_argument("--prompts", required=True)
-    p.add_argument("--n-prompts", type=int, default=200)
-    p.add_argument("--group-size", type=int, default=8)
-    p.add_argument("--temperature", type=float, default=1.0)
-    p.add_argument("--top-p", type=float, default=1.0)
-    p.add_argument("--max-response-length", type=int, default=3072)
-    p.add_argument("--tp", type=int, default=1)
-    p.add_argument("--no-vllm", action="store_true")
-    p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--out", default=None)
-    p.set_defaults(func=cmd_passrate)
-
-    return ap
+    if args.report:
+        Path(args.report).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.report).write_text(json.dumps(report, indent=2))
+        print(f"[port] wrote {args.report}")
 
 
 if __name__ == "__main__":
-    _args = build_parser().parse_args()
-    raise SystemExit(_args.func(_args))
+    main()

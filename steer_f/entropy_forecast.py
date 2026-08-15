@@ -1,289 +1,418 @@
-"""미래 엔트로피 예보 유틸 — H_togo, 엔트로피 advantage A_H, 헤드 캘리브레이션.
+# Copyright 2026 STEER-F authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+"""Future-entropy forecasting utilities: ``H_togo``, calibration, ``A_H``.
 
-정의 (계획서 §0.2):
+Definitions follow the STEER-F plan §0.2::
 
-    H_togo^κ(s) = Σ_{k=1..κ} γ_H^k · H( p_MTP(y_{t+k} | s) )
-    A_H(s_t, y_t) = H_togo(s_t ⊕ y_t) - H̄_togo(s_t)
+    H_togo^kappa(s) = sum_{k=1..kappa} gamma_H^k * H( p_MTP(y_{t+k} | s) )
+    A_H(s_t, y_t)   = H_togo(s_t + y_t) - H_bar_togo(s_t)
 
-구현 노트: 정책 forward는 위치 t에서 **이미 y_t를 조건으로 한** 히든을 만들지
-않는다. verl의 rmpad 경로에서 위치 t의 히든은 s_t = (prompt, y_<t) 를 조건으로
-하며 y_t를 예측한다. 따라서 `H_togo(s_t ⊕ y_t)`는 위치 t+1의 히든에서 얻은
-예보 — 즉 head_entropies를 **한 칸 당겨서** 쓴다 (`shift=True`, 기본값).
-이 한 칸을 놓치면 A_H가 "샘플된 토큰의 분기 가치"가 아니라 "그 이전 상태의
-가치"가 되어 신호가 통째로 어긋난다.
+``H_togo`` is produced from per-head entropies (see
+:meth:`steer_f.mtp_heads.MTPHeads.forecast_entropy`), so nothing here needs a
+vocabulary-sized tensor.
+
+Two baselines for ``H_bar_togo`` are implemented, because the plan asks for
+both and for Phase-1 to pick between them (ablation A5):
+
+* :func:`sibling_prefix_baseline` — the faithful one.  Rollouts count as
+  siblings at position ``t`` only while their responses are token-identical on
+  ``[0, t)``, so the baseline really is a function of the shared state ``s_t``.
+* :func:`group_mean_baseline` — the cheap approximation: average over the whole
+  prompt group regardless of prefix.
+
+Both return ``0`` where a rollout has no sibling other than itself, which is
+the degenerate case called out in plan §8.4.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass, asdict
+from typing import Optional, Sequence, Union
 
 import torch
-
-from .mtp_heads import entropy_from_logits
 
 __all__ = [
     "HeadCalibration",
     "h_togo",
     "entropy_advantage",
-    "sibling_mask",
-    "masked_zscore",
+    "sibling_prefix_baseline",
+    "group_mean_baseline",
+    "fit_head_calibration",
+    "first_divergence",
 ]
 
 
-# ----------------------------------------------------------------------
-# 캘리브레이션
-# ----------------------------------------------------------------------
 @dataclass
 class HeadCalibration:
-    """헤드별 아핀 보정: H_hat_k = scale_k * H_raw_k + bias_k.
+    """Per-head correction of forecast entropy against measured entropy.
 
-    먼 헤드(+k 큼)는 예측이 뭉개져 엔트로피를 체계적으로 **과대추정**한다.
-    보정 없이 쓰면 "먼 미래는 항상 다양해 보이는" 편향이 생기므로,
-    Phase 1에서 실측 경험분포 엔트로피에 대해 최소제곱으로 (scale, bias)를 맞춘다.
+    Distant heads systematically *over*-estimate entropy: their predictive
+    distribution is blurred by everything that can happen in between, so
+    ``H(p_MTP(y_{t+k}|s))`` drifts toward ``log V`` as ``k`` grows.  Left
+    uncorrected this makes "far future" look uniformly diverse and destroys
+    the discriminative power of ``A_H`` (plan §3.4, risk table row 4).
+
+    The correction is applied as::
+
+        H_cal_k = scale_k * H( softmax(logits_k / temperature_k) ) + bias_k
+
+    Fields are per-head sequences of length ``K``.  ``temperature`` is folded
+    into the entropy computation itself (cheap); ``scale``/``bias`` are the
+    residual affine fit.
     """
 
-    scale: list[float] = field(default_factory=list)
-    bias: list[float] = field(default_factory=list)
+    temperature: Sequence[float]
+    scale: Sequence[float]
+    bias: Sequence[float]
 
-    def __post_init__(self):
-        if len(self.scale) != len(self.bias):
-            raise ValueError("scale and bias must have the same length")
+    def __post_init__(self) -> None:
+        n = len(self.temperature)
+        if not (len(self.scale) == len(self.bias) == n):
+            raise ValueError(
+                "temperature/scale/bias must have equal length, got "
+                f"{len(self.temperature)}/{len(self.scale)}/{len(self.bias)}"
+            )
+        if any(t <= 0 for t in self.temperature):
+            raise ValueError("all temperatures must be > 0")
 
-    @property
-    def num_heads(self) -> int:
-        return len(self.scale)
+    def __len__(self) -> int:
+        return len(self.temperature)
 
-    @staticmethod
-    def identity(num_heads: int) -> "HeadCalibration":
-        return HeadCalibration(scale=[1.0] * num_heads, bias=[0.0] * num_heads)
-
-    @staticmethod
-    def fit(pred: torch.Tensor, target: torch.Tensor, mask: Optional[torch.Tensor] = None) -> "HeadCalibration":
-        """헤드별 최소제곱 적합.
-
-        Args:
-            pred: (K, N) 헤드 k의 원시 예보 엔트로피.
-            target: (K, N) 대응 실측 엔트로피.
-            mask: (K, N) 또는 (N,) 유효 마스크.
-        """
-        pred = pred.float()
-        target = target.float()
-        if mask is None:
-            mask = torch.ones_like(pred, dtype=torch.bool)
-        elif mask.dim() == 1:
-            mask = mask.unsqueeze(0).expand_as(pred)
-        mask = mask.bool()
-
-        scales, biases = [], []
-        for k in range(pred.shape[0]):
-            x = pred[k][mask[k]]
-            y = target[k][mask[k]]
-            if x.numel() < 2 or torch.var(x) < 1e-12:
-                scales.append(1.0)
-                biases.append(0.0)
-                continue
-            xm, ym = x.mean(), y.mean()
-            slope = ((x - xm) * (y - ym)).sum() / ((x - xm).pow(2).sum() + 1e-12)
-            scales.append(float(slope))
-            biases.append(float(ym - slope * xm))
-        return HeadCalibration(scale=scales, bias=biases)
-
-    def apply(self, head_entropies: torch.Tensor) -> torch.Tensor:
-        """(K, ...) 예보에 헤드별 아핀 보정 적용."""
-        k = head_entropies.shape[0]
-        if self.num_heads < k:
-            raise ValueError(f"calibration has {self.num_heads} heads but got {k}")
-        shape = (k,) + (1,) * (head_entropies.dim() - 1)
-        scale = torch.tensor(self.scale[:k], dtype=head_entropies.dtype, device=head_entropies.device).view(shape)
-        bias = torch.tensor(self.bias[:k], dtype=head_entropies.dtype, device=head_entropies.device).view(shape)
-        return head_entropies * scale + bias
+    @classmethod
+    def identity(cls, num_heads: int) -> "HeadCalibration":
+        return cls([1.0] * num_heads, [1.0] * num_heads, [0.0] * num_heads)
 
     def to_dict(self) -> dict:
-        return {"scale": self.scale, "bias": self.bias}
+        return {k: list(map(float, v)) for k, v in asdict(self).items()}
 
-    @staticmethod
-    def from_dict(d: dict) -> "HeadCalibration":
-        return HeadCalibration(scale=list(d["scale"]), bias=list(d["bias"]))
+    @classmethod
+    def from_dict(cls, d: dict) -> "HeadCalibration":
+        return cls(d["temperature"], d["scale"], d["bias"])
+
+    def apply(self, head_entropies: torch.Tensor) -> torch.Tensor:
+        """Apply ``scale``/``bias`` to a ``[K, ...]`` stack of head entropies.
+
+        ``temperature`` is *not* applied here — it must be passed to the
+        entropy computation itself (``forecast_entropy(temperature=...)``),
+        since re-deriving it from an entropy value is not possible.
+        """
+        k = head_entropies.shape[0]
+        if k > len(self):
+            raise ValueError(f"calibration has {len(self)} heads, got {k} entropies")
+        dev, dt = head_entropies.device, head_entropies.dtype
+        scale = torch.tensor(list(self.scale[:k]), device=dev, dtype=dt).view(-1, *([1] * (head_entropies.dim() - 1)))
+        bias = torch.tensor(list(self.bias[:k]), device=dev, dtype=dt).view(-1, *([1] * (head_entropies.dim() - 1)))
+        return scale * head_entropies + bias
 
 
-# ----------------------------------------------------------------------
-# H_togo
-# ----------------------------------------------------------------------
 def h_togo(
     head_entropies: torch.Tensor,
     kappa: int,
     gamma_h: float,
     calib: Optional[HeadCalibration] = None,
-    is_logits: bool = False,
+    clamp_min: float = 0.0,
 ) -> torch.Tensor:
-    """H_togo^κ = Σ_{k=1..κ} γ_H^k · H_k.
+    """Discounted sum of per-head forecast entropies.
 
     Args:
-        head_entropies: (K, B, T) 헤드별 예측 엔트로피.
-            `is_logits=True`면 (K, B, T, V) 로짓으로 받아 내부에서 엔트로피화한다
-            (소형 검증 배치 전용 — 메모리 주의).
-        kappa: 사용할 호라이즌 (1 <= kappa <= K).
-        gamma_h: 할인 계수.
-        calib: 헤드별 보정. None이면 보정 없음.
+        head_entropies: ``[K, ...]`` entropies in nats, head ``k`` (0-indexed)
+            forecasting offset ``+k+1``.  Produced by
+            :meth:`MTPHeads.forecast_entropy`.  Passing raw ``[K, B, T, V]``
+            logits is *not* supported — compute entropies first, the logit
+            tensor is too large to exist.
+        kappa: horizon, uses heads ``0 .. kappa-1``.
+        gamma_h: discount, weight of head ``k`` is ``gamma_h ** (k + 1)``.
+        calib: optional per-head affine correction.
+        clamp_min: floor on the result.  Entropies are non-negative, so a
+            negative ``H_togo`` can only come from a bad calibration fit;
+            clamping at 0 keeps it interpretable.  Pass ``-inf`` to disable.
 
     Returns:
-        (B, T) float32.
+        ``[...]`` — the leading head axis is consumed.  For the usual
+        ``[K, B, T]`` input this is ``[B, T]``.
     """
-    if is_logits:
-        head_entropies = entropy_from_logits(head_entropies)
-    if head_entropies.dim() < 2:
-        raise ValueError(f"expected (K, ...) tensor, got shape {tuple(head_entropies.shape)}")
-    k_total = head_entropies.shape[0]
-    if not (1 <= kappa <= k_total):
-        raise ValueError(f"kappa must be in [1, {k_total}], got {kappa}")
+    if head_entropies.dim() < 1:
+        raise ValueError("head_entropies must have a leading head axis")
+    k_avail = head_entropies.shape[0]
+    if not (1 <= kappa <= k_avail):
+        raise ValueError(f"kappa must be in [1, {k_avail}], got {kappa}")
+    if gamma_h <= 0:
+        raise ValueError(f"gamma_h must be > 0, got {gamma_h}")
 
-    h = head_entropies[:kappa].float()
+    ent = head_entropies[:kappa]
     if calib is not None:
-        h = calib.apply(h)
+        ent = calib.apply(ent)
 
-    shape = (kappa,) + (1,) * (h.dim() - 1)
     weights = torch.tensor(
-        [gamma_h ** (k + 1) for k in range(kappa)], dtype=h.dtype, device=h.device
-    ).view(shape)
-    return (h * weights).sum(dim=0)
+        [gamma_h ** (k + 1) for k in range(kappa)],
+        device=ent.device,
+        dtype=ent.dtype,
+    ).view(-1, *([1] * (ent.dim() - 1)))
+    out = (weights * ent).sum(dim=0)
+    if clamp_min != float("-inf"):
+        out = out.clamp_min(clamp_min)
+    return out
 
 
-# ----------------------------------------------------------------------
-# sibling baseline
-# ----------------------------------------------------------------------
-def sibling_mask(response_ids: torch.Tensor, group_size: int, response_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
-    """위치별 sibling 관계 마스크.
-
-    rollout i와 j가 위치 t에서 sibling ⟺ 같은 프롬프트 그룹이고 prefix y_<t 가 동일.
-    (t=0에서는 프롬프트만 공유하므로 그룹 전원이 sibling.)
+def first_divergence(responses: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+    """First position at which each pair of rollouts differs.
 
     Args:
-        response_ids: (B, T) 응답 토큰 id. B는 group_size의 배수여야 한다
-            (verl GRPO는 프롬프트당 `rollout.n`개를 연속 배치한다).
-        group_size: G = `actor_rollout_ref.rollout.n`.
-        response_mask: (B, T) 0/1. 패딩 위치는 비교에서 제외한다.
+        responses: ``[G, T]`` token ids of the rollouts in one prompt group.
+        mask: ``[G, T]`` validity mask.  A position where exactly one of the
+            two rollouts is still alive counts as a divergence (one finished
+            earlier); a position where neither is alive does not.
 
     Returns:
-        (n_groups, G, G, T) bool.
+        ``[G, G]`` int64, entry ``(i, j)`` is the smallest ``t`` with
+        ``responses[i, t] != responses[j, t]``, or ``T`` if they never differ.
+        The diagonal is always ``T``.
     """
-    b, t = response_ids.shape
-    if b % group_size != 0:
-        raise ValueError(f"batch {b} is not divisible by group_size {group_size}")
-    n_groups = b // group_size
-
-    ids = response_ids.view(n_groups, group_size, t)
-    eq = ids.unsqueeze(2) == ids.unsqueeze(1)  # (n_groups, G, G, T)
-    if response_mask is not None:
-        m = response_mask.view(n_groups, group_size, t).bool()
-        both_valid = m.unsqueeze(2) & m.unsqueeze(1)
-        # 한쪽이라도 패딩이면 그 위치에서 이미 갈라진 것으로 본다(길이 차이 = 분기).
-        eq = eq & both_valid
-
-    # prefix_eq[..., t] = (0..t 전부 일치)
-    prefix_eq = torch.cumprod(eq.int(), dim=-1).bool()
-    # 위치 t의 sibling 판정은 y_<t 기준 → 한 칸 밀어서 t=0은 전부 True
-    sib = torch.ones_like(prefix_eq)
-    sib[..., 1:] = prefix_eq[..., :-1]
-    return sib
-
-
-def _shift_forward(x: torch.Tensor, mask: Optional[torch.Tensor]) -> torch.Tensor:
-    """위치 t에 t+1의 값을 놓는다 (마지막 위치는 자기 자신 유지)."""
-    out = torch.empty_like(x)
-    out[:, :-1] = x[:, 1:]
-    out[:, -1] = x[:, -1]
+    if responses.dim() != 2:
+        raise ValueError(f"responses must be [G, T], got {tuple(responses.shape)}")
+    g, t = responses.shape
+    differs = responses.unsqueeze(1) != responses.unsqueeze(0)  # [G, G, T]
     if mask is not None:
-        # t+1이 패딩이면 t의 값을 그대로 둔다 (시퀀스 끝).
         m = mask.bool()
-        next_valid = torch.zeros_like(m)
-        next_valid[:, :-1] = m[:, 1:]
-        out = torch.where(next_valid, out, x)
-    return out
+        both_dead = (~m).unsqueeze(1) & (~m).unsqueeze(0)
+        alive_mismatch = m.unsqueeze(1) != m.unsqueeze(0)
+        differs = (differs | alive_mismatch) & ~both_dead
+    # argmax on a bool tensor returns the first True, but returns 0 when the
+    # row is all-False — hence the explicit "never differs" fallback.
+    any_diff = differs.any(dim=-1)
+    first = differs.float().argmax(dim=-1)
+    return torch.where(any_diff, first, torch.full_like(first, t)).to(torch.int64)
+
+
+def sibling_prefix_baseline(
+    h_togo_vals: torch.Tensor,
+    responses: torch.Tensor,
+    mask: torch.Tensor,
+    group_index: Sequence,
+) -> torch.Tensor:
+    """``H_bar_togo(s_t)`` averaged over rollouts that still share the prefix.
+
+    Rollout ``j`` is a sibling of rollout ``i`` at position ``t`` iff both are
+    in the same prompt group and ``responses[i, :t] == responses[j, :t]``.
+    Note the strict ``< t``: siblings must agree on everything *before* ``t``
+    but are free to differ at ``t`` itself, which is exactly what makes the
+    difference ``H_togo(s_t + y_t) - H_bar_togo(s_t)`` a branch score.
+
+    Args:
+        h_togo_vals: ``[B, T]``.
+        responses: ``[B, T]`` token ids.
+        mask: ``[B, T]`` response mask.
+        group_index: length-``B`` sequence of prompt-group keys (verl's
+            ``non_tensor_batch["uid"]``).
+
+    Returns:
+        ``[B, T]`` baseline.  Where a rollout is its own only sibling the
+        baseline equals its own value, so ``A_H`` is exactly 0.
+    """
+    _check_bt(h_togo_vals, responses, mask, group_index)
+    b, t = h_togo_vals.shape
+    out = h_togo_vals.clone()
+
+    for rows in _group_rows(group_index):
+        if len(rows) == 1:
+            continue  # baseline = self => A_H = 0
+        idx = torch.as_tensor(rows, dtype=torch.long, device=h_togo_vals.device)
+        div = first_divergence(responses[idx], mask[idx])  # [g, g]
+        positions = torch.arange(t, device=h_togo_vals.device).view(1, 1, t)
+        # sibling at t  <=>  no divergence strictly before t  <=>  div > t - 1
+        sibling = div.unsqueeze(-1) > (positions - 1)  # [g, g, T]
+        sibling = sibling & mask[idx].bool().unsqueeze(0)  # only alive siblings contribute
+        sibling[torch.arange(len(rows)), torch.arange(len(rows)), :] = True  # self always counts
+
+        vals = h_togo_vals[idx].unsqueeze(0)  # [1, g, T]
+        weights = sibling.to(vals.dtype)
+        denom = weights.sum(dim=1).clamp_min(1.0)
+        out[idx] = (weights * vals).sum(dim=1) / denom
+
+    return out * mask.to(out.dtype)
+
+
+def group_mean_baseline(
+    h_togo_vals: torch.Tensor,
+    mask: torch.Tensor,
+    group_index: Sequence,
+) -> torch.Tensor:
+    """``H_bar_togo`` approximated by the whole prompt group's mean at each ``t``.
+
+    Cheaper and prefix-agnostic: every rollout of the prompt contributes at
+    every position, whether or not it shares the prefix.  This is the
+    approximation the plan allows when prefix matching is too expensive, and
+    the B-arm of ablation A5.
+
+    Only rollouts still alive at ``t`` (``mask == 1``) enter the mean, so the
+    baseline does not decay toward zero as short rollouts finish.
+    """
+    if h_togo_vals.shape != mask.shape:
+        raise ValueError(f"shape mismatch: {tuple(h_togo_vals.shape)} vs {tuple(mask.shape)}")
+    if len(group_index) != h_togo_vals.shape[0]:
+        raise ValueError("group_index length must equal batch size")
+
+    out = h_togo_vals.clone()
+    m = mask.to(h_togo_vals.dtype)
+    for rows in _group_rows(group_index):
+        if len(rows) == 1:
+            continue
+        idx = torch.as_tensor(rows, dtype=torch.long, device=h_togo_vals.device)
+        w = m[idx]
+        denom = w.sum(dim=0).clamp_min(1.0)
+        mean_t = (w * h_togo_vals[idx]).sum(dim=0) / denom
+        # A rollout that is the only survivor at t must see itself as the mean
+        # (otherwise it would score against an empty set).
+        lone = w.sum(dim=0) <= 1
+        out[idx] = torch.where(lone.unsqueeze(0), h_togo_vals[idx], mean_t.unsqueeze(0).expand_as(w))
+    return out * m
 
 
 def entropy_advantage(
     h_togo_vals: torch.Tensor,
-    response_ids: Optional[torch.Tensor] = None,
-    group_size: int = 1,
-    response_mask: Optional[torch.Tensor] = None,
+    group_index: Sequence,
+    mask: torch.Tensor,
+    responses: Optional[torch.Tensor] = None,
     baseline: str = "sibling",
-    shift: bool = True,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """A_H(s_t, y_t) = H_togo(s_t ⊕ y_t) - H̄_togo(s_t).
+    clip_c: Optional[float] = None,
+) -> torch.Tensor:
+    """``A_H(s_t, y_t) = H_togo(s_t + y_t) - H_bar_togo(s_t)``.
 
     Args:
-        h_togo_vals: (B, T) `h_togo()` 출력.
-        response_ids: (B, T) — `baseline="sibling"`일 때 필수.
-        group_size: G. 같은 프롬프트에서 나온 rollout이 연속 G개라고 가정.
-        response_mask: (B, T) 0/1.
-        baseline: "sibling" | "group" | "none".
-            - sibling: 위치 t까지 prefix를 공유하는 rollout들의 평균 (계획서 1차 구현).
-            - group: 같은 프롬프트 그룹 전체 평균 (근사, 저렴). Ablation A5.
-            - none: baseline 0 (디버깅용).
-        shift: True면 h_togo를 한 칸 당겨 "y_t를 조건으로 한" 예보로 정렬한다.
-            docstring 상단의 정렬 노트 참조. **기본값을 바꾸지 말 것.**
+        h_togo_vals: ``[B, T]`` from :func:`h_togo`.
+        group_index: length-``B`` prompt-group keys.
+        mask: ``[B, T]`` response mask.
+        responses: ``[B, T]`` token ids — required for ``baseline="sibling"``.
+        baseline: ``"sibling"`` (prefix-matched) or ``"group"`` (group mean).
+        clip_c: if given, clamp the result to ``[-clip_c, clip_c]``.  Leaving
+            it ``None`` is the usual choice here because
+            :func:`steer_f.omega_tilde.compute_omega_tilde` does the clipping.
 
     Returns:
-        (a_h, baseline_vals) 둘 다 (B, T). 패딩 위치는 0.
-        sibling이 자기 자신뿐이면 baseline = 자기 값 → A_H = 0 (계획서 §8.4).
+        ``[B, T]``, zero outside ``mask``.
     """
-    b, t = h_togo_vals.shape
-    branch = _shift_forward(h_togo_vals, response_mask) if shift else h_togo_vals
-
-    if baseline == "none":
-        base = torch.zeros_like(branch)
+    if baseline == "sibling":
+        if responses is None:
+            raise ValueError('baseline="sibling" requires responses')
+        base = sibling_prefix_baseline(h_togo_vals, responses, mask, group_index)
     elif baseline == "group":
-        if group_size <= 1:
-            base = branch.clone()
-        else:
-            g = branch.view(b // group_size, group_size, t)
-            if response_mask is not None:
-                m = response_mask.view(b // group_size, group_size, t).float()
-                denom = m.sum(dim=1, keepdim=True).clamp(min=1.0)
-                mean = (g * m).sum(dim=1, keepdim=True) / denom
-            else:
-                mean = g.mean(dim=1, keepdim=True)
-            base = mean.expand_as(g).reshape(b, t)
-    elif baseline == "sibling":
-        if response_ids is None:
-            raise ValueError("baseline='sibling' requires response_ids")
-        sib = sibling_mask(response_ids, group_size, response_mask).float()  # (n_g, G, G, T)
-        g = branch.view(b // group_size, group_size, t)
-        if response_mask is not None:
-            m = response_mask.view(b // group_size, group_size, t).float()
-        else:
-            m = torch.ones_like(g)
-        # base[i, t] = Σ_j sib[i,j,t] * m[j,t] * g[j,t] / Σ_j sib[i,j,t] * m[j,t]
-        w = sib * m.unsqueeze(1)
-        num = (w * g.unsqueeze(1)).sum(dim=2)
-        den = w.sum(dim=2).clamp(min=1e-6)
-        base = (num / den).reshape(b, t)
+        base = group_mean_baseline(h_togo_vals, mask, group_index)
     else:
-        raise ValueError(f"unknown baseline: {baseline}")
+        raise ValueError(f'baseline must be "sibling" or "group", got {baseline!r}')
 
-    a_h = branch - base
-    if response_mask is not None:
-        m = response_mask.to(a_h.dtype)
-        a_h = a_h * m
-        base = base * m
-    return a_h, base
+    a_h = (h_togo_vals - base) * mask.to(h_togo_vals.dtype)
+    if clip_c is not None:
+        if clip_c <= 0:
+            raise ValueError(f"clip_c must be > 0, got {clip_c}")
+        a_h = a_h.clamp(-clip_c, clip_c)
+    return a_h
+
+
+def fit_head_calibration(
+    forecast_entropies: torch.Tensor,
+    measured_entropies: torch.Tensor,
+    fit_temperature: bool = False,
+    temperature_grid: Optional[Sequence[float]] = None,
+    forecast_fn=None,
+) -> HeadCalibration:
+    """Least-squares affine fit of forecast entropy onto measured entropy.
+
+    For each head ``k`` solves ``measured ~= scale_k * forecast + bias_k``.
+    ``measured`` in Phase 1 is the Monte-Carlo empirical entropy of the
+    continuations at offset ``+k+1``.
+
+    Args:
+        forecast_entropies: ``[K, N]`` forecast entropy per head per sample.
+        measured_entropies: ``[K, N]`` measured counterpart.
+        fit_temperature: also search a per-head temperature.  Requires
+            ``forecast_fn(k, temperature) -> [N]``, since a temperature cannot
+            be applied post-hoc to an entropy value.
+        temperature_grid: candidate temperatures when ``fit_temperature``.
+        forecast_fn: callable re-computing head ``k``'s entropies at a given
+            temperature.
+
+    Returns:
+        A :class:`HeadCalibration`.  Heads whose forecast has no variance get
+        ``scale=1, bias=0`` rather than a division by zero.
+    """
+    if forecast_entropies.shape != measured_entropies.shape:
+        raise ValueError(
+            f"shape mismatch: {tuple(forecast_entropies.shape)} vs {tuple(measured_entropies.shape)}"
+        )
+    k_heads = forecast_entropies.shape[0]
+    temps, scales, biases = [], [], []
+    grid = list(temperature_grid) if temperature_grid else [0.7, 0.85, 1.0, 1.25, 1.5, 2.0]
+
+    for k in range(k_heads):
+        best = (float("inf"), 1.0, 1.0, 0.0)  # (sse, temp, scale, bias)
+        candidates = grid if (fit_temperature and forecast_fn is not None) else [1.0]
+        for temp in candidates:
+            x = forecast_entropies[k].double()
+            if fit_temperature and forecast_fn is not None:
+                x = torch.as_tensor(forecast_fn(k, temp)).double()
+            y = measured_entropies[k].double()
+            scale, bias = _lstsq_affine(x, y)
+            sse = float(((scale * x + bias - y) ** 2).sum())
+            if sse < best[0]:
+                best = (sse, temp, scale, bias)
+        _, temp, scale, bias = best
+        temps.append(temp)
+        scales.append(scale)
+        biases.append(bias)
+
+    return HeadCalibration(temps, scales, biases)
 
 
 # ----------------------------------------------------------------------
-# 정규화 유틸
+# helpers
 # ----------------------------------------------------------------------
-def masked_zscore(x: torch.Tensor, mask: Optional[torch.Tensor] = None, eps: float = 1e-6) -> torch.Tensor:
-    """마스크 내에서 z-정규화. 0-분산이면 0을 반환 (계획서 §8.3)."""
-    if mask is None:
-        valid = torch.ones_like(x, dtype=torch.bool)
-    else:
-        valid = mask.bool()
-    if not valid.any():
-        return torch.zeros_like(x)
-    vals = x[valid].float()
-    std = vals.std()
-    if not torch.isfinite(std) or std < eps:
-        return torch.zeros_like(x)
-    out = (x - vals.mean()) / std
-    return out * valid.to(out.dtype)
+def _lstsq_affine(x: torch.Tensor, y: torch.Tensor) -> tuple[float, float]:
+    """Return ``(scale, bias)`` minimising ``||scale*x + bias - y||^2``."""
+    n = x.numel()
+    if n == 0:
+        return 1.0, 0.0
+    xm, ym = x.mean(), y.mean()
+    var = ((x - xm) ** 2).sum()
+    if float(var) < 1e-12:
+        return 1.0, float(ym - xm)
+    scale = float(((x - xm) * (y - ym)).sum() / var)
+    return scale, float(ym - scale * xm)
+
+
+def _group_rows(group_index: Sequence) -> list[list[int]]:
+    """Map a sequence of group keys to lists of row indices, order-stable."""
+    buckets: dict = {}
+    for i, key in enumerate(group_index):
+        buckets.setdefault(_hashable(key), []).append(i)
+    return list(buckets.values())
+
+
+def _hashable(key):
+    """numpy scalars / 0-d arrays appear in verl's ``uid`` column."""
+    if isinstance(key, torch.Tensor):
+        return key.item() if key.numel() == 1 else tuple(key.flatten().tolist())
+    try:
+        hash(key)
+        return key
+    except TypeError:
+        return str(key)
+
+
+def _check_bt(h_togo_vals, responses, mask, group_index) -> None:
+    if h_togo_vals.dim() != 2:
+        raise ValueError(f"h_togo_vals must be [B, T], got {tuple(h_togo_vals.shape)}")
+    if responses.shape != h_togo_vals.shape:
+        raise ValueError(
+            f"responses shape {tuple(responses.shape)} != h_togo shape {tuple(h_togo_vals.shape)}"
+        )
+    if mask.shape != h_togo_vals.shape:
+        raise ValueError(f"mask shape {tuple(mask.shape)} != h_togo shape {tuple(h_togo_vals.shape)}")
+    if len(group_index) != h_togo_vals.shape[0]:
+        raise ValueError(
+            f"group_index length {len(group_index)} != batch size {h_togo_vals.shape[0]}"
+        )

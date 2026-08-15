@@ -1,36 +1,69 @@
-"""STEER-F: STEER with Future-entropy Forecasting.
+# Copyright 2026 STEER-F authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+"""STEER-F — STEER with Future-entropy Forecasting.
 
-STEER의 근시안적 토큰 엔트로피 변화 추정 Ω를, MTP 헤드 기반 미래 엔트로피
-예보로 확장한 Ω̃로 대체한다.
+Extends STEER's myopic token-entropy estimate ``Omega`` with a forecast of the
+entropy that lies *ahead* of each branching decision, so that RLVR training
+preserves trajectory-level entropy rather than only per-state entropy.
 
-모듈:
-    mtp_heads          Medusa 스타일 병렬 MTP 헤드 + CE 워밍업 손실
-    entropy_forecast   H_togo, A_H(sibling/group baseline), 헤드 캘리브레이션
-    omega_tilde        Ω̃ 결합 (λ=0이면 순수 STEER와 비트 동일)
-    monitors           α 분포 / 분기 토큰 엔트로피 / 예보 표류 KL / λ 감쇠 제어
+Layout:
+    ``mtp_heads``        Medusa-style parallel MTP heads + their CE loss.
+    ``entropy_forecast`` ``H_togo``, head calibration, ``A_H`` baselines.
+    ``omega_tilde``      ``Omega_tilde`` and the patched token-weighting.
+    ``monitors``         drift / branch-entropy / recall diagnostics.
 """
 
-from .entropy_forecast import HeadCalibration, entropy_advantage, h_togo, masked_zscore, sibling_mask
-from .monitors import LambdaDriftController, branch_token_entropy, forecast_policy_kl, token_weight_stats
-from .mtp_heads import MTPHeads, build_mtp_heads_for, entropy_from_logits
-from .omega_tilde import SteerFConfig, compute_omega_tilde, normalize
+from .entropy_forecast import (
+    HeadCalibration,
+    entropy_advantage,
+    fit_head_calibration,
+    group_mean_baseline,
+    h_togo,
+    sibling_prefix_baseline,
+)
+from .monitors import (
+    LambdaDriftController,
+    branch_recall_at_k,
+    branch_token_entropy,
+    mtp_policy_kl,
+    token_weight_distribution,
+)
+from .mtp_heads import MTPHeads, entropy_from_logits, mtp_ce_loss
+from .omega_tilde import (
+    SteerFConfig,
+    compute_omega_tilde,
+    compute_token_weights_steerf,
+    local_omega_signed,
+    normalize,
+    visit_term,
+)
 
 __version__ = "0.1.0"
 
 __all__ = [
-    "MTPHeads",
-    "build_mtp_heads_for",
-    "entropy_from_logits",
     "HeadCalibration",
-    "h_togo",
-    "entropy_advantage",
-    "sibling_mask",
-    "masked_zscore",
-    "SteerFConfig",
-    "compute_omega_tilde",
-    "normalize",
-    "token_weight_stats",
-    "branch_token_entropy",
-    "forecast_policy_kl",
     "LambdaDriftController",
+    "MTPHeads",
+    "SteerFConfig",
+    "branch_recall_at_k",
+    "branch_token_entropy",
+    "compute_omega_tilde",
+    "compute_token_weights_steerf",
+    "entropy_advantage",
+    "entropy_from_logits",
+    "fit_head_calibration",
+    "group_mean_baseline",
+    "h_togo",
+    "local_omega_signed",
+    "mtp_ce_loss",
+    "mtp_policy_kl",
+    "normalize",
+    "sibling_prefix_baseline",
+    "token_weight_distribution",
+    "visit_term",
 ]

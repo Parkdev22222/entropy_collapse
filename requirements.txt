@@ -1,0 +1,25 @@
+# STEER-F.  verl and its heavy dependencies come from the pinned STEER
+# checkout (third_party/STEER/requirements.txt) — install that first:
+#
+#   bash scripts/setup_steer.sh
+#   pip install -e third_party/STEER
+#   pip install -r requirements.txt
+#
+# The steer_f package itself needs only torch; everything below is for the
+# Phase 1 / Phase 3 scripts and the test suite.
+
+torch>=2.1
+numpy>=1.24
+
+# scripts/phase1_*.py, scripts/phase3_port_model.py
+transformers>=4.44
+pandas>=2.0
+pyarrow>=14.0
+
+# tests (scipy cross-checks the hand-rolled Spearman / binomial statistics)
+pytest>=7.0
+scipy>=1.10
+
+# optional: embedding-based branch diversity in phase1_validate.py.
+# Without it the script falls back to a token-divergence measure.
+# sentence-transformers>=3.0

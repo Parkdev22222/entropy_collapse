@@ -1,12 +1,24 @@
+# STEER is fetched and patched by scripts/setup_steer.sh, never committed —
+# patches/ is the single source of truth for what STEER-F changes in verl.
+third_party/
+
+# artefacts
+checkpoints/
+rollout_data/
+wandb/
+outputs/
+*.pt
+*.safetensors
+docs/phase1_results.json
+
+# python
 __pycache__/
 *.py[cod]
 .pytest_cache/
 *.egg-info/
-wandb/
-outputs/
-rollout_data/
-checkpoints/
-artifacts/
-*.parquet
-*.pt
-*.safetensors
+.venv/
+venv/
+
+# patch leftovers
+*.orig
+*.rej

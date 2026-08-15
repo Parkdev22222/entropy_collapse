@@ -1,547 +1,357 @@
 #!/usr/bin/env python3
-"""Phase 1: MTP 예보의 Monte Carlo 검증 + (κ, γ_H) 결정 + 게이트 G1 판정.
+# Copyright 2026 STEER-F authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+"""Phase 1 — Monte-Carlo validation of the entropy forecast, and (kappa, gamma_H).
 
-프로토콜 (계획서 §3.3, ExTra Appendix C를 엔트로피용으로 변형):
-  1. 모델이 정답·오답을 모두 내는 문제 20~30개 선정 (난이도 4~5).
-  2. 문제당 temp 1.0으로 전체 궤적 32개 샘플링.
-  3. 각 궤적을 추론 스텝의 20/40/60/80%에서 절단 → prefix 풀 (~600개).
-  4. 각 prefix에서 K_mc=16개 continuation 샘플링 (temp 0.7, top-p 0.9) → 실측치.
-  5. 같은 prefix에서 MTP 예보 H_togo^κ 계산 (κ=1..8, γ_H 그리드).
-  6. 문제-내 Spearman ρ (Fisher z 평균), 분기 토큰 recall@10%.
+Plan §3.3, adapted from ExTra's Appendix-C protocol to entropy:
 
-**측정 호라이즌 주의**: GT_future_entropy를 continuation 전체 길이에 대해 합하면
-길이와 교락된다 (긴 continuation = 큰 합). 기본값은 `--gt-horizon` 토큰의 고정
-창에서 합하고, 길이 정규화 평균도 함께 기록해 둘 다 보고한다.
+1. pick problems the model gets both right and wrong (the regime where
+   branching actually matters);
+2. sample 32 full trajectories per problem at temperature 1.0;
+3. cut each at 20/40/60/80% of its length -> a pool of prefixes;
+4. from each prefix sample K_mc continuations and *measure* the future
+   entropy the policy really has there;
+5. forecast the same quantity with the MTP heads over a (kappa, gamma_H) grid;
+6. score with within-problem Spearman, and test branch recall against chance.
 
-사용 예:
-    python scripts/phase1_validate.py \\
-        --model Qwen/Qwen2.5-Math-7B \\
-        --heads artifacts/mtp_heads_qwen7b.pt \\
-        --problems datasets/math500.parquet \\
-        --workdir artifacts/phase1 \\
-        --n-problems 24 --n-trajectories 32 --n-mc 16
+The gate rule itself lives in `steer_f.validation` and is unit-tested, so a
+G1 verdict does not depend on anything written only in this file.
+
+    python scripts/phase1_validate.py \
+        --model Qwen/Qwen2.5-Math-7B \
+        --heads checkpoints/mtp_heads_qwen7b.pt \
+        --problems datasets/math500.parquet \
+        --out docs/phase1_results.json
+
+Ground truth, precisely
+-----------------------
+`H_togo^kappa` is a *discounted* sum over the next kappa steps, so the honest
+comparison is a discounted sum of the *measured* per-position entropies over
+the same horizon — recomputed per (kappa, gamma_H) cell.  The plan's plain
+"mean of summed token entropies" is also reported as `gt_sum_h`, but scoring a
+discounted forecast against an undiscounted truth would penalise every gamma_H
+below 1.0 for a reason that has nothing to do with forecast quality.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import pathlib
-import re
 import sys
-from dataclasses import asdict, dataclass
-from typing import Optional
+from pathlib import Path
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
+import torch
 
-from scripts._common import (  # noqa: E402
-    GenerationBackend,
-    apply_chat_template,
-    get_last_hidden_states,
-    get_lm_head,
-    load_policy,
-    load_prompts_from_parquet,
-)
-from steer_f.entropy_forecast import HeadCalibration, entropy_advantage, h_togo  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from steer_f.entropy_forecast import HeadCalibration, fit_head_calibration, h_togo  # noqa: E402
 from steer_f.mtp_heads import MTPHeads, entropy_from_logits  # noqa: E402
 from steer_f.validation import (  # noqa: E402
-    GridResult,
-    branch_recall_at_k,
     evaluate_gate_g1,
     select_kappa_gamma,
     within_problem_spearman,
 )
 
-TRUNC_FRACS = (0.2, 0.4, 0.6, 0.8)
+GAMMA_GRID = [0.7, 0.85, 1.0]
 
 
 # ----------------------------------------------------------------------
-# 정답 판정 (문제 선정용 — 엄밀한 채점기가 아니라 혼합 난이도 필터)
+# generation helpers
 # ----------------------------------------------------------------------
-_BOXED = re.compile(r"\\boxed\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}")
-
-
-def extract_answer(text: str) -> Optional[str]:
-    matches = _BOXED.findall(text)
-    return matches[-1].strip() if matches else None
-
-
-def answers_match(pred: Optional[str], gt: Optional[str]) -> bool:
-    if pred is None or gt is None:
-        return False
-    norm = lambda s: re.sub(r"[\s,$]|\\left|\\right|\\!|\\,", "", str(s)).rstrip(".")
-    return norm(pred) == norm(gt)
-
-
-# ----------------------------------------------------------------------
-# 헤드 로딩
-# ----------------------------------------------------------------------
-def load_heads(path: str, device: str):
-    import torch
-
-    ckpt = torch.load(path, map_location="cpu", weights_only=False)
-    cfg = ckpt["config"]
-    heads = MTPHeads(
-        hidden_size=cfg["hidden_size"],
-        num_heads=cfg["num_heads"],
-        head_hidden=cfg["head_hidden"],
-        vocab_size=cfg.get("vocab_size"),
-        residual=cfg.get("residual", True),
+@torch.no_grad()
+def sample_continuations(model, tokenizer, prefix_ids, n, max_new_tokens,
+                         temperature, top_p, device):
+    """Sample `n` continuations from one prefix.  Returns a list of id tensors."""
+    batch = prefix_ids.unsqueeze(0).expand(n, -1).to(device)
+    out = model.generate(
+        input_ids=batch,
+        attention_mask=torch.ones_like(batch),
+        do_sample=True,
+        temperature=temperature,
+        top_p=top_p,
+        max_new_tokens=max_new_tokens,
+        pad_token_id=tokenizer.pad_token_id,
     )
-    heads.load_state_dict(ckpt["state_dict"])
-    return heads.to(device).eval(), cfg
+    return [out[i, batch.shape[1]:] for i in range(n)]
 
 
-# ----------------------------------------------------------------------
-# 단계 1-2: 문제 선정 + 전체 궤적
-# ----------------------------------------------------------------------
-def stage_trajectories(args, tok, backend, workdir: pathlib.Path) -> list[dict]:
-    cache = workdir / "trajectories.json"
-    if cache.exists() and not args.force:
-        print(f"[stage1] cache hit {cache}")
-        return json.loads(cache.read_text())
+@torch.no_grad()
+def measured_future_entropy(model, prefix_ids, continuations, kappa_max, device):
+    """Per-offset entropy of the policy along each continuation.
 
-    problems = load_prompts_from_parquet(args.problems, limit=args.problem_pool)
-    texts = [apply_chat_template(tok, p["messages"]) for p in problems]
-    print(f"[stage1] {len(problems)} candidate problems, sampling {args.n_trajectories} trajectories each")
+    Returns `[n_cont, kappa_max]` where entry `[c, k]` is the entropy of the
+    policy's distribution at offset `+k+1` from the prefix, along continuation
+    `c`.  This is the quantity head `k` is trying to forecast, so the
+    comparison is like-for-like rather than a proxy.
+    """
+    rows = []
+    for cont in continuations:
+        ids = torch.cat([prefix_ids.to(device), cont.to(device)]).unsqueeze(0)
+        logits = model(input_ids=ids, use_cache=False).logits[0]
+        start = prefix_ids.shape[0] - 1  # distribution that produced the first new token
+        take = min(kappa_max, logits.shape[0] - start)
+        ent = entropy_from_logits(logits[start:start + take].float())
+        if take < kappa_max:  # continuation hit EOS early
+            ent = torch.cat([ent, torch.full((kappa_max - take,), float("nan"), device=device)])
+        rows.append(ent.cpu())
+    return torch.stack(rows)
 
-    outs = backend.generate(
-        texts,
-        n=args.n_trajectories,
-        temperature=1.0,
-        top_p=1.0,
-        max_tokens=args.max_response_length,
-        seed=args.seed,
+
+@torch.no_grad()
+def forecast_head_entropies(model, heads, prefix_ids, device, temperature):
+    """Per-head forecast entropy at the prefix's final position.  `[K]`."""
+    ids = prefix_ids.unsqueeze(0).to(device)
+    out = model(input_ids=ids, output_hidden_states=True, use_cache=False)
+    last_hidden = out.hidden_states[-1][:, -1:, :]  # [1, 1, H] — after the last prefix token
+    ent = heads.forecast_entropy(
+        last_hidden, model.get_output_embeddings(), temperature=temperature
     )
-
-    kept = []
-    for p, prompt_text, completions in zip(problems, texts, outs):
-        correct = [answers_match(extract_answer(c), p["ground_truth"]) for c in completions]
-        rate = sum(correct) / max(len(correct), 1)
-        # 정답·오답을 모두 내는 문제만 (계획서 §3.3 step 1)
-        if not (args.min_pass_rate <= rate <= args.max_pass_rate):
-            continue
-        kept.append(
-            {
-                "problem_id": p["problem_id"],
-                "prompt": prompt_text,
-                "ground_truth": p["ground_truth"],
-                "pass_rate": rate,
-                "trajectories": completions,
-                "correct": correct,
-            }
-        )
-        if len(kept) >= args.n_problems:
-            break
-
-    print(f"[stage1] kept {len(kept)} mixed-outcome problems")
-    if len(kept) < args.n_problems:
-        print(f"[stage1] WARNING: 목표 {args.n_problems}개에 미달 — --problem-pool 을 늘릴 것")
-    cache.write_text(json.dumps(kept))
-    return kept
+    return ent[:, 0, 0].cpu()
 
 
-# ----------------------------------------------------------------------
-# 단계 3: prefix 풀
-# ----------------------------------------------------------------------
-def split_steps(text: str) -> list[str]:
-    """추론 '스텝' 근사: 빈 줄이 아닌 줄 단위."""
-    return [ln for ln in text.split("\n") if ln.strip()]
+def branch_diversity(continuations, embed_model=None, texts=None):
+    """How different the continuations are — the `GT_branch_div` of plan §3.3.
 
+    Uses sentence embeddings when available (mean pairwise cosine distance);
+    otherwise falls back to first-divergence depth, i.e. how early the
+    continuations stop agreeing.  The fallback is coarser but needs no extra
+    model, and it measures the same thing the branch score is about.
+    """
+    if embed_model is not None and texts:
+        emb = embed_model.encode(texts, convert_to_tensor=True, normalize_embeddings=True)
+        sim = emb @ emb.T
+        n = sim.shape[0]
+        off = (sim.sum() - sim.diagonal().sum()) / max(1, n * (n - 1))
+        return float(1.0 - off)
 
-def stage_prefixes(problems: list[dict], workdir: pathlib.Path, force: bool) -> list[dict]:
-    cache = workdir / "prefixes.json"
-    if cache.exists() and not force:
-        print(f"[stage2] cache hit {cache}")
-        return json.loads(cache.read_text())
-
-    prefixes = []
-    for prob in problems:
-        for traj_idx, traj in enumerate(prob["trajectories"]):
-            steps = split_steps(traj)
-            if len(steps) < len(TRUNC_FRACS):
-                continue
-            for frac in TRUNC_FRACS:
-                n_keep = max(1, int(round(len(steps) * frac)))
-                if n_keep >= len(steps):
-                    continue
-                prefixes.append(
-                    {
-                        "problem_id": prob["problem_id"],
-                        "prompt": prob["prompt"],
-                        "traj_idx": traj_idx,
-                        "frac": frac,
-                        "prefix": "\n".join(steps[:n_keep]) + "\n",
-                    }
-                )
-    print(f"[stage2] {len(prefixes)} prefixes")
-    cache.write_text(json.dumps(prefixes))
-    return prefixes
+    depths = []
+    for i in range(len(continuations)):
+        for j in range(i + 1, len(continuations)):
+            a, b = continuations[i], continuations[j]
+            m = min(len(a), len(b))
+            d = m
+            for t in range(m):
+                if int(a[t]) != int(b[t]):
+                    d = t
+                    break
+            depths.append(d)
+    if not depths:
+        return 0.0
+    return float(-sum(depths) / len(depths))  # shallower divergence == more diverse
 
 
 # ----------------------------------------------------------------------
-# 단계 4: MC 실측치
+# main protocol
 # ----------------------------------------------------------------------
-def stage_ground_truth(args, model, tok, backend, prefixes, workdir: pathlib.Path) -> list[dict]:
-    import torch
-
-    cache = workdir / "ground_truth.json"
-    if cache.exists() and not args.force:
-        print(f"[stage3] cache hit {cache}")
-        return json.loads(cache.read_text())
-
-    full_prompts = [p["prompt"] + p["prefix"] for p in prefixes]
-    print(f"[stage3] sampling {args.n_mc} continuations for {len(prefixes)} prefixes")
-    conts = backend.generate(
-        full_prompts,
-        n=args.n_mc,
-        temperature=args.mc_temperature,
-        top_p=args.mc_top_p,
-        max_tokens=args.mc_max_tokens,
-        seed=args.seed,
-    )
-
-    embedder = None
-    if args.embed_model:
-        try:
-            from sentence_transformers import SentenceTransformer
-
-            embedder = SentenceTransformer(args.embed_model)
-        except Exception as exc:
-            print(f"[stage3] 임베딩 모델 로드 실패 ({exc}) — GT_branch_div 생략")
-
-    results = []
-    for i, (pref, completions) in enumerate(zip(prefixes, conts)):
-        # 실측 엔트로피: continuation을 teacher-forcing해 위치별 토큰 엔트로피를 잰다.
-        ent_sums, ent_means = [], []
-        ctx_ids = tok(full_prompts[i], add_special_tokens=False)["input_ids"]
-        for c in completions:
-            c_ids = tok(c, add_special_tokens=False)["input_ids"][: args.gt_horizon]
-            if not c_ids:
-                continue
-            ids = torch.tensor([ctx_ids + c_ids], device=model.device)
-            attn = torch.ones_like(ids)
-            with torch.no_grad():
-                out = model(input_ids=ids, attention_mask=attn, use_cache=False)
-            # 위치 (len(ctx)-1 .. end-1)의 로짓이 continuation 토큰들을 예측한다.
-            logits = out.logits[0, len(ctx_ids) - 1 : -1, :]
-            ent = entropy_from_logits(logits)
-            ent_sums.append(float(ent.sum()))
-            ent_means.append(float(ent.mean()))
-
-        row = {
-            "problem_id": pref["problem_id"],
-            "traj_idx": pref["traj_idx"],
-            "frac": pref["frac"],
-            "gt_future_entropy": float(sum(ent_sums) / len(ent_sums)) if ent_sums else float("nan"),
-            "gt_future_entropy_mean": float(sum(ent_means) / len(ent_means)) if ent_means else float("nan"),
-            "n_continuations": len(ent_sums),
-        }
-
-        if embedder is not None and len(completions) > 1:
-            import numpy as np
-
-            emb = embedder.encode(completions, normalize_embeddings=True)
-            centroid = emb.mean(axis=0)
-            row["gt_branch_div"] = float(np.mean(((emb - centroid) ** 2).sum(axis=1)))
-
-        results.append(row)
-        if (i + 1) % 50 == 0:
-            print(f"[stage3] {i + 1}/{len(prefixes)}")
-
-    cache.write_text(json.dumps(results))
-    return results
-
-
-# ----------------------------------------------------------------------
-# 단계 5: MTP 예보 (헤드별 원시 엔트로피를 저장 → 그리드는 사후 계산)
-# ----------------------------------------------------------------------
-def stage_forecast(args, model, tok, heads, prefixes, workdir: pathlib.Path) -> list[list[float]]:
-    import torch
-
-    cache = workdir / "forecast.json"
-    if cache.exists() and not args.force:
-        print(f"[stage4] cache hit {cache}")
-        return json.loads(cache.read_text())
-
-    lm_head = get_lm_head(model)
+def build_prefixes(response_ids, fractions):
+    """Cut one trajectory at the requested fractions of its length."""
     out = []
-    for i, pref in enumerate(prefixes):
-        ids = tok(pref["prompt"] + pref["prefix"], add_special_tokens=False)["input_ids"]
-        ids_t = torch.tensor([ids], device=model.device)
-        attn = torch.ones_like(ids_t)
-        with torch.no_grad():
-            hidden, _ = get_last_hidden_states(model, ids_t, attn)
-            # prefix 마지막 위치의 히든에서 +1..+K 예보
-            ent = heads.forward_entropy(hidden[:, -1:, :].to(next(heads.parameters()).dtype), lm_head)
-        out.append(ent[:, 0, 0].float().cpu().tolist())
-        if (i + 1) % 100 == 0:
-            print(f"[stage4] {i + 1}/{len(prefixes)}")
-
-    cache.write_text(json.dumps(out))
+    n = len(response_ids)
+    for f in fractions:
+        cut = int(n * f)
+        if 4 <= cut < n:
+            out.append(cut)
     return out
 
 
-# ----------------------------------------------------------------------
-# 단계 6: 분기 토큰 recall (sibling 궤적에서 실제 분기 위치 라벨링)
-# ----------------------------------------------------------------------
-def stage_branch_recall(args, model, tok, heads, problems, workdir: pathlib.Path, kappa: int, gamma_h: float) -> dict:
-    import torch
+def build_argparser():
+    p = argparse.ArgumentParser(description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--model", required=True)
+    p.add_argument("--heads", required=True, help="checkpoint from phase1_warmup_heads.py")
+    p.add_argument("--problems", required=True, help="parquet with a prompt column")
+    p.add_argument("--out", required=True, help="JSON results path")
+    p.add_argument("--prompt-column", default="prompt")
+    p.add_argument("--n-problems", type=int, default=25, help="plan asks for 20-30")
+    p.add_argument("--n-trajectories", type=int, default=32)
+    p.add_argument("--n-continuations", type=int, default=16, help="K_mc")
+    p.add_argument("--fractions", default="0.2,0.4,0.6,0.8")
+    p.add_argument("--max-prefixes", type=int, default=600, help="plan targets ~600")
+    p.add_argument("--traj-max-tokens", type=int, default=1024)
+    p.add_argument("--cont-max-tokens", type=int, default=64,
+                   help="only the first kappa_max offsets are scored")
+    p.add_argument("--traj-temperature", type=float, default=1.0)
+    p.add_argument("--cont-temperature", type=float, default=0.7)
+    p.add_argument("--cont-top-p", type=float, default=0.9)
+    p.add_argument("--forecast-temperature", type=float, default=1.0,
+                   help="must match the temperature verl uses for `entropys`")
+    p.add_argument("--embed-model", default=None,
+                   help="e.g. sentence-transformers/all-MiniLM-L6-v2; omitted -> token fallback")
+    p.add_argument("--calibrate", action="store_true",
+                   help="fit per-head scale/bias on the measured entropies")
+    p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    p.add_argument("--dtype", default="bfloat16", choices=["float32", "bfloat16", "float16"])
+    return p
 
-    cache = workdir / f"branch_recall_k{kappa}_g{gamma_h}.json"
-    if cache.exists() and not args.force:
-        print(f"[stage5] cache hit {cache}")
-        return json.loads(cache.read_text())
 
-    lm_head = get_lm_head(model)
-    scores, labels = [], []
+def main(argv=None):
+    args = build_argparser().parse_args(argv)
+    torch.manual_seed(args.seed)
 
-    for prob in problems:
-        group = prob["trajectories"][: args.branch_group_size]
-        if len(group) < 2:
-            continue
-        prompt_ids = tok(prob["prompt"], add_special_tokens=False)["input_ids"]
-        resp_ids = [tok(t, add_special_tokens=False)["input_ids"][: args.branch_max_len] for t in group]
-        t_max = max(len(r) for r in resp_ids)
-        if t_max < 2:
-            continue
+    import pandas as pd
+    from transformers import AutoModelForCausalLM, AutoTokenizer
 
-        pad = tok.pad_token_id or 0
-        g = len(resp_ids)
-        resp = torch.full((g, t_max), pad, dtype=torch.long)
-        mask = torch.zeros((g, t_max), dtype=torch.long)
-        h_all = torch.zeros((g, t_max), dtype=torch.float32)
+    dtype = getattr(torch, args.dtype)
+    tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    model = AutoModelForCausalLM.from_pretrained(
+        args.model, torch_dtype=dtype, trust_remote_code=True
+    ).to(args.device).eval()
 
-        for i, r in enumerate(resp_ids):
-            resp[i, : len(r)] = torch.tensor(r, dtype=torch.long)
-            mask[i, : len(r)] = 1
-            ids = torch.tensor([prompt_ids + r], device=model.device)
-            with torch.no_grad():
-                hidden, _ = get_last_hidden_states(model, ids, torch.ones_like(ids))
-                hid = hidden[:, len(prompt_ids) - 1 : -1, :].to(next(heads.parameters()).dtype)
-                head_ent = heads.forward_entropy(hid, lm_head)  # (K, 1, len(r))
-            h_all[i, : len(r)] = h_togo(head_ent, kappa=kappa, gamma_h=gamma_h)[0].cpu()
+    ckpt = torch.load(args.heads, map_location="cpu")
+    heads = MTPHeads(**ckpt["config"]).to(args.device, dtype=dtype)
+    heads.load_state_dict(ckpt["state_dict"])
+    heads.eval()
+    kappa_max = ckpt["config"]["num_heads"]
+    print(f"[validate] heads K={kappa_max} from {args.heads}")
 
-        a_h, _ = entropy_advantage(
-            h_all, response_ids=resp, group_size=g, response_mask=mask.float(), baseline="sibling"
+    embed_model = None
+    if args.embed_model:
+        from sentence_transformers import SentenceTransformer
+
+        embed_model = SentenceTransformer(args.embed_model, device=args.device)
+
+    df = pd.read_parquet(args.problems)
+    prompts = [str(x) for x in df[args.prompt_column].tolist()[: args.n_problems]]
+    fractions = [float(x) for x in args.fractions.split(",")]
+    print(f"[validate] {len(prompts)} problems, fractions={fractions}")
+
+    records = []
+    for pi, prompt in enumerate(prompts):
+        prompt_ids = tokenizer(prompt, return_tensors="pt")["input_ids"][0]
+        trajectories = sample_continuations(
+            model, tokenizer, prompt_ids, args.n_trajectories, args.traj_max_tokens,
+            args.traj_temperature, 1.0, args.device,
         )
 
-        # 실제 분기 위치: 같은 prefix를 공유하던 sibling들의 다음 토큰이 갈라지는 자리
-        from steer_f.entropy_forecast import sibling_mask
+        for ti, traj in enumerate(trajectories):
+            for cut in build_prefixes(traj, fractions):
+                if len(records) >= args.max_prefixes:
+                    break
+                prefix_ids = torch.cat([prompt_ids, traj[:cut].cpu()])
 
-        sib = sibling_mask(resp, group_size=g, response_mask=mask.float())[0]  # (G, G, T)
-        same_next = resp.unsqueeze(1) == resp.unsqueeze(0)  # (G, G, T)
-        for i in range(g):
-            for t in range(len(resp_ids[i])):
-                partners = sib[i, :, t].clone()
-                partners[i] = False
-                if not partners.any():
-                    continue  # sibling이 자기 자신뿐 → A_H = 0, 판정 대상 아님
-                scores.append(float(a_h[i, t]))
-                labels.append(bool((~same_next[i, partners, t]).any()))
+                conts = sample_continuations(
+                    model, tokenizer, prefix_ids, args.n_continuations,
+                    args.cont_max_tokens, args.cont_temperature, args.cont_top_p, args.device,
+                )
+                measured = measured_future_entropy(
+                    model, prefix_ids, conts, kappa_max, args.device
+                )  # [n_cont, kappa_max]
+                gt_per_offset = torch.nanmean(measured, dim=0)  # [kappa_max]
 
-    stats = branch_recall_at_k(scores, labels, top_frac=args.branch_top_frac, seed=args.seed)
-    stats["n_positions"] = len(scores)
-    cache.write_text(json.dumps(stats))
-    return stats
+                forecast = forecast_head_entropies(
+                    model, heads, prefix_ids, args.device, args.forecast_temperature
+                )  # [kappa_max]
 
+                texts = [tokenizer.decode(c, skip_special_tokens=True) for c in conts] \
+                    if embed_model else None
+                records.append({
+                    "problem": pi,
+                    "trajectory": ti,
+                    "cut": cut,
+                    "forecast_per_head": forecast.tolist(),
+                    "gt_per_offset": gt_per_offset.tolist(),
+                    "gt_sum_h": float(torch.nansum(gt_per_offset)),
+                    "gt_branch_div": branch_diversity(conts, embed_model, texts),
+                })
+            if len(records) >= args.max_prefixes:
+                break
+        print(f"[validate] problem {pi+1}/{len(prompts)}: {len(records)} prefixes", flush=True)
+        if len(records) >= args.max_prefixes:
+            break
 
-# ----------------------------------------------------------------------
-@dataclass
-class Phase1Report:
-    kappa: int
-    gamma_h: float
-    rho: float
-    rho_gt_mean: float
-    grid: list[dict]
-    recall: dict
-    calibration: dict
-    gate_passed: bool
-    gate_summary: str
-    n_prefixes: int
-    n_problems: int
+    if not records:
+        raise SystemExit("[validate] no prefixes collected — check --fractions / lengths")
 
-
-def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--model", required=True)
-    ap.add_argument("--heads", required=True, help="phase1_warmup_heads.py train 산출물")
-    ap.add_argument("--problems", required=True, help="math500.parquet 등")
-    ap.add_argument("--workdir", default="artifacts/phase1")
-    ap.add_argument("--report", default="docs/phase1_report.md")
-
-    ap.add_argument("--n-problems", type=int, default=24)
-    ap.add_argument("--problem-pool", type=int, default=120)
-    ap.add_argument("--n-trajectories", type=int, default=32)
-    ap.add_argument("--n-mc", type=int, default=16)
-    ap.add_argument("--min-pass-rate", type=float, default=0.15)
-    ap.add_argument("--max-pass-rate", type=float, default=0.85)
-    ap.add_argument("--max-response-length", type=int, default=3072)
-    ap.add_argument("--mc-temperature", type=float, default=0.7)
-    ap.add_argument("--mc-top-p", type=float, default=0.9)
-    ap.add_argument("--mc-max-tokens", type=int, default=512)
-    ap.add_argument("--gt-horizon", type=int, default=64, help="실측 엔트로피 합의 고정 창 (길이 교락 방지)")
-
-    ap.add_argument("--kappa-grid", default="1,2,3,4,5,6,7,8")
-    ap.add_argument("--gamma-grid", default="0.7,0.85,1.0")
-    ap.add_argument("--elbow-tol", type=float, default=0.01)
-    ap.add_argument("--calibrate", action="store_true", help="헤드별 아핀 보정을 적합해 적용")
-
-    ap.add_argument("--branch-group-size", type=int, default=8)
-    ap.add_argument("--branch-max-len", type=int, default=512)
-    ap.add_argument("--branch-top-frac", type=float, default=0.1)
-
-    ap.add_argument("--embed-model", default="sentence-transformers/all-MiniLM-L6-v2")
-    ap.add_argument("--dtype", default="bfloat16")
-    ap.add_argument("--device", default="cuda")
-    ap.add_argument("--tp", type=int, default=1)
-    ap.add_argument("--no-vllm", action="store_true")
-    ap.add_argument("--seed", type=int, default=42)
-    ap.add_argument("--force", action="store_true", help="캐시 무시하고 재계산")
-    args = ap.parse_args()
-
-    import torch
-
-    workdir = pathlib.Path(args.workdir)
-    workdir.mkdir(parents=True, exist_ok=True)
-
-    model, tok = load_policy(args.model, dtype=args.dtype, device=args.device)
-    heads, _ = load_heads(args.heads, args.device)
-    backend = GenerationBackend(args.model, prefer_vllm=not args.no_vllm, tensor_parallel_size=args.tp)
-
-    problems = stage_trajectories(args, tok, backend, workdir)
-    prefixes = stage_prefixes(problems, workdir, args.force)
-    gt = stage_ground_truth(args, model, tok, backend, prefixes, workdir)
-    fc = stage_forecast(args, model, tok, heads, prefixes, workdir)
-
-    head_ent = torch.tensor(fc).T.unsqueeze(-1)  # (K, N, 1)
-    pids = [r["problem_id"] for r in gt]
-    targets = [r["gt_future_entropy"] for r in gt]
-
+    # ---- optional calibration, fit on the measured per-offset entropies ----
     calib = None
     if args.calibrate:
-        # 헤드별로 실측 '평균' 엔트로피에 맞춘다 (합은 호라이즌 길이에 비례하므로 부적절).
-        tgt = torch.tensor([r["gt_future_entropy_mean"] for r in gt]).unsqueeze(0).expand(head_ent.shape[0], -1)
-        calib = HeadCalibration.fit(head_ent[:, :, 0], tgt)
-        print(f"[calib] scale={['%.3f' % s for s in calib.scale]} bias={['%.3f' % b for b in calib.bias]}")
+        f_mat = torch.tensor([r["forecast_per_head"] for r in records]).T   # [K, N]
+        m_mat = torch.tensor([r["gt_per_offset"] for r in records]).T       # [K, N]
+        keep = torch.isfinite(m_mat).all(dim=0)
+        calib = fit_head_calibration(f_mat[:, keep], m_mat[:, keep])
+        print(f"[validate] calibration scale={['%.3f' % s for s in calib.scale]}")
+        print(f"[validate]             bias ={['%.3f' % b for b in calib.bias]}")
 
-    grid: list[GridResult] = []
-    for kappa in [int(x) for x in args.kappa_grid.split(",")]:
-        if kappa > head_ent.shape[0]:
-            continue
-        for gamma in [float(x) for x in args.gamma_grid.split(",")]:
-            vals = h_togo(head_ent, kappa=kappa, gamma_h=gamma, calib=calib)[:, 0].tolist()
-            rho, per = within_problem_spearman(pids, vals, targets)
-            grid.append(GridResult(kappa=kappa, gamma_h=gamma, rho=rho, per_problem=per))
-            print(f"[grid] kappa={kappa} gamma_h={gamma} rho={rho:.4f} ({len(per)} problems)")
+    # ---- (kappa, gamma_H) grid ----
+    grid = []
+    for gamma in GAMMA_GRID:
+        for kappa in range(1, kappa_max + 1):
+            forecasts, truths, pids = [], [], []
+            for r in records:
+                f = h_togo(
+                    torch.tensor(r["forecast_per_head"]).view(-1, 1, 1),
+                    kappa=kappa, gamma_h=gamma, calib=calib,
+                )
+                gt_offsets = torch.tensor(r["gt_per_offset"])[:kappa]
+                if not torch.isfinite(gt_offsets).all():
+                    continue  # continuation ended before the horizon
+                weights = torch.tensor([gamma ** (k + 1) for k in range(kappa)])
+                forecasts.append(float(f))
+                truths.append(float((weights * gt_offsets).sum()))
+                pids.append(r["problem"])
 
-    best = select_kappa_gamma(grid, elbow_tol=args.elbow_tol)
-    print(f"[grid] selected kappa={best.kappa} gamma_h={best.gamma_h} rho={best.rho:.4f}")
+            stats = within_problem_spearman(forecasts, truths, pids)
+            grid.append({
+                "kappa": kappa, "gamma_h": gamma,
+                "rho_mean": stats["rho_mean"], "rho_pooled": stats["rho_pooled"],
+                "n_problems": stats["n_problems"], "n_observations": stats["n_observations"],
+            })
+            print(f"[validate] kappa={kappa} gamma_H={gamma}: "
+                  f"rho_within={stats['rho_mean']:.4f} (pooled {stats['rho_pooled']:.4f}, "
+                  f"{stats['n_observations']} obs)")
 
-    best_vals = h_togo(head_ent, kappa=best.kappa, gamma_h=best.gamma_h, calib=calib)[:, 0].tolist()
-    rho_mean, _ = within_problem_spearman(pids, best_vals, [r["gt_future_entropy_mean"] for r in gt])
+    chosen = select_kappa_gamma(grid)
+    print(f"\n[validate] selected kappa={chosen['kappa']} gamma_H={chosen['gamma_h']} "
+          f"(rho={chosen['rho_mean']:.4f}, best available {chosen['rho_best']:.4f}, "
+          f"giving up {chosen['rho_giveup']:.4f})")
 
-    recall = stage_branch_recall(args, model, tok, heads, problems, workdir, best.kappa, best.gamma_h)
-    print(f"[recall] {recall}")
+    # ---- secondary: does H_togo track branch diversity? ----
+    div_forecasts, div_truths, div_pids = [], [], []
+    for r in records:
+        f = h_togo(
+            torch.tensor(r["forecast_per_head"]).view(-1, 1, 1),
+            kappa=chosen["kappa"], gamma_h=chosen["gamma_h"], calib=calib,
+        )
+        div_forecasts.append(float(f))
+        div_truths.append(r["gt_branch_div"])
+        div_pids.append(r["problem"])
+    div_stats = within_problem_spearman(div_forecasts, div_truths, div_pids)
+    print(f"[validate] rho(H_togo, branch diversity) = {div_stats['rho_mean']:.4f}")
 
-    gate = evaluate_gate_g1(best.rho, recall)
-    print(gate.summary())
+    result = {
+        "args": vars(args),
+        "n_records": len(records),
+        "grid": grid,
+        "chosen": chosen,
+        "branch_diversity_rho": div_stats["rho_mean"],
+        "calibration": calib.to_dict() if calib else None,
+        "records": records,
+    }
+    out_path = Path(args.out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(result, indent=2))
+    print(f"[validate] wrote {out_path}")
 
-    report = Phase1Report(
-        kappa=best.kappa,
-        gamma_h=best.gamma_h,
-        rho=best.rho,
-        rho_gt_mean=rho_mean,
-        grid=[g.as_row() for g in grid],
-        recall=recall,
-        calibration=calib.to_dict() if calib else {},
-        gate_passed=gate.passed,
-        gate_summary=gate.summary(),
-        n_prefixes=len(prefixes),
-        n_problems=len(problems),
+    print(
+        "\n[validate] NOTE: gate G1 also needs branch recall@10%, which is measured on a\n"
+        "           real rollout group (steer_f.monitors.branch_recall_at_k) rather than on\n"
+        "           these independently-sampled prefixes. Run it on a Phase-0 rollout dump,\n"
+        "           then feed both numbers to steer_f.validation.evaluate_gate_g1."
     )
-    (workdir / "phase1_result.json").write_text(json.dumps(asdict(report), indent=2))
-    write_report(report, pathlib.Path(args.report), args)
-    _maybe_plot(grid, workdir)
-    return 0 if gate.passed else 2
-
-
-def write_report(rep: Phase1Report, path: pathlib.Path, args) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    lines = [
-        "# Phase 1 리포트 — MTP 예보 검증 및 (κ, γ_H) 결정",
-        "",
-        f"- 모델: `{args.model}`",
-        f"- 헤드: `{args.heads}`",
-        f"- 문제 {rep.n_problems}개, prefix {rep.n_prefixes}개, 문제당 궤적 {args.n_trajectories}, prefix당 MC {args.n_mc}",
-        f"- 실측 호라이즌: {args.gt_horizon} 토큰 (길이 교락 방지용 고정 창)",
-        "",
-        "## 결정",
-        "",
-        f"| κ | γ_H | within-problem ρ |",
-        f"|---|---|---|",
-        f"| **{rep.kappa}** | **{rep.gamma_h}** | **{rep.rho:.4f}** |",
-        "",
-        f"보조: 길이정규화 실측(mean) 기준 ρ = {rep.rho_gt_mean:.4f}",
-        "",
-        "## (κ, γ_H) 그리드",
-        "",
-        "| κ | γ_H | ρ | n_problems |",
-        "|---|---|---|---|",
-    ]
-    for row in rep.grid:
-        lines.append(f"| {row['kappa']} | {row['gamma_h']} | {row['rho']:.4f} | {row['n_problems']} |")
-
-    lines += [
-        "",
-        "## 분기 토큰 recall@10%",
-        "",
-        "| recall | 랜덤 baseline | lift | p-value | 위치 수 |",
-        "|---|---|---|---|---|",
-        f"| {rep.recall.get('recall', float('nan')):.4f} | {rep.recall.get('baseline', float('nan')):.4f} "
-        f"| {rep.recall.get('lift', float('nan')):.2f}× | {rep.recall.get('p_value', float('nan')):.4g} "
-        f"| {rep.recall.get('n_positions', 0)} |",
-        "",
-        "## 캘리브레이션",
-        "",
-        "```json",
-        json.dumps(rep.calibration, indent=2),
-        "```",
-        "",
-        "## 게이트 G1",
-        "",
-        "```",
-        rep.gate_summary,
-        "```",
-    ]
-    path.write_text("\n".join(lines) + "\n")
-    print(f"[report] wrote {path}")
-
-
-def _maybe_plot(grid, workdir: pathlib.Path) -> None:
-    try:
-        import matplotlib
-
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-    except Exception:
-        print("[plot] matplotlib 없음 — 곡선 생략")
-        return
-
-    gammas = sorted({g.gamma_h for g in grid})
-    fig, ax = plt.subplots(figsize=(6, 4))
-    for gamma in gammas:
-        pts = sorted([(g.kappa, g.rho) for g in grid if g.gamma_h == gamma])
-        ax.plot([p[0] for p in pts], [p[1] for p in pts], marker="o", label=f"γ_H={gamma}")
-    ax.axhline(0.2, ls="--", c="gray", label="G1 threshold 0.2")
-    ax.set_xlabel("κ (forecast horizon)")
-    ax.set_ylabel("within-problem Spearman ρ")
-    ax.legend()
-    fig.tight_layout()
-    out = workdir / "kappa_gamma_curve.png"
-    fig.savefig(out, dpi=150)
-    print(f"[plot] wrote {out}")
+    partial = evaluate_gate_g1(
+        rho_mean=chosen["rho_mean"], recall=float("nan"),
+        n_branch=0, n_hit=0, selection_rate=0.1,
+    )
+    print(partial.summary())
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    main()
