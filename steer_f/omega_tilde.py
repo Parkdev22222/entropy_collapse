@@ -65,6 +65,7 @@ __all__ = [
     "delta_logpi_hat",
     "visit_term",
     "normalize",
+    "reshape_metric",
     "compute_omega_tilde",
     "branch_weight_correction",
     "compute_token_weights_steerf",
@@ -86,6 +87,10 @@ class SteerFConfig:
         clip_c: symmetric clip on ``A_H``, bounding how much a mis-forecast
             can move any single token.
         norm: ``"scale"`` (RMS, default and safe), ``"z"``, or ``"none"``.
+        mapping: what the metric looks like when STEER's band mapping sees it —
+            ``"minmax"`` (stock), ``"winsor"`` or ``"rank"``.  See
+            :func:`reshape_metric`.
+        winsor_q: tail fraction clamped at each end when ``mapping="winsor"``.
         baseline: ``"sibling"`` or ``"group"`` — see
             :func:`steer_f.entropy_forecast.entropy_advantage`.
         kappa / gamma_h: forecast horizon and discount.
@@ -99,6 +104,8 @@ class SteerFConfig:
     eta: float = 1.0
     clip_c: float = 1.0
     norm: str = "scale"
+    mapping: str = "minmax"
+    winsor_q: float = 0.01
     baseline: str = "sibling"
     kappa: int = 4
     gamma_h: float = 0.85
@@ -137,6 +144,23 @@ class SteerFConfig:
             warnings.append(
                 'norm="z" recentres the metric, but the exponential mapping (linear=False) '
                 'is not shift-invariant. Use norm="scale".'
+            )
+        if self.mapping not in ("minmax", "winsor", "rank"):
+            raise ValueError(
+                f'mapping must be "minmax", "winsor" or "rank", got {self.mapping!r}')
+        if not (0.0 <= self.winsor_q < 0.5):
+            raise ValueError(f"winsor_q must be in [0, 0.5), got {self.winsor_q}")
+        if self.mapping != "minmax":
+            warnings.append(
+                f'mapping="{self.mapping}" changes the metric STEER maps, so this arm is '
+                "no longer bit-identical to stock STEER even at lam=0. That is the point "
+                "of the option, but it means lam=0 is a second baseline, not the stock one."
+            )
+        if self.mapping == "rank" and not linear:
+            warnings.append(
+                'mapping="rank" discards the metric\'s zero point, and the exponential '
+                "mapping (linear=False) is not shift-invariant, so the attenuation centre "
+                "moves to the batch median. Use linear=True, or winsor."
             )
         if self.norm == "none" and self.lam > 0:
             warnings.append(
@@ -373,6 +397,116 @@ def normalize(
 
 
 # ----------------------------------------------------------------------
+# metric reshaping — what the mapping actually sees
+# ----------------------------------------------------------------------
+def _average_ranks(x: torch.Tensor) -> torch.Tensor:
+    """Average (tie-corrected) 0-based ranks of a 1-D tensor, as float64."""
+    n = x.numel()
+    order = torch.argsort(x)
+    pos = torch.empty(n, dtype=torch.float64, device=x.device)
+    pos[order] = torch.arange(n, dtype=torch.float64, device=x.device)
+    vals, inv = torch.unique(x, return_inverse=True)
+    tot = torch.zeros(vals.numel(), dtype=torch.float64, device=x.device).scatter_add_(0, inv, pos)
+    cnt = torch.zeros(vals.numel(), dtype=torch.float64, device=x.device).scatter_add_(
+        0, inv, torch.ones(n, dtype=torch.float64, device=x.device)
+    )
+    return (tot / cnt)[inv]
+
+
+def _quantile_sorted(v: torch.Tensor, q: float) -> torch.Tensor:
+    """``q``-quantile by index into the sorted values.
+
+    ``torch.quantile`` refuses tensors above ~16M elements; a micro-batch is
+    far below that, but sorting keeps this usable on a pooled offline batch too.
+    """
+    n = v.numel()
+    idx = int(round(q * (n - 1)))
+    return torch.sort(v).values[max(0, min(n - 1, idx))]
+
+
+def reshape_metric(
+    metric: torch.Tensor,
+    response_mask: torch.Tensor,
+    mapping: str = "minmax",
+    winsor_q: float = 0.01,
+    mode: str = "symmetric",
+) -> torch.Tensor:
+    """Transform the metric *before* STEER's min-max / exponential mapping.
+
+    STEER rescales the metric onto ``[token_weight_min, token_weight_max]``
+    using the micro-batch's own ``min`` and ``max``.  ``Omega`` carries a
+    division by ``pi_old`` floored at ``1e-8``, so those two extremes are set
+    by outliers: measured on real rollouts, ``max|Omega| / median|Omega|`` is
+    3.4e4 and ``max / p99`` is 6.4 (``docs/omega_forms.json``).  The band is
+    therefore spent on one or two tokens and the bulk lands on a point --
+    ``tw_std`` 0.001 on a 0.1-wide band in the Phase-2 runs, i.e. the ordering
+    information STEER computes never reaches the loss.
+
+    Three options:
+
+    ``"minmax"``
+        Identity.  The stock behaviour, and the default, because it is what
+        the ``lambda = 0`` equivalence test compares against.
+    ``"winsor"``
+        Clamp the metric to its ``[winsor_q, 1 - winsor_q]`` quantiles first.
+        Smallest possible change: the shape of the bulk is untouched, only the
+        tail's grip on the denominator is cut.
+    ``"rank"``
+        Replace the metric by its within-micro-batch normalised rank.  Band
+        occupancy becomes uniform *by construction* and no tail can influence
+        it.  The cost is that all magnitude information is discarded: the gap
+        between the 1st and 2nd largest ``|Omega|`` is treated the same as the
+        gap between two adjacent bulk tokens.
+
+    Ranks are averaged over ties, so the point mass at ``Omega == 0`` (masked
+    or clipped positions) maps to a single shared value rather than an
+    arbitrary order.
+
+    Args:
+        metric: ``[B, T]``, already ``abs()``-ed when ``mode="symmetric"``.
+        response_mask: ``[B, T]``; statistics come from ``mask > 0`` only.
+        mapping: ``"minmax"``, ``"winsor"`` or ``"rank"``.
+        winsor_q: tail fraction clamped at each end when ``mapping="winsor"``.
+        mode: ``"symmetric"`` puts ranks on ``[0, 1]`` (the metric is
+            non-negative and 0 is a meaningful floor); ``"asymmetric"`` puts
+            them on ``[-1, 1]`` so the signed metric keeps a centre.  Under
+            ``linear=True`` this choice is invisible -- the min-max rescale is
+            affine-invariant -- and it only matters for the exponential
+            mapping, which is not shift-invariant.
+
+    Returns:
+        ``[B, T]``, zero outside the mask.
+    """
+    if mapping == "minmax":
+        return metric
+    if mapping not in ("winsor", "rank"):
+        raise ValueError(f'mapping must be "minmax", "winsor" or "rank", got {mapping!r}')
+    if mode not in ("symmetric", "asymmetric"):
+        raise ValueError(f'mode must be "symmetric" or "asymmetric", got {mode!r}')
+
+    valid = response_mask.bool()
+    vals = metric[valid]
+    if vals.numel() == 0:
+        return metric
+
+    out = torch.zeros_like(metric)
+    if mapping == "winsor":
+        if not (0.0 <= winsor_q < 0.5):
+            raise ValueError(f"winsor_q must be in [0, 0.5), got {winsor_q}")
+        lo = _quantile_sorted(vals, winsor_q)
+        hi = _quantile_sorted(vals, 1.0 - winsor_q)
+        out[valid] = vals.clamp(lo, hi)
+        return out
+
+    n = vals.numel()
+    if n == 1:
+        return out
+    r = (_average_ranks(vals) / (n - 1)).to(metric.dtype)
+    out[valid] = r if mode == "symmetric" else (2.0 * r - 1.0)
+    return out
+
+
+# ----------------------------------------------------------------------
 # the combination
 # ----------------------------------------------------------------------
 def compute_omega_tilde(
@@ -563,6 +697,8 @@ def compute_token_weights_steerf(
     clip_c: float = 1.0,
     norm: str = "scale",
     apply: str = "metric",
+    mapping: str = "minmax",
+    winsor_q: float = 0.01,
     use_iclip: bool = False,
     use_ratio: bool = False,
     return_stats: bool = False,
@@ -583,6 +719,9 @@ def compute_token_weights_steerf(
         cliprange_low / cliprange_high: used to rebuild ``w = clip(ratio) * A``
             with the same clipping the policy loss will apply.
         lam, eta, clip_c, norm: see :class:`SteerFConfig`.
+        mapping / winsor_q: reshape the metric before STEER's band mapping —
+            see :func:`reshape_metric`.  ``"minmax"`` is stock and is what the
+            ``lambda = 0`` equivalence test compares against.
         return_stats: also return the diagnostics dict.
 
     Returns:
@@ -640,6 +779,13 @@ def compute_token_weights_steerf(
             metric = torch.abs(metric)
         elif mode != "asymmetric":
             raise ValueError(f'mode must be "symmetric" or "asymmetric", got {mode!r}')
+
+        # The one line that changes what the stock mapping below is looking at.
+        # mapping="minmax" returns `metric` itself, so the stock path is bit-identical.
+        metric = reshape_metric(metric, response_mask, mapping=mapping,
+                                winsor_q=winsor_q, mode=mode)
+        stats["steerf/mapping_rank"] = float(mapping == "rank")
+        stats["steerf/mapping_winsor"] = float(mapping == "winsor")
 
         # ---- below: unchanged from stock STEER ----
         valid_metric = metric[response_mask.bool()]
