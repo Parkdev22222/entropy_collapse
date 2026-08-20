@@ -46,6 +46,51 @@ RUN_RL_ALGOS=${RUN_RL_ALGOS:-1}
 RUN_PASSK=${RUN_PASSK:-0}
 AUX_MODEL=${AUX_MODEL:-"Qwen/Qwen2.5-Math-7B"}   # extreme / RLOO / OPO / Pass@k arms
 
+# SCALE=smoke proves the pipeline end-to-end on one GPU in ~an hour. It pins
+# itself to the one model that fits a single 80GB card and drops every arm that
+# would only add hours without testing new code paths.
+export SCALE=${SCALE:-paper}
+export OFFLOAD=${OFFLOAD:-0}
+if [ "${SCALE}" = "smoke" ]; then
+    MATH_MODELS=${MATH_MODELS:-"Qwen/Qwen2.5-Math-1.5B"}
+    SEEDS=${SEEDS:-1}
+    RUN_CODE=${RUN_CODE:-0}; RUN_EXTREME=${RUN_EXTREME:-0}
+    RUN_RL_ALGOS=${RUN_RL_ALGOS:-0}; RUN_PASSK=0
+    STATE_DIR=${STATE_DIR:-${STEER_ROOT}/experiments_state_smoke}
+    LOG_DIR=${LOG_DIR:-${STEER_ROOT}/logs/experiments_smoke}
+    echo "[all] SCALE=smoke — pipeline validation only."
+    echo "[all]   train_batch 16, response 512, 3 steps, val n=2, 1 seed."
+    echo "[all]   Numbers from this run are NOT paper-comparable; state and logs"
+    echo "[all]   live in *_smoke/ so they cannot be confused with a real run."
+fi
+
+# ---- GPU topology: detect, don't assume -------------------------------------
+# Each run script defaults to the paper's 8 GPUs / TP=4. Relying on the caller
+# to remember `N_GPUS=1 TP_SIZE=1 bash ...` on every invocation is how a re-run
+# ends up asking for 8 GPUs on a 1-GPU box and dying in verl's resource pool
+# check. Detect once here and export, so a bare `bash run/run_all_experiments.sh`
+# is correct on any node; an explicit N_GPUS/TP_SIZE still wins.
+if [ -z "${N_GPUS:-}" ]; then
+    N_GPUS=$(python3 -c "import torch;print(torch.cuda.device_count())" 2>/dev/null || echo 0)
+    [ "${N_GPUS}" = "0" ] && N_GPUS=1
+fi
+if [ -z "${TP_SIZE:-}" ]; then
+    TP_SIZE=1
+    for t in 4 2; do
+        if [ $((N_GPUS % t)) -eq 0 ] && [ "${N_GPUS}" -ge "$t" ]; then TP_SIZE=$t; break; fi
+    done
+fi
+export N_GPUS TP_SIZE
+echo "[all] GPU topology: N_GPUS=${N_GPUS} TP_SIZE=${TP_SIZE}"
+if [ "${N_GPUS}" -lt 8 ]; then
+    echo "[all] NOTE: the paper used 8xH20. The optimisation is unchanged on fewer"
+    echo "[all]       GPUs (same global batch, more gradient accumulation), but"
+    echo "[all]       wall-clock scales ~inversely and 7B/14B full fine-tuning will"
+    echo "[all]       likely OOM below 8 GPUs. On a small node start with"
+    echo "[all]       MATH_MODELS=Qwen/Qwen2.5-Math-1.5B SEEDS=1 RUN_CODE=0 \\"
+    echo "[all]       RUN_EXTREME=0 RUN_RL_ALGOS=0 to validate the pipeline first."
+fi
+
 STATE_DIR=${STATE_DIR:-${STEER_ROOT}/experiments_state}
 LOG_DIR=${LOG_DIR:-${STEER_ROOT}/logs/experiments}
 mkdir -p "${STATE_DIR}" "${LOG_DIR}" "${STEER_ROOT}/results"

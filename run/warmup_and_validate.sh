@@ -18,13 +18,18 @@ export PYTHONPATH="${STEER_ROOT}:$PYTHONPATH"
 
 model_path=${MODEL_PATH:-"Qwen/Qwen2.5-Math-7B"}
 model_tag=$(basename "${model_path}")
-rollouts=${ROLLOUTS:-${STEER_ROOT}/rollout_data/warmup/${model_tag}/rollouts.jsonl}
+SCALE=${SCALE:-paper}
+rollouts=${ROLLOUTS:-${STEER_ROOT}/rollout_data/warmup/${model_tag}${SCALE:+-${SCALE}}/rollouts.jsonl}
+case "${SCALE}" in
+  paper) N_PROB=25; N_TRAJ=32; N_CONT=16; MAX_PRE=600 ;;
+  smoke) N_PROB=3;  N_TRAJ=4;  N_CONT=4;  MAX_PRE=24  ;;
+esac
 ckpt_dir=${STEER_ROOT}/checkpoints
 mkdir -p "${ckpt_dir}" "${STEER_ROOT}/docs"
 
-heads_out=${ckpt_dir}/mtp_heads_${model_tag}.pt
-calib_out=${ckpt_dir}/mtp_calibration_${model_tag}.json
-results_out=${STEER_ROOT}/docs/phase1_results_${model_tag}.json
+heads_out=${ckpt_dir}/mtp_heads_${model_tag}${SCALE:+-${SCALE}}.pt
+calib_out=${ckpt_dir}/mtp_calibration_${model_tag}${SCALE:+-${SCALE}}.json
+results_out=${STEER_ROOT}/docs/phase1_results_${model_tag}${SCALE:+-${SCALE}}.json
 
 # 1) head warm-up (K=8; kappa is selected afterwards, no retraining needed)
 python3 ${STEER_ROOT}/scripts/phase1_warmup_heads.py \
@@ -39,8 +44,8 @@ python3 ${STEER_ROOT}/scripts/phase1_validate.py \
     --model "${model_path}" \
     --heads "${heads_out}" \
     --problems ${PROBLEMS:-${STEER_ROOT}/datasets/math500.parquet} \
-    --n-problems 25 --n-trajectories 32 --n-continuations 16 \
-    --max-prefixes 600 --calibrate \
+    --n-problems ${N_PROB} --n-trajectories ${N_TRAJ} --n-continuations ${N_CONT} \
+    --max-prefixes ${MAX_PRE} --calibrate \
     --out "${results_out}"
 
 python3 - "$results_out" "$calib_out" <<'PY'

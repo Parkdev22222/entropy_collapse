@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # STEER-F in the paper's EXTREME entropy-control scenario (§6.3, Table 6,
 # Figure 8): clip_ratio_low=0.99, clip_ratio_high=5 — ratio clipping all but
-# removed. Everything else identical to run_steerf.sh. Table 6 numbers come
-# from eval_steerf.sh on the selected checkpoint; Figure 8 is actor/entropy.
+# removed. Everything else identical to run_steerf.sh, SCALE/OFFLOAD included.
 set -x
 
 export PYTHONHASHSEED=42
@@ -35,8 +34,8 @@ STEERF_APPLY=${STEERF_APPLY:-weight}          # metric | weight | branch
 STEERF_MAPPING=${STEERF_MAPPING:-minmax}      # minmax | winsor | rank
 STEERF_WINSOR_Q=${STEERF_WINSOR_Q:-0.01}
 STEERF_FORECAST=${STEERF_FORECAST:-mtp}       # mtp | oracle (free control arm)
-STEERF_HEADS=${STEERF_HEADS:-${STEER_ROOT}/checkpoints/mtp_heads_${model_tag}.pt}
-STEERF_CALIB=${STEERF_CALIB:-${STEER_ROOT}/checkpoints/mtp_calibration_${model_tag}.json}
+STEERF_HEADS=${STEERF_HEADS:-${STEER_ROOT}/checkpoints/mtp_heads_${model_tag}${SCALE:+-${SCALE}}.pt}
+STEERF_CALIB=${STEERF_CALIB:-${STEER_ROOT}/checkpoints/mtp_calibration_${model_tag}${SCALE:+-${SCALE}}.json}
 
 if [ "${STEERF_LAM}" != "0" ] && [ "${STEERF_FORECAST}" = "mtp" ] && [ ! -f "${STEERF_HEADS}" ]; then
     echo "FATAL: steerf_lam=${STEERF_LAM} needs MTP heads at ${STEERF_HEADS}."
@@ -45,6 +44,27 @@ if [ "${STEERF_LAM}" != "0" ] && [ "${STEERF_FORECAST}" = "mtp" ] && [ ! -f "${S
     exit 1
 fi
 
+# ---- scale profile ---------------------------------------------------------
+# SCALE=paper (default) reproduces the paper exactly. SCALE=smoke shrinks every
+# knob so the WHOLE pipeline (warm-up -> heads -> A_H -> reweighting -> eval ->
+# collect) can be proven end-to-end on a single GPU in about an hour; its
+# numbers are NOT comparable to the paper's tables and the run name says so.
+SCALE=${SCALE:-paper}
+case "${SCALE}" in
+  paper) TRAIN_BS=512; MINI_BS=32; RESP_LEN=3072; STEPS=200; VAL_N=32; TEST_FREQ=10; SAVE_FREQ=10 ;;
+  smoke) TRAIN_BS=16;  MINI_BS=8;  RESP_LEN=512;  STEPS=3;   VAL_N=2;  TEST_FREQ=1;  SAVE_FREQ=1  ;;
+  *) echo "FATAL: SCALE must be 'paper' or 'smoke', got '${SCALE}'"; exit 1 ;;
+esac
+
+# ---- memory profile --------------------------------------------------------
+# On one 80GB card, FSDP cannot shard, so full fine-tuning needs
+#   weights + grads + AdamW(fp32 master,m,v) = ~15x params in bytes
+#   1.5B -> 23 GiB (fits)   7B -> 114 GiB (does NOT fit)   14B -> 219 GiB (no)
+# OFFLOAD=1 pushes the optimizer state (and params) to CPU, which is what makes
+# 7B possible at all on a single card — at a large speed cost.
+OFFLOAD=${OFFLOAD:-0}
+if [ "${OFFLOAD}" = "1" ]; then PARAM_OFF=True; OPT_OFF=True; else PARAM_OFF=False; OPT_OFF=False; fi
+
 export WANDB_INIT_TIMEOUT=300
 export WANDB_TIMEOUT=300
 export WANDB_RETRY_DELAY=60
@@ -52,7 +72,7 @@ export WANDB_MAX_RETRIES=10
 
 save_contents="['hf_model']"
 current_datetime=$(date +"%Y%m%d_%H%M%S")
-run_name=${RUN_NAME:-"STEERF-extreme-${model_tag}-lam${STEERF_LAM}-k${STEERF_KAPPA}-g${STEERF_GAMMA_H}-${STEERF_APPLY}-${STEERF_MAPPING}_${current_datetime}"}
+run_name=${RUN_NAME:-"STEERF-extreme-${SCALE}-${model_tag}-lam${STEERF_LAM}-k${STEERF_KAPPA}-g${STEERF_GAMMA_H}-${STEERF_APPLY}-${STEERF_MAPPING}_${current_datetime}"}
 
 train_files="['$train_path']"
 test_files="['$test_path']"
@@ -61,15 +81,15 @@ python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
     data.train_files="$train_files" \
     data.val_files="$test_files" \
-    data.train_batch_size=512 \
+    data.train_batch_size=${TRAIN_BS} \
     data.max_prompt_length=1024 \
-    data.max_response_length=3072 \
+    data.max_response_length=${RESP_LEN} \
     data.filter_overlong_prompts=True \
     data.truncation='left'  \
     actor_rollout_ref.model.path=$model_path \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.model.use_remove_padding=True \
-    actor_rollout_ref.actor.ppo_mini_batch_size=32 \
+    actor_rollout_ref.actor.ppo_mini_batch_size=${MINI_BS} \
     actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=8 \
     actor_rollout_ref.actor.use_kl_loss=False \
     actor_rollout_ref.actor.kl_loss_coef=0.001 \
@@ -95,20 +115,20 @@ python3 -m verl.trainer.main_ppo \
     +actor_rollout_ref.actor.policy_loss.steerf_heads_path=${STEERF_HEADS} \
     +actor_rollout_ref.actor.policy_loss.steerf_calib_path=${STEERF_CALIB} \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
-    actor_rollout_ref.actor.fsdp_config.param_offload=False \
-    actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
+    actor_rollout_ref.actor.fsdp_config.param_offload=${PARAM_OFF} \
+    actor_rollout_ref.actor.fsdp_config.optimizer_offload=${OPT_OFF} \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=8 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=${TP_SIZE:-4} \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.6 \
     actor_rollout_ref.actor.checkpoint.save_contents=${save_contents} \
     actor_rollout_ref.rollout.n=8 \
-    actor_rollout_ref.rollout.val_kwargs.n=32 \
+    actor_rollout_ref.rollout.val_kwargs.n=${VAL_N} \
     actor_rollout_ref.rollout.val_kwargs.do_sample=True \
     actor_rollout_ref.rollout.val_kwargs.temperature=1.0 \
     actor_rollout_ref.rollout.val_kwargs.top_p=0.7 \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=8 \
-    actor_rollout_ref.ref.fsdp_config.param_offload=False \
+    actor_rollout_ref.ref.fsdp_config.param_offload=${PARAM_OFF} \
     algorithm.use_kl_in_reward=False \
     trainer.rollout_data_dir=${STEER_ROOT}/rollout_data/$project_name/$run_name \
     trainer.critic_warmup=0 \
@@ -117,14 +137,14 @@ python3 -m verl.trainer.main_ppo \
     trainer.experiment_name=$run_name \
     trainer.n_gpus_per_node=${N_GPUS:-8} \
     trainer.nnodes=1 \
-    trainer.save_freq=10 \
-    trainer.test_freq=10 \
+    trainer.save_freq=${SAVE_FREQ} \
+    trainer.test_freq=${TEST_FREQ} \
     trainer.total_epochs=10 \
-    trainer.total_training_steps=200 \
+    trainer.total_training_steps=${STEPS} \
     trainer.resume_mode=disable \
     +trainer.save_best_only=False \
     +trainer.delete_old_best_checkpoint=True \
     +trainer.save_after=80 \
-    +trainer.best_metric_key=val-core/aime_2024_dapo_boxed/acc/mean@32 \
+    +trainer.best_metric_key=val-core/aime_2024_dapo_boxed/acc/mean@${VAL_N} \
     ${SEED:+"+data.seed=${SEED}"} \
     "$@"

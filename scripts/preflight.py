@@ -158,22 +158,71 @@ def main() -> int:
                 FAILS.append(f"{mod}: installed but fails to import — {err}\n    fix: {fix}")
 
     # --- GPUs ----------------------------------------------------------------
-    n_want = int(os.environ.get("N_GPUS", "8"))
-    tp = int(os.environ.get("TP_SIZE", "4"))
+    # run_all_experiments.sh exports N_GPUS/TP_SIZE after detecting them; when
+    # preflight is run standalone, fall back to the detected count rather than
+    # the paper's 8, so a small node does not produce a spurious failure.
     try:
         import torch
         n_have = torch.cuda.device_count()
-        if n_have < n_want:
+        n_want = int(os.environ.get("N_GPUS") or n_have or 0)
+        tp = int(os.environ.get("TP_SIZE") or (4 if n_want >= 4 and n_want % 4 == 0
+                                               else 2 if n_want >= 2 and n_want % 2 == 0
+                                               else 1))
+        if n_have == 0:
             FAILS.append(
-                f"GPUs: found {n_have}, but N_GPUS={n_want} (paper setting is 8).\n"
-                f"    fix: run with N_GPUS={max(n_have,1)} TP_SIZE={1 if n_have < tp else tp} "
-                "— every script reads these envs. Expect far longer wall-clock "
-                "than the paper's 8xH20 budget."
+                "GPUs: torch sees no CUDA device — training cannot run here.\n"
+                "    fix: run this on the GPU node (or check CUDA_VISIBLE_DEVICES)."
+            )
+        elif n_want > n_have:
+            FAILS.append(
+                f"GPUs: N_GPUS={n_want} requested but only {n_have} visible.\n"
+                f"    fix: N_GPUS={n_have} TP_SIZE={tp if n_have % tp == 0 else 1} "
+                "(or unset both — run_all_experiments.sh auto-detects)."
             )
         elif n_want % tp != 0:
-            FAILS.append(f"N_GPUS={n_want} not divisible by TP_SIZE={tp}")
+            FAILS.append(f"N_GPUS={n_want} is not divisible by TP_SIZE={tp}")
+        elif n_have < 8:
+            WARNS.append(
+                f"GPUs: {n_have} visible; the paper used 8xH20. The optimisation is "
+                "unchanged (same global batch, more gradient accumulation) but "
+                "wall-clock scales ~inversely and 7B/14B full fine-tuning will "
+                "likely OOM.\n    fix (if it OOMs): start with "
+                "MATH_MODELS=Qwen/Qwen2.5-Math-1.5B SEEDS=1"
+            )
     except Exception as e:  # torch missing is already fatal via verl
         FAILS.append(f"torch/cuda probe failed: {e}")
+
+    # --- VRAM vs the models actually queued ----------------------------------
+    # FSDP on one GPU cannot shard, so full fine-tuning needs roughly
+    # 15 bytes/param (bf16 weights + bf16 grads + fp32 AdamW master/m/v) resident
+    # before activations, and the hybrid engine also hands vLLM its share.
+    PARAMS_B = {"1.5B": 1.54, "3B": 3.09, "7B": 7.62, "14B": 14.7}
+    try:
+        import torch
+        if torch.cuda.device_count() > 0:
+            vram = torch.cuda.get_device_properties(0).total_memory / 2**30
+            n = torch.cuda.device_count()
+            offload = os.environ.get("OFFLOAD", "0") == "1"
+            models = (os.environ.get("MATH_MODELS", "") + " "
+                      + os.environ.get("CODE_MODELS", "")).split() or ["Qwen/Qwen2.5-Math-7B"]
+            for m in models:
+                size = next((k for k in PARAMS_B if k in m), None)
+                if size is None:
+                    continue
+                p = PARAMS_B[size] * 1e9
+                bytes_per_param = 6 if offload else 15  # offload sends AdamW to CPU
+                static = p * bytes_per_param / 2**30 / max(n, 1)
+                if static > vram * 0.75:          # leave room for activations + vLLM
+                    hint = ("" if offload else
+                            "\n    try: OFFLOAD=1 (AdamW state to CPU, much slower)")
+                    WARNS.append(
+                        f"VRAM: {m} needs ~{static:.0f} GiB resident for full "
+                        f"fine-tuning across {n} GPU(s) of {vram:.0f} GiB — expect OOM."
+                        + hint +
+                        "\n    fits on one 80GB card: Qwen2.5-Math-1.5B (~23 GiB)"
+                    )
+    except Exception:
+        pass
 
     # --- datasets ------------------------------------------------------------
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

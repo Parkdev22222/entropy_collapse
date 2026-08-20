@@ -82,6 +82,37 @@ python scripts/preflight.py          # 큐를 걸기 전 환경 검증 (run_all�
 > 최적이다. 우리 스크립트 기본값은 **0.7**이며, 릴리스 재현이 필요하면
 > `TOKEN_WEIGHT_MIN=0.8`로 오버라이드한다.
 
+### 하드웨어 요구사항 — 먼저 읽을 것
+
+FSDP는 GPU 1장에서 **샤딩이 되지 않으므로**, 풀 파인튜닝의 상주 메모리는
+`weights(bf16) + grads(bf16) + AdamW(fp32 master+m+v)` ≈ **파라미터당 15바이트**다.
+활성화와 vLLM 몫은 여기에 더해진다.
+
+| 모델 | 상주(1 GPU) | A100 80GB ×1 | 8×H20 (논문) |
+|---|---|---|---|
+| Qwen2.5-Math-1.5B | ~23 GiB | ✅ 가능 | ✅ |
+| Qwen2.5-Math-7B | ~114 GiB | ⚠️ `OFFLOAD=1` 필요 (AdamW를 CPU로 → 매우 느림) | ✅ |
+| Qwen2.5-14B / Coder-14B | ~219 GiB | ❌ 불가 | ✅ |
+
+**A100 80GB 1장 기준 현실적인 범위**: Table 12(1.5B)만 논문 세팅 그대로 완주
+가능하며, 1런당 대략 **3–4일**(200스텝, 응답 3072, 512프롬프트×8롤아웃 기준)이
+걸린다. Table 3(7B)은 `OFFLOAD=1`로 돌릴 수는 있으나 수 주 규모, Table 4/5(14B·코드
+3종)는 사실상 불가다. `scripts/preflight.py`가 큐를 걸기 전에 이 판정을 출력한다.
+
+### 먼저 파이프라인부터 검증 — `SCALE=smoke`
+
+논문 규모로 며칠을 태우기 전에, 전체 경로(워밍업 → 헤드 → A_H → 재가중 → 평가 →
+수집)가 실제로 도는지 **1시간 안에** 확인한다:
+
+```bash
+SCALE=smoke bash run/run_all_experiments.sh
+```
+
+1.5B 고정, `train_batch=16`, 응답 512, 3스텝, val n=2, 1시드. 상태·로그는
+`experiments_state_smoke/`, `logs/experiments_smoke/`에 따로 쌓이고 런 이름에도
+`smoke`가 박히므로 **논문 표 숫자와 절대 섞이지 않는다.** 통과하면 그때
+`SCALE=paper`(기본)로 본 실험을 건다.
+
 ### 원샷 실행 — 전체 스위트
 
 ```bash
@@ -95,7 +126,9 @@ bash run/run_all_experiments.sh                     # 전부 (재개 가능)
 요약과 함께 `results/summary.tsv`(표에 넣을 숫자, 시드별 + 평균)를 쓴다.
 
 부분 실행 토글: `RUN_MATH/RUN_CODE/RUN_EXTREME/RUN_RL_ALGOS`(기본 1),
-`RUN_PASSK`(기본 0 — 고비용), `MATH_MODELS/CODE_MODELS/SEEDS`.
+`RUN_PASSK`(기본 0 — 고비용), `MATH_MODELS/CODE_MODELS/SEEDS`,
+`SCALE`(paper|smoke), `OFFLOAD`(1이면 옵티마이저·파라미터를 CPU로).
+`N_GPUS`/`TP_SIZE`는 **자동 감지**되므로 보통 지정할 필요가 없다.
 예: 7B 메인만 → `MATH_MODELS=Qwen/Qwen2.5-Math-7B RUN_CODE=0 RUN_EXTREME=0 RUN_RL_ALGOS=0 bash run/run_all_experiments.sh`
 
 체크포인트 선택(논문 규칙: AIME24 최고)은 `scripts/select_best_checkpoint.py`가
@@ -170,6 +203,19 @@ MODEL_PATH=<선택된 체크포인트>/hf_model bash run/eval_steerf.sh
 
 `STEERF_APPLY=weight`가 기본인 근거와 `mapping` 옵션의 동기(가중치 압축 실측)는
 `docs/STEERF_method.md` §12–§15.
+
+### 모델 다운로드
+
+`OSError: Can't load the model for 'Qwen/...'`는 대개 **HF 캐시에 받다 만 파일**이
+남은 것이다(익명 요청은 rate limit에 걸려 중간에 끊긴다). 해당 캐시를 지우고
+토큰과 함께 완전히 받은 뒤 로컬 경로를 쓰면 확실하다:
+
+```bash
+export HF_TOKEN=hf_xxx
+rm -rf ~/.cache/huggingface/hub/models--Qwen--Qwen2.5-Math-7B
+huggingface-cli download Qwen/Qwen2.5-Math-7B --local-dir /workspace/models/Qwen2.5-Math-7B
+MODEL_PATH=/workspace/models/Qwen2.5-Math-7B bash run/run_steerf.sh
+```
 
 ## 반드시 지킬 것
 

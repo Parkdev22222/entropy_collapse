@@ -15,16 +15,23 @@ export PYTHONPATH="${STEER_ROOT}:$PYTHONPATH"
 
 model_path=${MODEL_PATH:-"Qwen/Qwen2.5-Math-7B"}
 model_tag=$(basename "${model_path}")
-N_STEPS=${N_STEPS:-8}
-dump_dir=${STEER_ROOT}/rollout_data/warmup/${model_tag}
+SCALE=${SCALE:-paper}
+case "${SCALE}" in
+  paper) N_STEPS=${N_STEPS:-8};  TRAIN_BS=512; RESP_LEN=3072 ;;
+  smoke) N_STEPS=${N_STEPS:-2};  TRAIN_BS=16;  RESP_LEN=512  ;;
+  *) echo "FATAL: SCALE must be 'paper' or 'smoke'"; exit 1 ;;
+esac
+OFFLOAD=${OFFLOAD:-0}
+if [ "${OFFLOAD}" = "1" ]; then PARAM_OFF=True; else PARAM_OFF=False; fi
+dump_dir=${STEER_ROOT}/rollout_data/warmup/${model_tag}${SCALE:+-${SCALE}}
 
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
     data.train_files="['${TRAIN_PATH:-${STEER_ROOT}/datasets/DAPO-Math-17k.parquet}']" \
     data.val_files="['${TEST_PATH:-${STEER_ROOT}/datasets/aime24.parquet}']" \
-    data.train_batch_size=512 \
+    data.train_batch_size=${TRAIN_BS} \
     data.max_prompt_length=1024 \
-    data.max_response_length=3072 \
+    data.max_response_length=${RESP_LEN} \
     data.filter_overlong_prompts=True \
     data.truncation='left' \
     actor_rollout_ref.model.path=$model_path \
@@ -35,6 +42,8 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.use_kl_loss=False \
     actor_rollout_ref.actor.entropy_coeff=0 \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
+    actor_rollout_ref.actor.fsdp_config.param_offload=${PARAM_OFF} \
+    actor_rollout_ref.actor.fsdp_config.optimizer_offload=${PARAM_OFF} \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=8 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=${TP_SIZE:-4} \
     actor_rollout_ref.rollout.name=vllm \
@@ -58,7 +67,7 @@ python3 -m verl.trainer.main_ppo \
 
 python3 ${STEER_ROOT}/scripts/phase0_collect_rollouts.py \
     "${dump_dir}" \
-    --out ${STEER_ROOT}/rollout_data/warmup/${model_tag}/rollouts.jsonl \
+    --out ${dump_dir}/rollouts.jsonl \
     --min-chars 32
 
-echo "warmup rollouts: ${STEER_ROOT}/rollout_data/warmup/${model_tag}/rollouts.jsonl"
+echo "warmup rollouts: ${dump_dir}/rollouts.jsonl"
