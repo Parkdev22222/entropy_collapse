@@ -41,6 +41,9 @@ export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:Tr
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STEER_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
+# shellcheck source=run/_gpu_defaults.sh
+. "${SCRIPT_DIR}/_gpu_defaults.sh"
+
 export PYTHONPATH="${STEER_ROOT}:$PYTHONPATH"
 echo "Current VERL path:"
 python3 -c "import verl; print(verl.__file__)"
@@ -136,23 +139,23 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.clip_ratio_low=0.2 \
     actor_rollout_ref.actor.clip_ratio_c=10.0 \
     actor_rollout_ref.actor.policy_loss.loss_mode=entropy_control \
-    +actor_rollout_ref.actor.policy_loss.token_weight_min=${TOKEN_WEIGHT_MIN:-0.7} \
-    +actor_rollout_ref.actor.policy_loss.token_weight_max=1.0 \
-    +actor_rollout_ref.actor.policy_loss.linear=False \
-    +actor_rollout_ref.actor.policy_loss.steerf_lam=${STEERF_LAM} \
-    +actor_rollout_ref.actor.policy_loss.steerf_kappa=${STEERF_KAPPA} \
-    +actor_rollout_ref.actor.policy_loss.steerf_gamma_h=${STEERF_GAMMA_H} \
-    +actor_rollout_ref.actor.policy_loss.steerf_clip_c=${STEERF_CLIP_C} \
-    +actor_rollout_ref.actor.policy_loss.steerf_norm=${STEERF_NORM} \
-    +actor_rollout_ref.actor.policy_loss.steerf_baseline=${STEERF_BASELINE} \
-    +actor_rollout_ref.actor.policy_loss.steerf_apply=${STEERF_APPLY} \
-    +actor_rollout_ref.actor.policy_loss.steerf_mapping=${STEERF_MAPPING} \
-    +actor_rollout_ref.actor.policy_loss.steerf_winsor_q=${STEERF_WINSOR_Q} \
-    +actor_rollout_ref.actor.policy_loss.steerf_forecast=${STEERF_FORECAST} \
-    +actor_rollout_ref.actor.policy_loss.steerf_heads_path=${STEERF_HEADS} \
-    +actor_rollout_ref.actor.policy_loss.steerf_calib_path=${STEERF_CALIB} \
+    ++actor_rollout_ref.actor.policy_loss.token_weight_min=${TOKEN_WEIGHT_MIN:-0.7} \
+    ++actor_rollout_ref.actor.policy_loss.token_weight_max=1.0 \
+    ++actor_rollout_ref.actor.policy_loss.linear=False \
+    ++actor_rollout_ref.actor.policy_loss.steerf_lam=${STEERF_LAM} \
+    ++actor_rollout_ref.actor.policy_loss.steerf_kappa=${STEERF_KAPPA} \
+    ++actor_rollout_ref.actor.policy_loss.steerf_gamma_h=${STEERF_GAMMA_H} \
+    ++actor_rollout_ref.actor.policy_loss.steerf_clip_c=${STEERF_CLIP_C} \
+    ++actor_rollout_ref.actor.policy_loss.steerf_norm=${STEERF_NORM} \
+    ++actor_rollout_ref.actor.policy_loss.steerf_baseline=${STEERF_BASELINE} \
+    ++actor_rollout_ref.actor.policy_loss.steerf_apply=${STEERF_APPLY} \
+    ++actor_rollout_ref.actor.policy_loss.steerf_mapping=${STEERF_MAPPING} \
+    ++actor_rollout_ref.actor.policy_loss.steerf_winsor_q=${STEERF_WINSOR_Q} \
+    ++actor_rollout_ref.actor.policy_loss.steerf_forecast=${STEERF_FORECAST} \
+    ++actor_rollout_ref.actor.policy_loss.steerf_heads_path=${STEERF_HEADS} \
+    ++actor_rollout_ref.actor.policy_loss.steerf_calib_path=${STEERF_CALIB} \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
-    +actor_rollout_ref.actor.entropy_from_logits_with_chunking=True \
+    ++actor_rollout_ref.actor.entropy_from_logits_with_chunking=True \
     actor_rollout_ref.actor.fsdp_config.param_offload=${PARAM_OFF} \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=${OPT_OFF} \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=8 \
@@ -180,9 +183,9 @@ python3 -m verl.trainer.main_ppo \
     trainer.total_epochs=10 \
     trainer.total_training_steps=${STEPS} \
     trainer.resume_mode=disable \
-    +trainer.save_best_only=False \
-    +trainer.delete_old_best_checkpoint=True \
-    +trainer.save_after=80 \
-    +trainer.best_metric_key=val-core/aime_2024_dapo_boxed/acc/mean@${VAL_N} \
-    ${SEED:+"+data.seed=${SEED}"} \
+    ++trainer.save_best_only=False \
+    ++trainer.delete_old_best_checkpoint=True \
+    ++trainer.save_after=80 \
+    ++trainer.best_metric_key=val-core/aime_2024_dapo_boxed/acc/mean@${VAL_N} \
+    ${SEED:+"++data.seed=${SEED}"} \
     "$@"

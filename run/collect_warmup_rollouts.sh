@@ -11,6 +11,9 @@ set -xe
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STEER_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+# shellcheck source=run/_gpu_defaults.sh
+. "${SCRIPT_DIR}/_gpu_defaults.sh"
 export PYTHONPATH="${STEER_ROOT}:$PYTHONPATH"
 export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
 
@@ -43,7 +46,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.use_kl_loss=False \
     actor_rollout_ref.actor.entropy_coeff=0 \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
-    +actor_rollout_ref.actor.entropy_from_logits_with_chunking=True \
+    ++actor_rollout_ref.actor.entropy_from_logits_with_chunking=True \
     actor_rollout_ref.actor.fsdp_config.param_offload=${PARAM_OFF} \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=${PARAM_OFF} \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=8 \

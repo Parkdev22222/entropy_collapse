@@ -65,36 +65,9 @@ if [ "${SCALE}" = "smoke" ]; then
 fi
 
 # ---- GPU topology: detect, don't assume -------------------------------------
-# Each run script defaults to the paper's 8 GPUs / TP=4. Relying on the caller
-# to remember `N_GPUS=1 TP_SIZE=1 bash ...` on every invocation is how a re-run
-# ends up asking for 8 GPUs on a 1-GPU box and dying in verl's resource pool
-# check. Detect once here and export, so a bare `bash run/run_all_experiments.sh`
-# is correct on any node; an explicit N_GPUS/TP_SIZE still wins.
-if [ -z "${N_GPUS:-}" ]; then
-    N_GPUS=$(python3 -c "import torch;print(torch.cuda.device_count())" 2>/dev/null || echo 0)
-    [ "${N_GPUS}" = "0" ] && N_GPUS=1
-fi
-if [ -z "${TP_SIZE:-}" ]; then
-    TP_SIZE=1
-    for t in 4 2; do
-        if [ $((N_GPUS % t)) -eq 0 ] && [ "${N_GPUS}" -ge "$t" ]; then TP_SIZE=$t; break; fi
-    done
-fi
-export N_GPUS TP_SIZE
-echo "[all] GPU topology: N_GPUS=${N_GPUS} TP_SIZE=${TP_SIZE}"
-
-# vLLM reserves gpu_memory_utilization x VRAM as a pool, and verl only moves the
-# FSDP model off the GPU during generation when param_offload=True. On one card
-# the paper's 0.6 therefore has to coexist with weights + AdamW: measured 67.7 of
-# ~73 addressable GiB for 1.5B, which OOMs on any fragmentation. Lower it when
-# there is a single GPU — this is an inference-engine memory knob only, it does
-# not change any training result.
-if [ "${N_GPUS}" -eq 1 ] && [ -z "${GPU_MEM_UTIL:-}" ]; then
-    GPU_MEM_UTIL=0.35
-    echo "[all] single GPU: GPU_MEM_UTIL=${GPU_MEM_UTIL} (paper default 0.6 does not fit"
-    echo "[all]   alongside the resident optimizer state; results are unaffected)"
-fi
-export GPU_MEM_UTIL=${GPU_MEM_UTIL:-0.6}
+# shellcheck source=run/_gpu_defaults.sh
+. "${SCRIPT_DIR}/_gpu_defaults.sh"
+echo "[all] GPU topology: N_GPUS=${N_GPUS} TP_SIZE=${TP_SIZE} GPU_MEM_UTIL=${GPU_MEM_UTIL}"
 if [ "${N_GPUS}" -lt 8 ]; then
     echo "[all] NOTE: the paper used 8xH20. The optimisation is unchanged on fewer"
     echo "[all]       GPUs (same global batch, more gradient accumulation), but"

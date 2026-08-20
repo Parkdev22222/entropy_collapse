@@ -19,6 +19,9 @@ set -x
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STEER_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+# shellcheck source=run/_gpu_defaults.sh
+. "${SCRIPT_DIR}/_gpu_defaults.sh"
 export PYTHONPATH="${STEER_ROOT}:$PYTHONPATH"
 
 export PYTHONHASHSEED=42
