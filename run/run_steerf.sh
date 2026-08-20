@@ -81,6 +81,14 @@ case "${SCALE}" in
   *) echo "FATAL: SCALE must be 'paper' or 'smoke', got '${SCALE}'"; exit 1 ;;
 esac
 
+# ---- memory: chunked entropy (numerically identical, ~27 GiB cheaper) -------
+# The log-prob pass materialises fp32 logits AND fp32 softmax probs over
+# [micro_bs*seq, V] — 29.5 GiB for 8x3250 at V=152k, on top of the 7.4 GiB bf16
+# logits. verl's entropy_from_logits_with_chunking computes the same
+# lse - <p, l> in 2048-row chunks; verified bit-identical, peak 36.8 -> 9.7 GiB.
+# micro_batch_size_per_gpu stays at 8 because STEER's min-max is computed
+# per micro-batch — shrinking it would change the method, not just the memory.
+
 # ---- memory profile --------------------------------------------------------
 # On one 80GB card, FSDP cannot shard, so full fine-tuning needs
 #   weights + grads + AdamW(fp32 master,m,v) = ~15x params in bytes
@@ -140,12 +148,13 @@ python3 -m verl.trainer.main_ppo \
     +actor_rollout_ref.actor.policy_loss.steerf_heads_path=${STEERF_HEADS} \
     +actor_rollout_ref.actor.policy_loss.steerf_calib_path=${STEERF_CALIB} \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
+    +actor_rollout_ref.actor.entropy_from_logits_with_chunking=True \
     actor_rollout_ref.actor.fsdp_config.param_offload=${PARAM_OFF} \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=${OPT_OFF} \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=8 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=${TP_SIZE:-4} \
     actor_rollout_ref.rollout.name=vllm \
-    actor_rollout_ref.rollout.gpu_memory_utilization=0.6 \
+    actor_rollout_ref.rollout.gpu_memory_utilization=${GPU_MEM_UTIL:-0.6} \
     actor_rollout_ref.actor.checkpoint.save_contents=${save_contents} \
     actor_rollout_ref.rollout.n=8 \
     actor_rollout_ref.rollout.val_kwargs.n=${VAL_N} \

@@ -123,12 +123,13 @@ python3 -m verl.trainer.main_ppo \
     +actor_rollout_ref.actor.policy_loss.steerf_heads_path=${STEERF_HEADS} \
     +actor_rollout_ref.actor.policy_loss.steerf_calib_path=${STEERF_CALIB} \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
+    +actor_rollout_ref.actor.entropy_from_logits_with_chunking=True \
     actor_rollout_ref.actor.fsdp_config.param_offload=${PARAM_OFF} \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=${OPT_OFF} \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=8 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=${TP_SIZE:-4} \
     actor_rollout_ref.rollout.name=vllm \
-    actor_rollout_ref.rollout.gpu_memory_utilization=0.6 \
+    actor_rollout_ref.rollout.gpu_memory_utilization=${GPU_MEM_UTIL:-0.6} \
     actor_rollout_ref.actor.checkpoint.save_contents=${save_contents} \
     actor_rollout_ref.rollout.n=8 \
     actor_rollout_ref.rollout.val_kwargs.n=${VAL_N} \

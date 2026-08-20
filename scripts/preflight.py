@@ -212,14 +212,19 @@ def main() -> int:
                 p = PARAMS_B[size] * 1e9
                 bytes_per_param = 6 if offload else 15  # offload sends AdamW to CPU
                 static = p * bytes_per_param / 2**30 / max(n, 1)
-                if static > vram * 0.75:          # leave room for activations + vLLM
+                # activations: bf16 logits [mbs*seq, V] + chunked entropy scratch.
+                # micro_batch_size_per_gpu is fixed at 8 by the method (STEER's
+                # min-max is per micro-batch), so this term does not shrink.
+                act = (8 * 3250 * 152064 * 2 + 2 * 2048 * 152064 * 4) / 2**30
+                if static + act > vram * 0.92:
                     hint = ("" if offload else
                             "\n    try: OFFLOAD=1 (AdamW state to CPU, much slower)")
                     WARNS.append(
-                        f"VRAM: {m} needs ~{static:.0f} GiB resident for full "
-                        f"fine-tuning across {n} GPU(s) of {vram:.0f} GiB — expect OOM."
+                        f"VRAM: {m} peaks at ~{static + act:.0f} GiB per GPU "
+                        f"({static:.0f} static + {act:.0f} activations) across "
+                        f"{n} GPU(s) of {vram:.0f} GiB — expect OOM."
                         + hint +
-                        "\n    fits on one 80GB card: Qwen2.5-Math-1.5B (~23 GiB)"
+                        "\n    also try: GPU_MEM_UTIL=0.4 (less reserved for vLLM)"
                     )
     except Exception:
         pass

@@ -84,20 +84,33 @@ python scripts/preflight.py          # 큐를 걸기 전 환경 검증 (run_all�
 
 ### 하드웨어 요구사항 — 먼저 읽을 것
 
-FSDP는 GPU 1장에서 **샤딩이 되지 않으므로**, 풀 파인튜닝의 상주 메모리는
-`weights(bf16) + grads(bf16) + AdamW(fp32 master+m+v)` ≈ **파라미터당 15바이트**다.
-활성화와 vLLM 몫은 여기에 더해진다.
+FSDP는 가중치·그래디언트·옵티마이저를 **랭크 수로 나눠** 갖는다. 따라서 GPU
+1장이면 샤딩 이득이 0이고 상주 메모리는 `bf16 가중치 + bf16 그래디언트 +
+fp32 AdamW(master·m·v)` ≈ **파라미터당 15바이트**다. 여기에 활성화가 더해지는데,
+로그확률 패스의 로짓 텐서는 **샤딩되지 않는다**.
 
-| 모델 | 상주(1 GPU) | A100 80GB ×1 | 8×H20 (논문) |
-|---|---|---|---|
-| Qwen2.5-Math-1.5B | ~23 GiB | ✅ 가능 | ✅ |
-| Qwen2.5-Math-7B | ~114 GiB | ⚠️ `OFFLOAD=1` 필요 (AdamW를 CPU로 → 매우 느림) | ✅ |
-| Qwen2.5-14B / Coder-14B | ~219 GiB | ❌ 불가 | ✅ |
+활성화 항은 `entropy_from_logits_with_chunking=True`(전 스크립트 기본값)로
+**36.8 → 9.7 GiB**로 줄였다. verl의 청크 구현은 같은 `lse − ⟨p, l⟩`를 2048행씩
+계산할 뿐이라 **비트 단위로 동일**하다(검증 완료). 반면
+`ppo_micro_batch_size_per_gpu`는 8로 고정해야 한다 — STEER의 min-max가
+마이크로배치 단위라 이 값을 줄이면 메모리가 아니라 **방법 자체가 바뀐다**.
 
-**A100 80GB 1장 기준 현실적인 범위**: Table 12(1.5B)만 논문 세팅 그대로 완주
-가능하며, 1런당 대략 **3–4일**(200스텝, 응답 3072, 512프롬프트×8롤아웃 기준)이
-걸린다. Table 3(7B)은 `OFFLOAD=1`로 돌릴 수는 있으나 수 주 규모, Table 4/5(14B·코드
-3종)는 사실상 불가다. `scripts/preflight.py`가 큐를 걸기 전에 이 판정을 출력한다.
+GPU 1장 기준 피크(정적 + 활성화 9.7 GiB):
+
+| 모델 | 1장 | 1장 `OFFLOAD=1` | A100 80GB ×1 | **H200 141GB ×1** |
+|---|---|---|---|---|
+| Qwen2.5-Math-1.5B | 31 GiB | 18 GiB | ✅ 여유 | ✅ 여유 |
+| Qwen2.5-Math-7B | 116 GiB | 52 GiB | ⚠️ `OFFLOAD=1` 필요 | ✅ **그대로 가능** (여유 ~5 GiB — 빠듯하면 `GPU_MEM_UTIL=0.4` 또는 `OFFLOAD=1`) |
+| Qwen2.5-14B / Coder-14B | 215 GiB | 92 GiB | ❌ (4장 필요) | ⚠️ `OFFLOAD=1`로 가능 |
+
+`OFFLOAD=1`은 AdamW 상태와 파라미터를 CPU로 내린다 — 메모리는 크게 줄지만
+스텝 시간이 상당히 늘어난다. `GPU_MEM_UTIL`(기본 0.6)은 vLLM이 선점하는 비율로,
+한 장에 vLLM과 FSDP가 같이 올라갈 때 조정 여지가 가장 큰 값이다.
+
+**요약**: A100 80GB ×1이면 사실상 1.5B(Table 12)만, **H200 141GB ×1이면 7B
+(Table 3)까지 오프로드 없이** 닿는다. 14B와 코드 3종(Table 4·5)은 오프로드를
+쓰더라도 시간이 문제이므로 다중 GPU 노드를 권한다. 실제 박스 기준 판정은
+`scripts/preflight.py`가 큐를 걸기 전에 출력한다.
 
 ### 먼저 파이프라인부터 검증 — `SCALE=smoke`
 
@@ -127,7 +140,8 @@ bash run/run_all_experiments.sh                     # 전부 (재개 가능)
 
 부분 실행 토글: `RUN_MATH/RUN_CODE/RUN_EXTREME/RUN_RL_ALGOS`(기본 1),
 `RUN_PASSK`(기본 0 — 고비용), `MATH_MODELS/CODE_MODELS/SEEDS`,
-`SCALE`(paper|smoke), `OFFLOAD`(1이면 옵티마이저·파라미터를 CPU로).
+`SCALE`(paper|smoke), `OFFLOAD`(1이면 옵티마이저·파라미터를 CPU로),
+`GPU_MEM_UTIL`(vLLM 선점 비율, 기본 0.6).
 `N_GPUS`/`TP_SIZE`는 **자동 감지**되므로 보통 지정할 필요가 없다.
 예: 7B 메인만 → `MATH_MODELS=Qwen/Qwen2.5-Math-7B RUN_CODE=0 RUN_EXTREME=0 RUN_RL_ALGOS=0 bash run/run_all_experiments.sh`
 
