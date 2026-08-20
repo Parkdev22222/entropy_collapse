@@ -51,6 +51,13 @@ LOG_DIR=${LOG_DIR:-${STEER_ROOT}/logs/experiments}
 mkdir -p "${STATE_DIR}" "${LOG_DIR}" "${STEER_ROOT}/results"
 FAILED=()
 
+# Fail fast on missing deps / wrong GPU count BEFORE queueing anything —
+# every check in preflight.py is a failure mode that has actually happened.
+# Skip with PREFLIGHT=0 (not recommended).
+if [ "${PREFLIGHT:-1}" = "1" ]; then
+    python3 "${STEER_ROOT}/scripts/preflight.py" || exit 1
+fi
+
 # ---------------------------------------------------------------- stage
 # stage <name> <cmd...>   — run once, log to LOG_DIR/<name>.log, resume-safe.
 stage () {

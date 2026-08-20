@@ -24,10 +24,20 @@ H_togo  = Σ_{k=1..κ} γ_H^k · H( p_MTP(y_{t+k} | s) )  # MTP 헤드 예보
 ## Setup
 
 ```bash
-pip install -e .          # verl 포크 + steer_f 를 함께 설치
-                          # (Ray 워커가 steer_f 를 import 하므로 PYTHONPATH 의존 금지)
+pip install -e .                     # verl 포크 + steer_f (base 의존성만!)
+pip install "vllm==0.8.5.post1"      # 롤아웃 백엔드 — base에 포함되지 않는 [vllm] extra.
+                                     # 빠뜨리면 모든 스테이지가 ~50초 만에
+                                     # "ModuleNotFoundError: msgspec" 으로 죽는다.
+pip install math-verify word2number tensorboard==2.18.0
+pip install flash-attn --no-build-isolation   # torch/cuda/py에 맞는 프리빌트 휠 권장
 python -m pytest tests/ -q
+python scripts/preflight.py          # 큐를 걸기 전 환경 검증 (run_all이 자동 수행)
 ```
+
+`pip install -e .`가 필수인 이유: Ray 워커는 `steer_f`를 절대 경로로 import하며,
+재사용된 raylet에는 부모 셸의 PYTHONPATH가 닿지 않는다 (실측된 사고).
+`run/run_all_experiments.sh`는 시작 시 `scripts/preflight.py`로 위 전부를
+검사하고, 하나라도 빠지면 **아무것도 큐에 넣지 않고** 수정 방법과 함께 멈춘다.
 
 ## 실험 프로토콜 — 논문과의 패리티
 
