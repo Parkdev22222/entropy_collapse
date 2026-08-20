@@ -29,7 +29,12 @@ pip install "vllm==0.8.5.post1"      # 롤아웃 백엔드 — base에 포함되
                                      # 빠뜨리면 모든 스테이지가 ~50초 만에
                                      # "ModuleNotFoundError: msgspec" 으로 죽는다.
 pip install math-verify word2number tensorboard==2.18.0
-pip install flash-attn --no-build-isolation   # torch/cuda/py에 맞는 프리빌트 휠 권장
+# flash-attn: verl의 dp_actor가 CUDA에서 무조건 import하므로 **필수**다.
+# 반드시 torch 버전 + CUDA + python + cxx11-abi가 전부 맞는 휠을 써야 한다
+# (안 맞으면 "undefined symbol: _ZN3c105Error..."로 워커가 죽는다).
+# 내 torch 빌드에 맞는 정확한 휠 이름은 scripts/preflight.py가 찍어 준다:
+python -c "import torch; print(torch.__version__, torch.version.cuda, torch.compiled_with_cxx11_abi())"
+pip install https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE-cp312-cp312-linux_x86_64.whl
 python -m pytest tests/ -q
 python scripts/preflight.py          # 큐를 걸기 전 환경 검증 (run_all이 자동 수행)
 ```
@@ -41,7 +46,7 @@ python scripts/preflight.py          # 큐를 걸기 전 환경 검증 (run_all�
 | torch | 2.6.0+cu124 | vllm 0.8.5가 요구 |
 | vllm | 0.8.5.post1 | 상위 버전은 verl 0.4.1 rollout 어댑터와 불일치 |
 | **ray[default]** | **2.46.0** | ≥2.47은 대시보드가 opentelemetry-prometheus를 import — vllm이 핀한 구버전 semconv와 충돌해 **raylet 등록 타임아웃**으로 죽는다 (`pip install "ray[default]==2.46.0" && ray stop --force`) |
-| flash-attn | 2.7.4.post1 | 프리빌트 휠 기준 |
+| flash-attn | 2.7.4.post1 | **휠의 cxx11abi가 torch와 일치해야 한다.** PyPI의 `pip install flash-attn`은 ABI가 어긋난 휠을 집어올 수 있다 — Dao-AILab 릴리스에서 `cu12torch2.6cxx11abiFALSE-cp312` 처럼 4요소가 맞는 휠을 직접 지정할 것 |
 | transformers | 4.51.3 | |
 | tensorboard | 2.18.0 | 상위 버전은 protobuf 충돌 이력 |
 

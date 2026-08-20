@@ -15,10 +15,28 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import os
+import subprocess
 import sys
 
 FAILS: list[str] = []
 WARNS: list[str] = []
+
+
+def importable(mod: str, timeout: int = 120):
+    """Actually import `mod` in a subprocess; return None on success else the error.
+
+    find_spec() only proves a file is on disk. The failures that cost the most
+    time here are *installed but broken*: a flash-attn wheel built against a
+    different torch C++ ABI imports fine as a spec and dies with `undefined
+    symbol: _ZN3c105Error...` the moment a Ray worker touches it, ~90 seconds
+    into a stage. A subprocess also survives the abort/segfault cases.
+    """
+    r = subprocess.run([sys.executable, "-c", f"import {mod}"],
+                       capture_output=True, text=True, timeout=timeout)
+    if r.returncode == 0:
+        return None
+    tail = (r.stderr.strip().splitlines() or ["(no stderr)"])[-1]
+    return tail
 
 
 def need(mod: str, fix: str, why: str) -> None:
@@ -29,6 +47,30 @@ def need(mod: str, fix: str, why: str) -> None:
 def want(mod: str, fix: str, why: str) -> None:
     if importlib.util.find_spec(mod) is None:
         WARNS.append(f"{mod}: {why}\n    fix: {fix}")
+
+
+def _flash_attn_hint() -> str:
+    """Name the exact wheel for this interpreter's torch build."""
+    try:
+        import torch
+        ver, cuda = torch.__version__.split("+")[0], (torch.version.cuda or "").replace(".", "")
+        abi = "TRUE" if torch.compiled_with_cxx11_abi() else "FALSE"
+        mm = ".".join(ver.split(".")[:2])
+        py = f"cp{sys.version_info.major}{sys.version_info.minor}"
+        whl = (f"flash_attn-2.7.4.post1+cu{cuda[:2]}torch{mm}cxx11abi{abi}"
+               f"-{py}-{py}-linux_x86_64.whl")
+        return (
+            f"    detected: torch {torch.__version__}, cxx11abi={abi}, python {py}\n"
+            f"    fix: pip uninstall -y flash-attn && pip install \\\n"
+            f"           https://github.com/Dao-AILab/flash-attention/releases/download/"
+            f"v2.7.4.post1/{whl}\n"
+            "    (no matching wheel / offline? build against the installed torch instead:\n"
+            "     MAX_JOBS=4 pip install flash-attn==2.7.4.post1 --no-build-isolation "
+            "— 30-90 min)"
+        )
+    except Exception:
+        return ("    fix: install the flash-attn 2.7.4.post1 wheel matching your "
+                "torch/cuda/python/cxx11-abi from the Dao-AILab releases page")
 
 
 def main() -> int:
@@ -52,9 +94,6 @@ def main() -> int:
     need("math_verify", "pip install math-verify", "answer verification for eval")
 
     # --- soft requirements -------------------------------------------------
-    want("flash_attn", "pip install flash-attn --no-build-isolation "
-         "(use the prebuilt wheel matching your torch/cuda/python)",
-         "training runs but much slower / may OOM at paper batch sizes")
     want("tensorboard", "pip install tensorboard==2.18.0",
          "scripts/select_best_checkpoint.py reads tb events for the paper's "
          "checkpoint-selection rule")
@@ -88,6 +127,35 @@ def main() -> int:
                 "    (2.46 predates the opentelemetry-prometheus dependency and is "
                 "the combination proven with vllm 0.8.5.post1 / torch 2.6)"
             )
+
+    # --- installed-but-broken imports ----------------------------------------
+    # verl/workers/actor/dp_actor.py imports flash_attn.bert_padding at module
+    # level whenever CUDA is available, so it is a HARD requirement regardless
+    # of use_remove_padding — and the usual failure is a wheel/torch C++ ABI
+    # mismatch, which only a real import reveals.
+    if importlib.util.find_spec("flash_attn") is None:
+        FAILS.append(
+            "flash_attn: not installed, but verl's dp_actor imports\n"
+            "    flash_attn.bert_padding unconditionally on CUDA.\n"
+            + _flash_attn_hint()
+        )
+    else:
+        err = importable("flash_attn")
+        if err:
+            FAILS.append(
+                f"flash_attn: installed but fails to import — {err}\n"
+                "    ('undefined symbol: _ZN3c105Error...' means the wheel's C++ ABI\n"
+                "     does not match this torch build.)\n"
+                + _flash_attn_hint()
+            )
+
+    for mod, fix in (("msgspec", 'pip install "vllm==0.8.5.post1"'),
+                     ("word2number", "pip install word2number"),
+                     ("math_verify", "pip install math-verify")):
+        if importlib.util.find_spec(mod) is not None:
+            err = importable(mod, timeout=60)
+            if err:
+                FAILS.append(f"{mod}: installed but fails to import — {err}\n    fix: {fix}")
 
     # --- GPUs ----------------------------------------------------------------
     n_want = int(os.environ.get("N_GPUS", "8"))
