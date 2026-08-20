@@ -1,0 +1,37 @@
+STEER-F: re-enable the training-rollout dump.
+
+STEER's fork decodes the prompts/responses and then leaves the
+`_dump_generations` call commented out, so `trainer.rollout_data_dir` is
+accepted on the command line and silently produces nothing.  Phase 1's head
+warm-up consumes exactly that dump (README "산출물 → Phase 1 입력"), so without
+this the pipeline has no input at Phase 1 and the Phase 0 gate produces no
+artefact.
+
+Uncommenting is enough: `reward_extra_infos_dict` is already bound in this
+scope (assigned from `compute_reward` earlier in the same iteration), and
+`_dump_generations` is the fork's own helper, used unmodified by `_validate`.
+
+--- a/verl/trainer/ppo/ray_trainer.py
+--- a/verl/trainer/ppo/ray_trainer.py
++++ b/verl/trainer/ppo/ray_trainer.py
+@@ -1324,13 +1324,13 @@
+                             inputs = self.tokenizer.batch_decode(batch.batch["prompts"], skip_special_tokens=True)
+                             outputs = self.tokenizer.batch_decode(batch.batch["responses"], skip_special_tokens=True)
+                             scores = batch.batch["token_level_scores"].sum(-1).cpu().tolist()
+-                            # self._dump_generations(
+-                            #     inputs=inputs,
+-                            #     outputs=outputs,
+-                            #     scores=scores,
+-                            #     reward_extra_infos_dict=reward_extra_infos_dict,
+-                            #     dump_path=rollout_data_dir,
+-                            # )
++                            self._dump_generations(
++                                inputs=inputs,
++                                outputs=outputs,
++                                scores=scores,
++                                reward_extra_infos_dict=reward_extra_infos_dict,
++                                dump_path=rollout_data_dir,
++                            )
+ 
+                     # 6. validation
+                     # validate

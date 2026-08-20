@@ -1,0 +1,8 @@
+[watchdog 08-18 14:17:22] main_ppo alive but GPU empty (1/5) — util=0% mem=4MiB
+[watchdog 08-18 22:04:00] main_ppo alive but GPU empty (1/5) — util=0% mem=4MiB
+[watchdog 08-19 01:03:27] main_ppo alive but GPU empty (1/5) — util=0% mem=4MiB
+[watchdog 08-19 04:00:53] main_ppo alive but GPU empty (1/5) — util=0% mem=4MiB
+[watchdog 08-19 11:51:59] GPU idle (1/6) — util=0% mem=0MiB, 8/48 runs done
+[watchdog 08-19 11:52:59] main_ppo alive but GPU empty (1/5) — util=0% mem=4MiB
+[watchdog 08-19 19:46:11] main_ppo alive but GPU empty (1/5) — util=4% mem=4MiB
+[watchdog 08-19 19:47:11] main_ppo alive but GPU empty (2/5) — util=0% mem=4MiB

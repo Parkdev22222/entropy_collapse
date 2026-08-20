@@ -46,6 +46,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from steer_f.mtp_heads import MTPHeads, mtp_ce_loss  # noqa: E402
+from steer_f.mtp_sequential import SequentialMTPHeads, seq_mtp_ce_loss  # noqa: E402
 
 
 class RolloutTextDataset(Dataset):
@@ -98,6 +99,11 @@ def build_argparser():
     p.add_argument("--num-heads", type=int, default=8,
                    help="K. Train the largest K you may want; kappa is chosen post hoc")
     p.add_argument("--head-hidden", type=int, default=1024)
+    p.add_argument("--sequential", action="store_true",
+                   help="DeepSeek-V3 style heads: depth k consumes Emb(y_{t+k}) as well "
+                        "as the previous depth's hidden. Plan §3 remedy 3 for a G1 "
+                        "failure. Costs one embedding lookup and one block per depth, "
+                        "and makes H_togo conditional on the realised continuation")
     p.add_argument("--no-tie-unembedding", action="store_true",
                    help="give the heads their own unembedding (much larger checkpoint)")
     p.add_argument("--max-length", type=int, default=1024)
@@ -137,7 +143,8 @@ def main(argv=None):
     vocab_size = model.config.vocab_size
     lm_head = model.get_output_embeddings()
 
-    heads = MTPHeads(
+    head_cls = SequentialMTPHeads if args.sequential else MTPHeads
+    heads = head_cls(
         hidden_size=hidden_size,
         vocab_size=vocab_size,
         num_heads=args.num_heads,
@@ -145,6 +152,7 @@ def main(argv=None):
         tie_unembedding=not args.no_tie_unembedding,
         dtype=dtype,
     ).to(args.device)
+    embedding = model.get_input_embeddings() if args.sequential else None
     n_params = sum(p.numel() for p in heads.parameters())
     print(f"[warmup] heads: K={args.num_heads}, {n_params/1e6:.1f}M params")
 
@@ -178,10 +186,16 @@ def main(argv=None):
                 )
             hidden = out.hidden_states[-1].detach()
 
-            loss, metrics = mtp_ce_loss(
-                heads, hidden, input_ids, attention_mask,
-                lm_head=lm_head, chunk_size=args.chunk_size,
-            )
+            if args.sequential:
+                loss, metrics = seq_mtp_ce_loss(
+                    heads, hidden, input_ids, attention_mask,
+                    lm_head=lm_head, embedding=embedding, chunk_size=args.chunk_size,
+                )
+            else:
+                loss, metrics = mtp_ce_loss(
+                    heads, hidden, input_ids, attention_mask,
+                    lm_head=lm_head, chunk_size=args.chunk_size,
+                )
             (loss / args.grad_accum).backward()
 
             if (i + 1) % args.grad_accum == 0:
@@ -215,6 +229,7 @@ def main(argv=None):
                 "head_hidden": args.head_hidden,
                 "tie_unembedding": not args.no_tie_unembedding,
             },
+            "sequential": bool(args.sequential),
             "model": args.model,
             "train_args": vars(args),
             "final_metrics": metrics,

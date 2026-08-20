@@ -233,7 +233,11 @@ def evaluate_gate_g1(
     )
 
 
-def select_kappa_gamma(grid: Sequence[dict], elbow_tolerance: float = 0.01) -> dict:
+def select_kappa_gamma(
+    grid: Sequence[dict],
+    elbow_tolerance: float = 0.01,
+    min_kappa: int = 2,
+) -> dict:
     """Pick ``(kappa, gamma_H)`` from a grid of correlation results.
 
     Plan §3.4 asks for "the elbow".  Made concrete: among the ``gamma_H`` whose
@@ -244,14 +248,31 @@ def select_kappa_gamma(grid: Sequence[dict], elbow_tolerance: float = 0.01) -> d
     distant-head over-estimation bias, instead of chasing a rho difference the
     sample size cannot resolve.
 
+    ``min_kappa`` defaults to 2 because ``kappa = 1`` is degenerate rather than
+    merely short.  Head 0 maps the hidden state at position ``t`` to the
+    distribution of ``y_{t+1}``, which is what the policy's own unembedding
+    computes; with ``tie_unembedding`` and ``zero_init_output`` the head is
+    initialised as a copy of exactly that predictor.  So ``H_togo(kappa=1)`` is
+    approximately the policy's own next-token entropy, and the measured
+    counterpart at offset +1 *is* that entropy — the correlation is an identity,
+    not a forecast.  Measured on Qwen2.5-1.5B it came out at rho = 0.997 for
+    every gamma (gamma cancels from a rank correlation when kappa = 1), against
+    0.71-0.81 for kappa >= 2, so an unconstrained elbow search always lands
+    there.  Selecting it would reduce ``A_H`` to a deviation of *local* entropy
+    from the sibling mean, i.e. exactly the myopia STEER-F exists to correct.
+
     Args:
         grid: dicts with keys ``kappa``, ``gamma_h``, ``rho_mean``.
         elbow_tolerance: how much rho may be given up for a shorter horizon.
+        min_kappa: smallest horizon eligible for selection.  Pass 1 only to
+            reproduce the degenerate behaviour deliberately.
 
     Returns:
         The winning grid entry, annotated with ``rho_best`` and ``rho_giveup``.
     """
     usable = [g for g in grid if g.get("rho_mean") == g.get("rho_mean")]
+    if min_kappa > 1:
+        usable = [g for g in usable if g["kappa"] >= min_kappa]
     if not usable:
         raise ValueError("grid contains no finite rho_mean values")
 

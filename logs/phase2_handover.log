@@ -1,0 +1,10 @@
+[handover 08-17 04:28:08] waiting for the in-flight phase2-lam0.25-s1 to finish
+[handover 08-17 10:36:26] phase2-lam0.25-s1 finished
+[handover 08-17 10:36:26] recorded: 0.25	1	ok	0.3950	0.1120	0.5349	0.7863	100	349
+[handover 08-17 10:36:26] starting the extended queue (main grid + oracle/grpo controls)
+[phase2-queue 08-17 10:36:26] running the A_H-vs-correctness alignment analysis (one-off, ~15 min)
+[phase2-queue 08-17 10:37:14] alignment analysis done -> docs/ah_vs_correctness.json
+[phase2-queue 08-17 10:37:14] phase2-lam0.0-s1 already recorded ok — skipping
+[phase2-queue 08-17 10:37:14] phase2-lam0.25-s1 already recorded ok — skipping
+[phase2-queue 08-17 10:37:14] starting phase2-lam0.5-s1
+[phase2] ARM=steerf lambda=0.5 seed=1 steps=100 -> /workspace/entropy_collapse/logs/phase2-lam0.5-s1.log

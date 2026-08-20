@@ -31,4 +31,7 @@ MAX_RESPONSE_LENGTH=2048 \
     actor_rollout_ref.actor.ppo_mini_batch_size=16 \
     data.max_response_length=2048 \
     trainer.save_freq=25 \
-    trainer.test_freq=5
+    trainer.test_freq=5 \
+    "$@"
+# Forward this wrapper's own arguments too, so a caller can override anything
+# set above (hydra takes the last assignment for a key).

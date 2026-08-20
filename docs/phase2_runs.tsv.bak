@@ -1,0 +1,16 @@
+lam	seed	status	final_entropy	branch_gap	mean@16	best@16	steps	minutes
+0.0	1	ok	0.6120	na	0.5345	0.7859	100	168
+0.25	1	ok	0.3950	0.1120	0.5349	0.7863	100	349
+0.5	1	ok	0.4800	-0.1080	0.5439	0.7832	100	474
+1.0	1	ok	0.3560	0.0300	0.5333	0.7778	100	472
+oracle0.25	1	fail	na	na	na	na	0	2
+oracle0.5	1	fail	na	na	na	na	0	2
+grpo	1	fail	0.2340	na	0.5317	0.7911	100	177
+0.0	2	fail	na	na	na	na	0	2
+0.25	2	fail	na	na	na	na	0	2
+0.5	2	fail	na	na	na	na	0	2
+1.0	2	fail	na	na	na	na	0	2
+oracle0.25	2	fail	na	na	na	na	0	2
+oracle0.5	2	fail	na	na	na	na	0	3
+grpo	2	fail	0.3160	na	0.5415	0.7979	100	176
+0.0	3	fail	na	na	na	na	0	3

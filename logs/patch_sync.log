@@ -1,0 +1,13 @@
+[patch-sync 08-17 14:07:23] waiting for a gap between runs
+[patch-sync 08-17 18:32:26] gap detected — syncing
+[setup] core_algos_steerf.patch: apply ok
+[setup] dp_actor_steerf.patch: apply ok
+[setup] rollout_dump_steerf.patch: apply ok
+[setup] steerf_forecast_pass.patch: apply ok
+
+[setup] done. Verify with:
+        STEER_REPO=/workspace/entropy_collapse/third_party/STEER python3 -m pytest tests/ -q
+        git -C /workspace/entropy_collapse/third_party/STEER diff --stat
+[patch-sync 08-17 18:32:27] sync OK — steerf_apply now reaches the loss
+...............................                                          [100%]
+247 passed in 6.03s

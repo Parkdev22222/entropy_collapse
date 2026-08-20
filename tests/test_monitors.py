@@ -226,3 +226,98 @@ def test_recall_empty_mask_is_safe():
     out = branch_recall_at_k(torch.rand(2, 4), torch.ones(2, 4, dtype=torch.long),
                              torch.zeros(2, 4), ["p", "p"])
     assert out["n_valid"] == 0
+
+
+# ----------------------------------------------------------------------
+# tie handling in the top-decile selection
+#
+# A_H carries a point mass at exactly 0: with baseline="sibling" a rollout that
+# has become unique is its own only sibling, so its A_H is exactly zero
+# (sibling_prefix_baseline's documented behaviour), and past the first
+# divergence that is nearly every position. Selecting with ">= kth largest"
+# then keeps ~99% of tokens instead of the top decile, which silently disables
+# gate G1's binomial test and gate G2's branch/non-branch entropy split.
+# ----------------------------------------------------------------------
+def test_selection_is_exactly_top_frac_under_a_zero_point_mass():
+    """Realised selection stays at top_frac even when most A_H values tie at 0."""
+    b, t = 8, 200
+    a_h = torch.zeros(b, t)
+    a_h[:, :4] = torch.randn(b, 4)          # only the sibling-rich prefix is nonzero
+    responses = torch.arange(b * t).reshape(b, t) % 7
+    responses[:, :3] = 1                     # shared prefix, then divergence
+    mask = torch.ones(b, t)
+
+    out = branch_recall_at_k(a_h, responses, mask, ["p"] * b, top_frac=0.1)
+
+    # `baseline` is the realised selection rate, which G1 uses as the null.
+    assert out["baseline"] == pytest.approx(0.1, abs=0.005), (
+        f"top decile holds {out['baseline']:.1%} of tokens; a tie-tolerant "
+        "threshold would make G1's binomial test unpassable"
+    )
+
+
+def test_branch_entropy_split_is_not_degenerate_under_ties():
+    b, t = 8, 200
+    a_h = torch.zeros(b, t)
+    a_h[:, :4] = torch.randn(b, 4)
+    entropys = torch.rand(b, t)
+
+    out = branch_token_entropy(entropys, a_h, torch.ones(b, t), top_frac=0.1)
+
+    assert out["steerf/branch_token_frac"] == pytest.approx(0.1, abs=0.005)
+    # Both sides must be populated, else the gap compares a set with nothing.
+    assert out["steerf/nonbranch_entropy"] == out["steerf/nonbranch_entropy"]  # not nan
+
+
+def test_selection_picks_the_largest_values_first():
+    """Rank-based selection must still prefer high A_H over the tie block."""
+    a_h = torch.zeros(1, 100)
+    a_h[0, :5] = torch.tensor([5.0, 4.0, 3.0, 2.0, 1.0])
+    out = branch_token_entropy(torch.rand(1, 100), a_h, torch.ones(1, 100), top_frac=0.1)
+    assert out["steerf/branch_token_frac"] == pytest.approx(0.1, abs=0.01)
+
+
+# ----------------------------------------------------------------------
+# Restricting the recall test to the sibling support
+# ----------------------------------------------------------------------
+def test_support_restricts_both_selection_and_null():
+    """Without a support mask the null is diluted by positions A_H cannot rank."""
+    from steer_f.entropy_forecast import sibling_support
+
+    responses = torch.tensor([
+        [1, 1, 5, 7, 8, 9, 3, 3],
+        [1, 1, 9, 2, 4, 6, 3, 3],
+    ])
+    mask = torch.ones(2, 8)
+    a_h = torch.zeros(2, 8)
+    a_h[:, 2] = torch.tensor([1.0, -1.0])   # nonzero only where siblings remain
+
+    sup = sibling_support(responses, mask, ["p", "p"])
+    # positions 0..2 share the prefix; from 3 on each rollout is alone
+    assert bool(sup[0, 2]) and not bool(sup[0, 5])
+
+    wide = branch_recall_at_k(a_h, responses, mask, ["p", "p"], top_frac=0.5)
+    narrow = branch_recall_at_k(a_h, responses, mask, ["p", "p"], top_frac=0.5, support=sup)
+    assert narrow["n_valid"] < wide["n_valid"]
+
+
+def test_support_mask_of_all_false_is_safe():
+    from steer_f.entropy_forecast import sibling_support
+
+    responses = torch.tensor([[1, 2, 3, 4]])
+    out = branch_recall_at_k(torch.rand(1, 4), responses, torch.ones(1, 4), ["p"],
+                             support=torch.zeros(1, 4, dtype=torch.bool))
+    assert out["n_valid"] == 0
+
+
+def test_sibling_support_is_false_where_a_h_is_structurally_zero():
+    from steer_f.entropy_forecast import sibling_prefix_baseline, sibling_support
+
+    responses = torch.tensor([[1, 1, 4, 4, 4], [1, 1, 9, 9, 9]])
+    mask = torch.ones(2, 5)
+    h = torch.randn(2, 5)
+    base = sibling_prefix_baseline(h, responses, mask, ["p", "p"])
+    a_h = (h - base) * mask
+    sup = sibling_support(responses, mask, ["p", "p"])
+    # every position outside the support must have A_H exactly zero
+    assert torch.all(a_h[~sup] == 0)

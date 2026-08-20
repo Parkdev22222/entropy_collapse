@@ -32,6 +32,18 @@ fi
 # STEER-F: steer_f must precede verl so `from steer_f...` resolves inside the
 # patched core_algos.
 export PYTHONPATH="${STEERF_ROOT}:${STEER_ROOT}:$PYTHONPATH"
+
+# Preflight. The steer_f package was once moved out from under a running queue;
+# every steerf arm then died inside a Ray worker with ModuleNotFoundError after
+# ~2 minutes, the queue recorded "fail" and moved on, and 12 cells were burned
+# before anyone looked. verl swallows the import into a RayTaskError, so the
+# failure is loud in the log and invisible in the summary. Check it here, where
+# one line of output says exactly what is wrong, before a GPU is reserved.
+if ! python -c "import steer_f.omega_tilde, steer_f.entropy_forecast" 2>/dev/null; then
+  echo "FATAL: steer_f is not importable from PYTHONPATH=${PYTHONPATH}" >&2
+  echo "       expected the package at ${STEERF_ROOT}/steer_f" >&2
+  exit 3
+fi
 echo "Current VERL path:"
 python3 -c "import verl; print(verl.__file__)"
 python3 -c "import steer_f; print('steer_f', steer_f.__version__)"
@@ -51,6 +63,16 @@ STEERF_KAPPA=${STEERF_KAPPA:-4}
 STEERF_GAMMA_H=${STEERF_GAMMA_H:-0.85}
 STEERF_BASELINE=${STEERF_BASELINE:-sibling}
 STEERF_BETA_MTP=${STEERF_BETA_MTP:-0.05}
+# mtp    = forecast H_togo with the MTP heads (the method)
+# oracle = read H_togo from the policy's own realised entropy (the control).
+#          No heads, no warm-up, and no extra forward, so it also runs at the
+#          lambda=0 step time. See steer_f.entropy_forecast.oracle_h_togo.
+STEERF_FORECAST=${STEERF_FORECAST:-mtp}
+# Theorem 1's I_clip. Default false = the released STEER implementation, which
+# is what the lambda=0 equivalence test and the paper's numbers are against.
+STEERF_ICLIP=${STEERF_ICLIP:-False}
+# Theorem 1's r*A instead of the released code's A/pi_old.
+STEERF_RATIO=${STEERF_RATIO:-False}
 STEERF_HEADS=${STEERF_HEADS:-${STEERF_ROOT}/checkpoints/mtp_heads.pt}
 STEERF_CALIB=${STEERF_CALIB:-${STEERF_ROOT}/checkpoints/mtp_calibration.json}
 
@@ -92,6 +114,9 @@ if [ "$loss_mode" = "entropy_control" ]; then
     +actor_rollout_ref.actor.policy_loss.steerf_gamma_h=${STEERF_GAMMA_H}
     +actor_rollout_ref.actor.policy_loss.steerf_baseline=${STEERF_BASELINE}
     +actor_rollout_ref.actor.policy_loss.steerf_beta_mtp=${STEERF_BETA_MTP}
+    +actor_rollout_ref.actor.policy_loss.steerf_forecast=${STEERF_FORECAST}
+    +actor_rollout_ref.actor.policy_loss.steerf_iclip=${STEERF_ICLIP}
+    +actor_rollout_ref.actor.policy_loss.steerf_ratio=${STEERF_RATIO}
     +actor_rollout_ref.actor.policy_loss.steerf_heads_path=${STEERF_HEADS}
     +actor_rollout_ref.actor.policy_loss.steerf_calib_path=${STEERF_CALIB}
   )

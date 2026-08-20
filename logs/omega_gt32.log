@@ -1,0 +1,26 @@
+[gt] 32 mixed-outcome groups, eta=0.0001
+Sliding Window Attention is enabled but not implemented for `sdpa`; unexpected results may be encountered.
+[gt] group 2/32  n=768 tokens  |dH|mean=1.058e-03
+[gt] group 4/32  n=768 tokens  |dH|mean=1.787e-03
+[gt] group 6/32  n=768 tokens  |dH|mean=3.358e-03
+[gt] group 7/32  n=768 tokens  |dH|mean=7.595e-04
+[gt] group 9/32  n=31 tokens  |dH|mean=3.933e-02
+[gt] group 11/32  n=768 tokens  |dH|mean=1.297e-03
+[gt] group 12/32  n=213 tokens  |dH|mean=9.161e-03
+[gt] group 13/32  n=768 tokens  |dH|mean=2.003e-03
+[gt] group 16/32  n=768 tokens  |dH|mean=1.568e-03
+[gt] group 18/32  n=768 tokens  |dH|mean=1.241e-03
+[gt] group 19/32  n=768 tokens  |dH|mean=1.159e-03
+[gt] group 20/32  n=768 tokens  |dH|mean=1.529e-03
+[gt] group 21/32  n=768 tokens  |dH|mean=2.090e-03
+[gt] group 22/32  n=768 tokens  |dH|mean=3.663e-03
+[gt] group 24/32  n=768 tokens  |dH|mean=9.463e-04
+[gt] group 27/32  n=768 tokens  |dH|mean=1.354e-03
+[gt] group 28/32  n=768 tokens  |dH|mean=2.056e-03
+[gt] group 29/32  n=768 tokens  |dH|mean=8.855e-04
+
+form                     MSE       PCC      SRCC   (paper reports PCC ~+0.4, SRCC ~+0.6..0.7)
+released           4.184e-04     0.263     0.307
+theorem_r          4.184e-04     0.387     0.304
+
+wrote docs/omega_ground_truth.json

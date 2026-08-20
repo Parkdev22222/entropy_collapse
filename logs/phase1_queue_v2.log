@@ -1,0 +1,138 @@
+[phase1 00:44:11] heads ready
+[phase1 00:44:11] MC validation
+Sliding Window Attention is enabled but not implemented for `sdpa`; unexpected results may be encountered.
+[validate] heads K=8 from checkpoints/mtp_heads.pt
+[validate] 25 problems, fractions=[0.2, 0.4, 0.6, 0.8]
+[validate] budget: 600 prefixes, <= 24 per problem
+[validate] problem 1/25: +24 (total 24)
+[validate] problem 2/25: +24 (total 48)
+[validate] problem 3/25: +24 (total 72)
+[validate] problem 4/25: +24 (total 96)
+[validate] problem 5/25: +24 (total 120)
+[validate] problem 6/25: +24 (total 144)
+[validate] problem 7/25: +24 (total 168)
+[validate] problem 8/25: +24 (total 192)
+[validate] problem 9/25: +24 (total 216)
+[validate] problem 10/25: +24 (total 240)
+[validate] problem 11/25: +24 (total 264)
+[validate] problem 12/25: +24 (total 288)
+[validate] problem 13/25: +24 (total 312)
+[validate] problem 14/25: +24 (total 336)
+[validate] problem 15/25: +24 (total 360)
+[validate] problem 16/25: +24 (total 384)
+[validate] problem 17/25: +24 (total 408)
+[validate] problem 18/25: +24 (total 432)
+[validate] problem 19/25: +24 (total 456)
+[validate] problem 20/25: +24 (total 480)
+[validate] problem 21/25: +24 (total 504)
+[validate] problem 22/25: +24 (total 528)
+[validate] problem 23/25: +24 (total 552)
+[validate] problem 24/25: +24 (total 576)
+[validate] problem 25/25: +24 (total 600)
+[validate] calibration scale=['0.990', '0.443', '0.340', '0.337', '0.359', '0.356', '0.424', '0.415']
+[validate]             bias =['0.002', '-0.106', '-0.317', '-0.558', '-0.828', '-0.940', '-1.292', '-1.308']
+[validate] kappa=1 gamma_H=0.7: rho_within=0.9950 (pooled 0.9985, 600 obs)
+[validate] kappa=2 gamma_H=0.7: rho_within=0.8405 (pooled 0.8435, 600 obs)
+[validate] kappa=3 gamma_H=0.7: rho_within=0.8019 (pooled 0.8094, 600 obs)
+[validate] kappa=4 gamma_H=0.7: rho_within=0.7872 (pooled 0.8033, 600 obs)
+[validate] kappa=5 gamma_H=0.7: rho_within=0.7894 (pooled 0.8100, 600 obs)
+[validate] kappa=6 gamma_H=0.7: rho_within=0.7935 (pooled 0.8123, 600 obs)
+[validate] kappa=7 gamma_H=0.7: rho_within=0.7938 (pooled 0.8096, 600 obs)
+[validate] kappa=8 gamma_H=0.7: rho_within=0.7931 (pooled 0.8146, 600 obs)
+[validate] kappa=1 gamma_H=0.85: rho_within=0.9950 (pooled 0.9985, 600 obs)
+[validate] kappa=2 gamma_H=0.85: rho_within=0.8255 (pooled 0.8329, 600 obs)
+[validate] kappa=3 gamma_H=0.85: rho_within=0.7755 (pooled 0.7913, 600 obs)
+[validate] kappa=4 gamma_H=0.85: rho_within=0.7536 (pooled 0.7841, 600 obs)
+[validate] kappa=5 gamma_H=0.85: rho_within=0.7583 (pooled 0.7892, 600 obs)
+[validate] kappa=6 gamma_H=0.85: rho_within=0.7617 (pooled 0.7928, 600 obs)
+[validate] kappa=7 gamma_H=0.85: rho_within=0.7532 (pooled 0.7901, 600 obs)
+[validate] kappa=8 gamma_H=0.85: rho_within=0.7696 (pooled 0.7991, 600 obs)
+[validate] kappa=1 gamma_H=1.0: rho_within=0.9950 (pooled 0.9985, 600 obs)
+[validate] kappa=2 gamma_H=1.0: rho_within=0.8115 (pooled 0.8237, 600 obs)
+[validate] kappa=3 gamma_H=1.0: rho_within=0.7593 (pooled 0.7756, 600 obs)
+[validate] kappa=4 gamma_H=1.0: rho_within=0.7293 (pooled 0.7675, 600 obs)
+[validate] kappa=5 gamma_H=1.0: rho_within=0.7314 (pooled 0.7683, 600 obs)
+[validate] kappa=6 gamma_H=1.0: rho_within=0.7374 (pooled 0.7725, 600 obs)
+[validate] kappa=7 gamma_H=1.0: rho_within=0.7322 (pooled 0.7676, 600 obs)
+[validate] kappa=8 gamma_H=1.0: rho_within=0.7515 (pooled 0.7770, 600 obs)
+
+[validate] selected kappa=2 gamma_H=0.7 (rho=0.8405, best available 0.8405, giving up 0.0000)
+[validate] rho(H_togo, branch diversity) = 0.5990
+[validate] wrote docs/phase1_results.json
+
+[validate] NOTE: gate G1 also needs branch recall@10%, which is measured on a
+           real rollout group (steer_f.monitors.branch_recall_at_k) rather than on
+           these independently-sampled prefixes. Run it on a Phase-0 rollout dump,
+           then feed both numbers to steer_f.validation.evaluate_gate_g1.
+GATE: FAIL
+  [x] within-problem rho >= 0.20: rho_mean=0.8405
+  [ ] branch recall@10% above chance (p<0.05): recall=nan vs chance=0.1000, p=nan (0/0)
+  ! only 0 true branch points — the recall test has little power; sample more prefixes before treating a FAIL as informative
+[phase1 01:12:23] validation exited 0
+[phase1] wrote checkpoints/mtp_calibration.json
+[phase1 01:12:23] selected kappa=2 gamma_h=0.7
+[phase1 01:12:23] branch recall (trained heads)
+Sliding Window Attention is enabled but not implemented for `sdpa`; unexpected results may be encountered.
+[recall] calibration loaded from checkpoints/mtp_calibration.json
+[recall] 96 groups, sizes 8..8
+[recall] 8/96 groups
+[recall] 16/96 groups
+[recall] 24/96 groups
+[recall] 32/96 groups
+[recall] 40/96 groups
+[recall] 48/96 groups
+[recall] 56/96 groups
+[recall] 64/96 groups
+[recall] 72/96 groups
+[recall] 80/96 groups
+[recall] 88/96 groups
+[recall] 96/96 groups
+[recall] sibling support: 7526 of 497797 masked positions (1.5%)
+[recall] {
+  "recall": 0.3424283765347885,
+  "baseline": 0.10005314908317832,
+  "lift": 3.424283765347885,
+  "n_branch": 2199,
+  "n_hit": 753,
+  "n_valid": 7526
+}
+[recall] rho_mean=0.8405 from docs/phase1_results.json
+GATE: PASS
+  [x] within-problem rho >= 0.20: rho_mean=0.8405
+  [x] branch recall@10% above chance (p<0.05): recall=0.3424 vs chance=0.1001, p=1.128e-207 (753/2199)
+[recall] wrote docs/phase1_recall.json
+[phase1 01:13:17] recall exited 0
+[phase1 01:13:17] branch recall (UNTRAINED control)
+[dummy-heads] wrote UNTRAINED heads to checkpoints/mtp_heads_control.pt (H=1536, V=151936, K=8)
+[dummy-heads] plumbing test only — not a STEER-F result
+Sliding Window Attention is enabled but not implemented for `sdpa`; unexpected results may be encountered.
+[recall] no calibration — distant heads are biased upward (ablation A6)
+[recall] 96 groups, sizes 8..8
+[recall] 8/96 groups
+[recall] 16/96 groups
+[recall] 24/96 groups
+[recall] 32/96 groups
+[recall] 40/96 groups
+[recall] 48/96 groups
+[recall] 56/96 groups
+[recall] 64/96 groups
+[recall] 72/96 groups
+[recall] 80/96 groups
+[recall] 88/96 groups
+[recall] 96/96 groups
+[recall] sibling support: 7526 of 497797 masked positions (1.5%)
+[recall] {
+  "recall": 0.3424283765347885,
+  "baseline": 0.10005314908317832,
+  "lift": 3.424283765347885,
+  "n_branch": 2199,
+  "n_hit": 753,
+  "n_valid": 7526
+}
+GATE: FAIL
+  [ ] within-problem rho >= 0.20: rho_mean=nan
+  [x] branch recall@10% above chance (p<0.05): recall=0.3424 vs chance=0.1001, p=1.128e-207 (753/2199)
+  ! rho_mean is nan: every problem was constant or below min_per_problem
+[recall] wrote docs/phase1_recall_control.json
+[phase1 01:14:00] control exited 0
+[phase1 01:14:00] done — compare docs/phase1_recall.json against docs/phase1_recall_control.json

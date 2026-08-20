@@ -300,3 +300,50 @@ def test_numpy_style_group_keys_work():
     )
     assert a_h.shape == (3, 4)
     assert torch.equal(a_h[2], torch.zeros(4))  # "b" is a singleton
+
+
+# ----------------------------------------------------------------------
+# oracle_h_togo — the control the MTP forecast has to beat
+# ----------------------------------------------------------------------
+def test_oracle_h_togo_is_the_discounted_forward_sum():
+    from steer_f.entropy_forecast import oracle_h_togo
+
+    ent = torch.tensor([[1.0, 2.0, 4.0, 8.0]])
+    mask = torch.ones(1, 4)
+    out = oracle_h_togo(ent, mask, kappa=2, gamma_h=0.5)
+    # position 0: .5*2 + .25*4 = 2.0 ; position 1: .5*4 + .25*8 = 4.0
+    assert out[0, 0] == pytest.approx(2.0)
+    assert out[0, 1] == pytest.approx(4.0)
+    # position 2 has only one future token left, position 3 none
+    assert out[0, 2] == pytest.approx(0.5 * 8.0)
+    assert out[0, 3] == pytest.approx(0.0)
+
+
+def test_oracle_h_togo_ignores_masked_future():
+    from steer_f.entropy_forecast import oracle_h_togo
+
+    ent = torch.tensor([[1.0, 2.0, 99.0]])
+    mask = torch.tensor([[1.0, 1.0, 0.0]])       # third token is padding
+    out = oracle_h_togo(ent, mask, kappa=2, gamma_h=1.0)
+    assert out[0, 0] == pytest.approx(2.0)        # padding contributes nothing
+    assert out[0, 2] == pytest.approx(0.0)        # masked position is zeroed
+
+
+def test_oracle_h_togo_rejects_bad_shapes():
+    from steer_f.entropy_forecast import oracle_h_togo
+
+    with pytest.raises(ValueError):
+        oracle_h_togo(torch.rand(2, 3), torch.rand(2, 4), kappa=1, gamma_h=1.0)
+    with pytest.raises(ValueError):
+        oracle_h_togo(torch.rand(2, 3), torch.ones(2, 3), kappa=0, gamma_h=1.0)
+
+
+def test_oracle_a_h_is_zero_without_siblings():
+    """Same structural property as the MTP path, so the two are comparable."""
+    from steer_f.entropy_forecast import entropy_advantage, oracle_h_togo
+
+    responses = torch.tensor([[1, 2, 3, 4]])
+    mask = torch.ones(1, 4)
+    h = oracle_h_togo(torch.rand(1, 4), mask, kappa=2, gamma_h=0.85)
+    a = entropy_advantage(h, ["p"], mask, responses=responses, baseline="sibling")
+    assert torch.all(a == 0)

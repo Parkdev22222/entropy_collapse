@@ -1,0 +1,28 @@
+{
+  "n_branch_points": 410,
+  "n_groups": 120,
+  "unanimous_groups_skipped": 3685,
+  "kappa": 2,
+  "gamma_h": 0.7,
+  "results": {
+    "oracle": {
+      "win_rate": 0.3548812664907652,
+      "wins": 807,
+      "pairs": 2274,
+      "p_value": 0.9999999999978606
+    },
+    "local": {
+      "win_rate": 0.0,
+      "wins": 0,
+      "pairs": 2274,
+      "p_value": 0.9999999999978606
+    },
+    "mtp": {
+      "win_rate": 0.2801231310466139,
+      "wins": 637,
+      "pairs": 2274,
+      "p_value": 0.9999999999978606
+    }
+  },
+  "reading": "win_rate is P(higher A_H sibling is the correct one); 0.5 is chance. Near 0.5 means future-entropy diversity is not aligned with correctness at this scale."
+}

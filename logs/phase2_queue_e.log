@@ -1,0 +1,9 @@
+[queue-e 08-17 12:08:39] waiting for the main grid to finish
+[queue-e 08-18 08:38:41] main grid done — starting apply=weight arms
+[queue-e 08-18 08:38:41] starting phase2-applyw-lam0.25-s1
+[phase2] apply=weight lambda=0.25 seed=1 -> /workspace/entropy_collapse/logs/phase2-applyw-lam0.25-s1.log
+[phase2] ARM=steerf lambda=0.25 seed=1 steps=100 -> /workspace/entropy_collapse/logs/phase2-lam0.25-s1.log
+[queue-e 08-18 14:16:21] phase2-applyw-lam0.25-s1 exited rc=127 after 337m
+[queue-e 08-18 14:16:21] starting phase2-applyw-lam0.5-s1
+[phase2] apply=weight lambda=0.5 seed=1 -> /workspace/entropy_collapse/logs/phase2-applyw-lam0.5-s1.log
+[phase2] ARM=steerf lambda=0.5 seed=1 steps=100 -> /workspace/entropy_collapse/logs/phase2-lam0.5-s1.log

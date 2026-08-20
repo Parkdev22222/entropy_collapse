@@ -1,0 +1,93 @@
++ export MODEL_PATH=/workspace/hf_cache/hub/models--Qwen--Qwen2.5-1.5B-Instruct/snapshots/989aa7980e4cf806f80c7fef2b1adb7bc71aa306
++ MODEL_PATH=/workspace/hf_cache/hub/models--Qwen--Qwen2.5-1.5B-Instruct/snapshots/989aa7980e4cf806f80c7fef2b1adb7bc71aa306
++ export PROJECT_NAME=STEER-F-phase2
++ PROJECT_NAME=STEER-F-phase2
++ export N_GPUS=1
++ N_GPUS=1
++ export TP_SIZE=1
++ TP_SIZE=1
++ export TOTAL_EPOCHS=1
++ TOTAL_EPOCHS=1
++++ dirname /workspace/entropy_collapse/run/run_steerf_small.sh
+++ cd /workspace/entropy_collapse/run
+++ pwd
++ SCRIPT_DIR=/workspace/entropy_collapse/run
++ TRAIN_BATCH_SIZE=64
++ MINI_BATCH_SIZE=16
++ MAX_RESPONSE_LENGTH=2048
++ /workspace/entropy_collapse/run/run_steerf.sh data.train_batch_size=64 actor_rollout_ref.actor.ppo_mini_batch_size=16 data.max_response_length=2048 trainer.save_freq=25 trainer.test_freq=5 data.max_response_length=1024 actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=8 actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=8 actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=8 actor_rollout_ref.rollout.gpu_memory_utilization=0.45 +data.seed=1 actor_rollout_ref.rollout.val_kwargs.n=16 actor_rollout_ref.rollout.val_kwargs.do_sample=True 'trainer.logger=['\''console'\'','\''tensorboard'\'']' trainer.val_before_train=False trainer.test_freq=100 trainer.save_freq=100 trainer.total_training_steps=100 +actor_rollout_ref.actor.policy_loss.steerf_apply=weight
++ export PYTHONHASHSEED=42
++ PYTHONHASHSEED=42
++ export PYTORCH_SEED=42
++ PYTORCH_SEED=42
++ export CUDA_DEVICE_ORDER=PCI_BUS_ID
++ CUDA_DEVICE_ORDER=PCI_BUS_ID
++ export CUBLAS_WORKSPACE_CONFIG=:4096:8
++ CUBLAS_WORKSPACE_CONFIG=:4096:8
++++ dirname /workspace/entropy_collapse/run/run_steerf.sh
+++ cd /workspace/entropy_collapse/run
+++ pwd
++ SCRIPT_DIR=/workspace/entropy_collapse/run
+++ cd /workspace/entropy_collapse/run/..
+++ pwd
++ STEERF_ROOT=/workspace/entropy_collapse
++ STEER_ROOT=/workspace/entropy_collapse/third_party/STEER
++ '[' '!' -d /workspace/entropy_collapse/third_party/STEER/verl ']'
++ export PYTHONPATH=/workspace/entropy_collapse:/workspace/entropy_collapse/third_party/STEER:
++ PYTHONPATH=/workspace/entropy_collapse:/workspace/entropy_collapse/third_party/STEER:
++ echo 'Current VERL path:'
+Current VERL path:
++ python3 -c 'import verl; print(verl.__file__)'
+/workspace/entropy_collapse/third_party/STEER/verl/__init__.py:18: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+/workspace/entropy_collapse/third_party/STEER/verl/__init__.py
++ python3 -c 'import steer_f; print('\''steer_f'\'', steer_f.__version__)'
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+ModuleNotFoundError: No module named 'steer_f'
++ ARM=steerf
++ project_name=STEER-F-phase2
++ train_path=/workspace/entropy_collapse/third_party/STEER/datasets/DAPO-Math-17k.parquet
++ test_path=/workspace/entropy_collapse/third_party/STEER/datasets/math500.parquet
++ model_path=/workspace/hf_cache/hub/models--Qwen--Qwen2.5-1.5B-Instruct/snapshots/989aa7980e4cf806f80c7fef2b1adb7bc71aa306
++ STEERF_LAM=0.25
++ STEERF_ETA=1.0
++ STEERF_CLIP_C=1.0
++ STEERF_NORM=scale
++ STEERF_KAPPA=4
++ STEERF_GAMMA_H=0.85
++ STEERF_BASELINE=sibling
++ STEERF_BETA_MTP=0.05
++ STEERF_FORECAST=mtp
++ STEERF_ICLIP=False
++ STEERF_RATIO=False
++ STEERF_HEADS=/workspace/entropy_collapse/checkpoints/mtp_heads.pt
++ STEERF_CALIB=/workspace/entropy_collapse/checkpoints/mtp_calibration.json
++ case "$ARM" in
++ loss_mode=entropy_control
++ run_name=steerf
++ '[' steerf = steerf ']'
++ run_name=steerf-lam0.25-k4-g0.85
+++ date +%Y%m%d_%H%M%S
++ run_name=steerf-lam0.25-k4-g0.85_20260818_083851
++ export WANDB_INIT_TIMEOUT=300
++ WANDB_INIT_TIMEOUT=300
++ export WANDB_TIMEOUT=300
++ WANDB_TIMEOUT=300
++ export WANDB_RETRY_DELAY=60
++ WANDB_RETRY_DELAY=60
++ export WANDB_MAX_RETRIES=10
++ WANDB_MAX_RETRIES=10
++ save_contents='['\''hf_model'\'']'
++ train_files='['\''/workspace/entropy_collapse/third_party/STEER/datasets/DAPO-Math-17k.parquet'\'']'
++ test_files='['\''/workspace/entropy_collapse/third_party/STEER/datasets/math500.parquet'\'']'
++ steer_args=()
++ '[' entropy_control = entropy_control ']'
++ steer_args+=(+actor_rollout_ref.actor.policy_loss.token_weight_min=${TOKEN_WEIGHT_MIN:-0.8} +actor_rollout_ref.actor.policy_loss.token_weight_max=${TOKEN_WEIGHT_MAX:-1.2} +actor_rollout_ref.actor.policy_loss.linear=${LINEAR:-True} +actor_rollout_ref.actor.policy_loss.entropy_control_mode=${ENTROPY_CONTROL_MODE:-symmetric} +actor_rollout_ref.actor.policy_loss.steerf_lam=${STEERF_LAM} +actor_rollout_ref.actor.policy_loss.steerf_eta=${STEERF_ETA} +actor_rollout_ref.actor.policy_loss.steerf_clip_c=${STEERF_CLIP_C} +actor_rollout_ref.actor.policy_loss.steerf_norm=${STEERF_NORM} +actor_rollout_ref.actor.policy_loss.steerf_kappa=${STEERF_KAPPA} +actor_rollout_ref.actor.policy_loss.steerf_gamma_h=${STEERF_GAMMA_H} +actor_rollout_ref.actor.policy_loss.steerf_baseline=${STEERF_BASELINE} +actor_rollout_ref.actor.policy_loss.steerf_beta_mtp=${STEERF_BETA_MTP} +actor_rollout_ref.actor.policy_loss.steerf_forecast=${STEERF_FORECAST} +actor_rollout_ref.actor.policy_loss.steerf_iclip=${STEERF_ICLIP} +actor_rollout_ref.actor.policy_loss.steerf_ratio=${STEERF_RATIO} +actor_rollout_ref.actor.policy_loss.steerf_heads_path=${STEERF_HEADS} +actor_rollout_ref.actor.policy_loss.steerf_calib_path=${STEERF_CALIB})
++ python3 -m verl.trainer.main_ppo algorithm.adv_estimator=grpo 'data.train_files=['\''/workspace/entropy_collapse/third_party/STEER/datasets/DAPO-Math-17k.parquet'\'']' 'data.val_files=['\''/workspace/entropy_collapse/third_party/STEER/datasets/math500.parquet'\'']' data.train_batch_size=512 data.max_prompt_length=1024 data.max_response_length=3072 data.filter_overlong_prompts=True data.truncation=left actor_rollout_ref.model.path=/workspace/hf_cache/hub/models--Qwen--Qwen2.5-1.5B-Instruct/snapshots/989aa7980e4cf806f80c7fef2b1adb7bc71aa306 actor_rollout_ref.actor.optim.lr=1e-6 actor_rollout_ref.model.use_remove_padding=True actor_rollout_ref.actor.ppo_mini_batch_size=32 actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=8 actor_rollout_ref.actor.use_kl_loss=False actor_rollout_ref.actor.kl_loss_coef=0.001 actor_rollout_ref.actor.kl_loss_type=low_var_kl actor_rollout_ref.actor.entropy_coeff=0 actor_rollout_ref.actor.clip_ratio_high=0.28 actor_rollout_ref.actor.clip_ratio_low=0.2 actor_rollout_ref.actor.clip_ratio_c=10.0 actor_rollout_ref.actor.policy_loss.loss_mode=entropy_control +actor_rollout_ref.actor.policy_loss.token_weight_min=0.9 +actor_rollout_ref.actor.policy_loss.token_weight_max=1.0 +actor_rollout_ref.actor.policy_loss.linear=True +actor_rollout_ref.actor.policy_loss.entropy_control_mode=asymmetric +actor_rollout_ref.actor.policy_loss.steerf_lam=0.25 +actor_rollout_ref.actor.policy_loss.steerf_eta=1.0 +actor_rollout_ref.actor.policy_loss.steerf_clip_c=1.0 +actor_rollout_ref.actor.policy_loss.steerf_norm=scale +actor_rollout_ref.actor.policy_loss.steerf_kappa=4 +actor_rollout_ref.actor.policy_loss.steerf_gamma_h=0.85 +actor_rollout_ref.actor.policy_loss.steerf_baseline=sibling +actor_rollout_ref.actor.policy_loss.steerf_beta_mtp=0.05 +actor_rollout_ref.actor.policy_loss.steerf_forecast=mtp +actor_rollout_ref.actor.policy_loss.steerf_iclip=False +actor_rollout_ref.actor.policy_loss.steerf_ratio=False +actor_rollout_ref.actor.policy_loss.steerf_heads_path=/workspace/entropy_collapse/checkpoints/mtp_heads.pt +actor_rollout_ref.actor.policy_loss.steerf_calib_path=/workspace/entropy_collapse/checkpoints/mtp_calibration.json actor_rollout_ref.model.enable_gradient_checkpointing=True actor_rollout_ref.actor.fsdp_config.param_offload=False actor_rollout_ref.actor.fsdp_config.optimizer_offload=False actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=8 actor_rollout_ref.rollout.tensor_model_parallel_size=1 actor_rollout_ref.rollout.name=vllm actor_rollout_ref.rollout.gpu_memory_utilization=0.6 'actor_rollout_ref.actor.checkpoint.save_contents=['\''hf_model'\'']' actor_rollout_ref.rollout.n=8 actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=8 actor_rollout_ref.ref.fsdp_config.param_offload=False algorithm.use_kl_in_reward=False trainer.rollout_data_dir=/workspace/entropy_collapse/rollout_data/STEER-F-phase2/steerf-lam0.25-k4-g0.85_20260818_083851 trainer.critic_warmup=0 'trainer.logger=['\''console'\'','\''wandb'\'']' trainer.project_name=STEER-F-phase2 trainer.experiment_name=steerf-lam0.25-k4-g0.85_20260818_083851 trainer.n_gpus_per_node=1 trainer.nnodes=1 trainer.save_freq=10 trainer.test_freq=1 trainer.total_epochs=1 trainer.resume_mode=disable +trainer.save_best_only=False +trainer.delete_old_best_checkpoint=True +trainer.save_after=80 +trainer.best_metric_key=val-core/math_dapo/acc/mean@32 data.train_batch_size=64 actor_rollout_ref.actor.ppo_mini_batch_size=16 data.max_response_length=2048 trainer.save_freq=25 trainer.test_freq=5 data.max_response_length=1024 actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=8 actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=8 actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=8 actor_rollout_ref.rollout.gpu_memory_utilization=0.45 +data.seed=1 actor_rollout_ref.rollout.val_kwargs.n=16 actor_rollout_ref.rollout.val_kwargs.do_sample=True 'trainer.logger=['\''console'\'','\''tensorboard'\'']' trainer.val_before_train=False trainer.test_freq=100 trainer.save_freq=100 trainer.total_training_steps=100 +actor_rollout_ref.actor.policy_loss.steerf_apply=weight
+/workspace/entropy_collapse/third_party/STEER/verl/__init__.py:18: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+2026-08-18 08:39:11,762	INFO worker.py:1879 -- Started a local Ray instance. View the dashboard at [1m[32mhttp://127.0.0.1:8266 [39m[22m
+/workspace/entropy_collapse/run/run_steerf.sh: line 163: 688375 Killed                  python3 -m verl.trainer.main_ppo algorithm.adv_estimator=grpo data.train_files="$train_files" data.val_files="$test_files" data.train_batch_size=512 data.max_prompt_length=1024 data.max_response_length=3072 data.filter_overlong_prompts=True data.truncation='left' actor_rollout_ref.model.path=$model_path actor_rollout_ref.actor.optim.lr=1e-6 actor_rollout_ref.model.use_remove_padding=True actor_rollout_ref.actor.ppo_mini_batch_size=32 actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=8 actor_rollout_ref.actor.use_kl_loss=False actor_rollout_ref.actor.kl_loss_coef=0.001 actor_rollout_ref.actor.kl_loss_type=low_var_kl actor_rollout_ref.actor.entropy_coeff=0 actor_rollout_ref.actor.clip_ratio_high=0.28 actor_rollout_ref.actor.clip_ratio_low=0.2 actor_rollout_ref.actor.clip_ratio_c=10.0 actor_rollout_ref.actor.policy_loss.loss_mode=${loss_mode} "${steer_args[@]}" actor_rollout_ref.model.enable_gradient_checkpointing=True actor_rollout_ref.actor.fsdp_config.param_offload=False actor_rollout_ref.actor.fsdp_config.optimizer_offload=False actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=8 actor_rollout_ref.rollout.tensor_model_parallel_size=${TP_SIZE:-4} actor_rollout_ref.rollout.name=vllm actor_rollout_ref.rollout.gpu_memory_utilization=0.6 actor_rollout_ref.actor.checkpoint.save_contents=${save_contents} actor_rollout_ref.rollout.n=8 actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=8 actor_rollout_ref.ref.fsdp_config.param_offload=False algorithm.use_kl_in_reward=False trainer.rollout_data_dir=${STEERF_ROOT}/rollout_data/$project_name/$run_name trainer.critic_warmup=0 trainer.logger="['console','wandb']" trainer.project_name=$project_name trainer.experiment_name=$run_name trainer.n_gpus_per_node=${N_GPUS:-8} trainer.nnodes=${NNODES:-1} trainer.save_freq=10 trainer.test_freq=1 trainer.total_epochs=${TOTAL_EPOCHS:-10} trainer.resume_mode=disable +trainer.save_best_only=False +trainer.delete_old_best_checkpoint=True +trainer.save_after=80 +trainer.best_metric_key=val-core/math_dapo/acc/mean@32 "$@"
++ ut_ref.ref.fsdp_config.param_offload=False algorithm.use_kl_in_reward=False trainer.rollout_data_dir=/workspace/entropy_collapse/rollout_data/STEER-F-phase2/steerf-lam0.25-k4-g0.85_20260818_083851 trainer.critic_warmup=0 'trainer.logger=['\''console'\'','\''wandb'\'']' trainer.project_name=STEER-F-phase2 trainer.experiment_name=steerf-lam0.25-k4-g0.85_20260818_083851 trainer.n_gpus_per_node=1 trainer.nnodes=1 trainer.save_freq=10 trainer.test_freq=1 trainer.total_epochs=1 trainer.resume_mode=disable +trainer.save_best_only=False +trainer.delete_old_best_checkpoint=True +trainer.save_after=80 +trainer.best_metric_key=val-core/math_dapo/acc/mean@32 data.train_batch_size=64 actor_rollout_ref.actor.ppo_mini_batch_size=16 data.max_response_length=2048 trainer.save_freq=25 trainer.test_freq=5 data.max_response_length=1024 actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=8 actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=8 actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=8 actor_rollout_ref.rollout.gpu_memory_utilization=0.45 +data.seed=1 actor_rollout_ref.rollout.val_kwargs.n=16 actor_rollout_ref.rollout.val_kwargs.do_sample=True 'trainer.logger=['\''console'\'','\''tensorboard'\'']' trainer.val_before_train=False trainer.test_freq=100 trainer.save_freq=100 trainer.total_training_steps=100 +actor_rollout_ref.actor.policy_loss.steerf_apply=weight
+/workspace/entropy_collapse/run/run_steerf.sh: line 165: ut_ref.ref.fsdp_config.param_offload=False: command not found

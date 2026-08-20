@@ -60,11 +60,13 @@ import torch
 
 __all__ = [
     "SteerFConfig",
+    "clip_indicator",
     "local_omega_signed",
     "delta_logpi_hat",
     "visit_term",
     "normalize",
     "compute_omega_tilde",
+    "branch_weight_correction",
     "compute_token_weights_steerf",
 ]
 
@@ -147,11 +149,45 @@ class SteerFConfig:
 # ----------------------------------------------------------------------
 # Omega, the local term
 # ----------------------------------------------------------------------
+def clip_indicator(
+    advantages: torch.Tensor,
+    old_log_prob: torch.Tensor,
+    log_prob: torch.Tensor,
+    cliprange_low: float = 0.2,
+    cliprange_high: float = 0.28,
+) -> torch.Tensor:
+    """``I_clip`` of the paper's Eq. 6 — 0 where the surrogate is clipped.
+
+    A token whose importance ratio has left the trust region contributes no
+    gradient, so its true entropy change is exactly zero.  Theorem 1 carries
+    this factor; the released implementation drops it, and the difference is
+    not cosmetic under the exponential mapping: a clipped token can otherwise
+    be assigned the batch-max ``|Omega|``, and that maximum is the denominator
+    every *other* token in the micro-batch is normalised by.  One token that
+    the update will not move can therefore weaken the attenuation applied to
+    all the tokens it will.
+
+        I_clip = 0  if A > 0 and r > 1 + eps_high
+        I_clip = 0  if A < 0 and r < 1 - eps_low
+        I_clip = 1  otherwise
+
+    At the first inner epoch ``r == 1`` exactly and this is the all-ones
+    tensor; it only bites once the ratio has drifted across mini-batches.
+    """
+    ratio = torch.exp(torch.clamp(log_prob - old_log_prob, min=-20.0, max=20.0))
+    clipped = ((advantages > 0) & (ratio > 1.0 + cliprange_high)) | (
+        (advantages < 0) & (ratio < 1.0 - cliprange_low)
+    )
+    return (~clipped).to(advantages.dtype)
+
+
 def local_omega_signed(
     advantages: torch.Tensor,
     entropys: torch.Tensor,
     old_log_prob: torch.Tensor,
     log_prob: torch.Tensor,
+    iclip: Optional[torch.Tensor] = None,
+    use_ratio: bool = False,
 ) -> torch.Tensor:
     """STEER's first-order entropy-change estimate, in *signed* convention.
 
@@ -174,6 +210,40 @@ def local_omega_signed(
     Args:
         advantages / entropys / old_log_prob / log_prob: ``[B, T]``.
 
+    Args (continued):
+        iclip: optional ``[B, T]`` clip indicator from :func:`clip_indicator`.
+            ``None`` reproduces the released STEER implementation, which omits
+            it; passing it reproduces Theorem 1.  The default is ``None``
+            because the equivalence test, and the numbers the paper reports,
+            are both against the released code.
+        use_ratio: use ``r * A`` (Theorem 1) instead of ``A / pi_old`` (the
+            released code).  Appendix G Step 3 is explicit that only the
+            *sampled* action's logit moves, so the realised entropy change is
+            the single inner-product term
+
+                Omega = dH/dz_{s,a} * (z^{k+1}_{s,a} - z^k_{s,a})
+                      = -(eta/L) I_clip * r * A * pi (1-pi) (log pi + H),
+
+            with ``r = pi_theta / pi_old``.  The same factor arrives
+            independently from Eq. 7: it is an expectation over ``a ~ pi_theta``
+            while rollouts are drawn from ``pi_old``, so the importance-
+            corrected single-sample estimator carries ``r``.  Both routes
+            differ from the released code by exactly one factor of ``pi_theta``.
+
+            It is not a rescaling.  Measured on real rollouts at the first
+            inner epoch (``docs/omega_forms.json``, pooled over 20 groups so
+            the batch max spans several queries), the released form hands the
+            batch maximum -- Eq. 9's denominator for every other token -- to a
+            token of probability ``2.0e-6``; the theorem form hands it to one
+            of probability ``0.30``, which is where Figures 1-2 say the entropy
+            change actually lives.  Downstream: max/p99 6.4 -> 3.7, tokens
+            pinned within 1%% of ``w_max`` 83.4%% -> 66.7%%, weight std
+            0.0124 -> 0.0180.  Rank correlation between the two is 0.945, so
+            they also disagree about *which* tokens to attenuate.
+
+            Default ``False``: the released form is what the lambda=0
+            equivalence test and the paper's reported numbers are against.
+
     Returns:
         ``[B, T]``.
     """
@@ -184,11 +254,19 @@ def local_omega_signed(
     ln_x_plus_h = torch.log(x) + entropys
     f_x = x_one_minus_x * ln_x_plus_h
 
-    old_prob = torch.exp(old_log_prob)
-    old_prob = torch.clamp(old_prob, min=_EPS, max=1.0)
-    advantage_over_old_prob = advantages / old_prob
+    if use_ratio:
+        # r = pi_theta / pi_old, clamped the way verl clamps it elsewhere.
+        coef = advantages * torch.exp(
+            torch.clamp(log_prob - old_log_prob, min=-20.0, max=20.0))
+    else:
+        old_prob = torch.exp(old_log_prob)
+        old_prob = torch.clamp(old_prob, min=_EPS, max=1.0)
+        coef = advantages / old_prob
 
-    omega = -advantage_over_old_prob * f_x
+    omega = -coef * f_x
+    if iclip is not None:
+        # Theorem 1's I_clip: a clipped token's entropy change is exactly zero.
+        omega = omega * iclip.to(omega.dtype)
     if not torch.isfinite(omega).all():
         print("[STEER-F] Warning: Found non-finite values in Omega")
         omega = torch.where(torch.isfinite(omega), omega, torch.zeros_like(omega))
@@ -362,6 +440,107 @@ def compute_omega_tilde(
     return omega_tilde, stats
 
 
+def branch_weight_correction(
+    token_weights: torch.Tensor,
+    visit: torch.Tensor,
+    response_mask: torch.Tensor,
+    lam: float,
+    token_weight_min: float,
+    token_weight_max: float,
+    mode: str = "signed",
+) -> tuple:
+    """Adjust already-mapped weights at branch points.  ``apply="weight"``.
+
+    The additive metric form (``apply="metric"``) puts the branch signal into
+    ``Omega`` and lets STEER's min-max map it.  Measured on real rollouts, that
+    map destroys the signal: ``Omega`` is heavy-tailed -- it carries a division
+    by ``pi_old``, floored at 1e-8 -- so its extremes set the scale and the bulk
+    of tokens land within ~5% of the weight range of each other.  A branch term
+    that is nonzero at ~1% of positions comes out the far side as a mean
+    difference of 0.0007 on a 0.1-wide band, i.e. nothing, while still costing
+    the attenuating range 8-34% of its occupancy because it shifted the metric
+    distribution the min-max is computed over.  Four metric-level formulations
+    were compared offline and all four failed the same way
+    (``docs/weight_forms.json``).
+
+    Applying the correction *after* the mapping removes that competition
+    entirely: STEER's weights are computed exactly as upstream computes them,
+    and the branch adjustment is then a bounded nudge in weight space, whose
+    size is set by ``lam`` alone rather than by the shape of ``Omega``'s tail.
+
+        w = clamp( w_steer + lam * (w_max - w_min) * tanh(visit / rms(visit)),
+                   w_min, w_max )
+
+    ``tanh`` bounds a single token's adjustment to ``lam * (w_max - w_min)``, so
+    ``lam = 0.5`` moves a branch token at most half the band.  ``rms`` is taken
+    over the *support* -- positions where the branch score is actually defined
+    -- because ``A_H`` is exactly zero wherever a rollout has no surviving
+    siblings, and normalising over all positions would rescale the correction by
+    the sparsity rather than by its magnitude.
+
+    Two modes, and the difference is not cosmetic.
+
+    ``mode="signed"`` grades the adjustment by the branch score, so siblings at
+    one branch point are pushed apart: the one whose future looks richer than
+    its siblings' average is attenuated less, the dead end more.  Because
+    ``A_H`` is a deviation from that average it is zero-centred *by
+    construction*, so this can never shift the branch tokens' mean weight -- it
+    only spreads them.  Measured offline: mean branch-vs-other difference
+    +0.002 on a 0.1 band, while the weight standard deviation rose 0.0034 ->
+    0.0043.  Discrimination, not protection.
+
+    ``mode="uniform"`` attenuates every position that has surviving siblings by
+    the same amount, ignoring the sign and magnitude of the score entirely.
+    This is the "branch points are where diversity lives, so slow all of them
+    down" reading, and it is a genuinely weaker hypothesis: it needs no
+    forecast, no MTP heads and no Phase 1, because "does this rollout still
+    have siblings here" is answered by the rollout group alone.  If it matches
+    ``signed``, the forecast is not carrying the effect.
+
+    Args:
+        token_weights: ``[B, T]`` output of STEER's mapping.
+        visit: ``[B, T]`` ``dlogpi_hat * clip(A_H)``, the same quantity the
+            metric form adds.  Only its support is used when ``mode="uniform"``.
+        response_mask: ``[B, T]``.
+        lam: correction size as a fraction of the weight band.
+        token_weight_min / token_weight_max: the band to stay inside.
+        mode: ``"signed"`` or ``"uniform"``.
+
+    Returns:
+        ``(weights, stats)``.
+    """
+    if mode not in ("signed", "uniform"):
+        raise ValueError(f'mode must be "signed" or "uniform", got {mode!r}')
+    valid = response_mask.bool()
+    support = valid & (visit != 0)
+    stats = {
+        "steerf/branch_corr_frac": float(support.float().sum() / max(1, int(valid.sum()))),
+    }
+    if lam == 0.0 or not support.any():
+        stats["steerf/branch_corr_mean_abs"] = 0.0
+        return token_weights, stats
+
+    band = token_weight_max - token_weight_min
+    delta = torch.zeros_like(token_weights)
+
+    if mode == "uniform":
+        # Negative: lower weight is more attenuation, which is what "protect
+        # this position" means under the asymmetric mapping.
+        delta[support] = -lam * band
+    else:
+        rms = visit[support].float().pow(2).mean().sqrt()
+        if not torch.isfinite(rms) or rms < _EPS:
+            stats["steerf/branch_corr_mean_abs"] = 0.0
+            return token_weights, stats
+        delta[support] = lam * band * torch.tanh(visit[support].float() / rms)
+
+    out = torch.clamp(token_weights + delta, token_weight_min, token_weight_max)
+    out = out * response_mask.float()
+    stats["steerf/branch_corr_mean_abs"] = float(delta[support].abs().mean())
+    stats["steerf/branch_corr_max_abs"] = float(delta[support].abs().max())
+    return out, stats
+
+
 # ----------------------------------------------------------------------
 # drop-in replacement for verl's compute_token_weights
 # ----------------------------------------------------------------------
@@ -383,6 +562,9 @@ def compute_token_weights_steerf(
     eta: float = 1.0,
     clip_c: float = 1.0,
     norm: str = "scale",
+    apply: str = "metric",
+    use_iclip: bool = False,
+    use_ratio: bool = False,
     return_stats: bool = False,
 ):
     """Token weights from ``Omega_tilde``, mapping logic unchanged from STEER.
@@ -407,24 +589,50 @@ def compute_token_weights_steerf(
         ``[B, T]`` token weights, or ``(weights, stats)`` if ``return_stats``.
     """
     with torch.no_grad():
-        omega = local_omega_signed(advantages, entropys, old_log_prob, log_prob)
+        # use_iclip=False is the released STEER implementation and is what the
+        # lambda=0 equivalence test and the paper's reported numbers are against;
+        # True is Theorem 1 as written. See clip_indicator's docstring.
+        iclip = (
+            clip_indicator(advantages, old_log_prob, log_prob,
+                           cliprange_low=cliprange_low, cliprange_high=cliprange_high)
+            if use_iclip
+            else None
+        )
+        omega = local_omega_signed(advantages, entropys, old_log_prob, log_prob,
+                                   iclip=iclip, use_ratio=use_ratio)
 
-        if lam != 0.0 and a_h is not None:
+        if apply not in ("metric", "weight", "branch"):
+            raise ValueError(
+                f'apply must be "metric", "weight" or "branch", got {apply!r}')
+
+        steerf_on = lam != 0.0 and a_h is not None
+        pending_visit = None
+        if steerf_on:
             negative_approx_kl = torch.clamp(log_prob - old_log_prob, min=-20.0, max=20.0)
             ratio = torch.exp(negative_approx_kl)
             w = torch.clamp(ratio, 1 - cliprange_low, 1 + cliprange_high) * advantages
             pi_sampled = torch.clamp(torch.exp(log_prob), min=_EPS, max=1.0 - _EPS)
-            metric, stats = compute_omega_tilde(
-                omega_local=omega,
-                w=w,
-                pi_sampled=pi_sampled,
-                a_h=a_h,
-                response_mask=response_mask,
-                lam=lam,
-                eta=eta,
-                clip_c=clip_c,
-                norm=norm,
-            )
+            if apply == "metric":  # noqa: SIM108
+                metric, stats = compute_omega_tilde(
+                    omega_local=omega,
+                    w=w,
+                    pi_sampled=pi_sampled,
+                    a_h=a_h,
+                    response_mask=response_mask,
+                    lam=lam,
+                    eta=eta,
+                    clip_c=clip_c,
+                    norm=norm,
+                )
+            else:
+                # apply="weight": the metric stays exactly stock STEER's, so the
+                # min-max below sees the distribution it was designed for, and
+                # the branch signal is applied to the mapped weights instead.
+                metric = omega
+                pending_visit = visit_term(w, pi_sampled, a_h, eta=eta, clip_c=clip_c)
+                stats = {"steerf/lam": float(lam),
+                         "steerf/apply_weight": 1.0,
+                         "steerf/apply_uniform": float(apply == "branch")}
         else:
             metric, stats = omega, {"steerf/lam": 0.0}
 
@@ -485,4 +693,17 @@ def compute_token_weights_steerf(
             token_weights[valid_mask] = valid_weights
 
         token_weights = token_weights * response_mask.float()
+
+        if pending_visit is not None:
+            token_weights, corr_stats = branch_weight_correction(
+                token_weights,
+                pending_visit,
+                response_mask,
+                lam=lam,
+                token_weight_min=token_weight_min,
+                token_weight_max=token_weight_max,
+                mode="uniform" if apply == "branch" else "signed",
+            )
+            stats.update(corr_stats)
+
         return (token_weights, stats) if return_stats else token_weights

@@ -1,0 +1,8 @@
+Sliding Window Attention is enabled but not implemented for `sdpa`; unexpected results may be encountered.
+predictor                   rho_pooled   rho_mean  branch pts
+oracle                          1.0000     1.0000         149
+parallel                        0.8185     0.9887         149
+sequential                      0.7963     0.9988         149
+sequential-untrained            0.7144     0.9816         149
+parallel-untrained              0.7114     0.9775         149
+[rank-test] wrote docs/phase1_rank_test.json

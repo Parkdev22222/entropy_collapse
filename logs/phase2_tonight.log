@@ -1,0 +1,33 @@
+[tonight 08-18 15:51:15] waiting for the in-flight run to finish
+[tonight 08-18 22:03:35] GPU free — starting the priority passes
+[queue-paper 08-18 22:03:35] waiting for the earlier queues
+[queue-paper 08-18 22:03:35] starting paper-faithful arms
+[queue-paper 08-18 22:03:35] starting phase2-paper-lam0.0-s1
+[phase2] ARM=steer lambda=0.0 seed=1 steps=100 -> /workspace/entropy_collapse/logs/phase2-lam0.0-s1.log
+[queue-paper 08-19 01:02:40] phase2-paper-lam0.0-s1 exited rc=0 after 179m
+[queue-paper 08-19 01:02:40] arm paper seed 1 complete
+[queue-paper 08-19 01:02:40] starting phase2-thm-lam0.0-s1
+[phase2] ARM=steer lambda=0.0 seed=1 steps=100 -> /workspace/entropy_collapse/logs/phase2-lam0.0-s1.log
+[queue-paper 08-19 04:00:25] phase2-thm-lam0.0-s1 exited rc=0 after 177m
+[queue-paper 08-19 04:00:25] arm thm seed 1 complete
+[queue-paper 08-19 04:00:25] seed 1 pass complete
+[queue-paper 08-19 04:00:25] all paper-faithful arms done
+lam	seed	status	final_entropy	branch_gap	mean@16	best@16	steps	minutes
+0.0	1	ok	0.6120	na	0.5345	0.7859	100	168
+0.25	1	ok	0.3950	0.1120	0.5349	0.7863	100	349
+0.5	1	ok	0.4800	-0.1080	0.5439	0.7832	100	474
+1.0	1	ok	0.3560	0.0300	0.5333	0.7778	100	472
+grpo	1	fail	0.2340	na	0.5317	0.7911	100	177
+grpo	2	fail	0.3160	na	0.5415	0.7979	100	176
+weight0.5	1	ok	0.5490	0.0030	0.5397	0.7901	100	467
+paper0.0	1	ok	0.1770	na	0.5441	0.7806	100	179
+thm0.0	1	ok	0.1890	na	0.5481	0.7840	100	177
+[tonight 08-19 04:00:25] lam=0.0 pass done
+[queue-paper 08-19 04:00:25] waiting for the earlier queues
+[queue-paper 08-19 04:00:25] starting paper-faithful arms
+[queue-paper 08-19 04:00:25] starting phase2-paper-lam0.5-s1
+[phase2] ARM=steerf lambda=0.5 seed=1 steps=100 -> /workspace/entropy_collapse/logs/phase2-lam0.5-s1.log
+[queue-paper 08-19 11:51:52] phase2-paper-lam0.5-s1 exited rc=0 after 471m
+[queue-paper 08-19 11:51:52] arm paper seed 1 complete
+[queue-paper 08-19 11:51:52] starting phase2-thm-lam0.5-s1
+[phase2] ARM=steerf lambda=0.5 seed=1 steps=100 -> /workspace/entropy_collapse/logs/phase2-lam0.5-s1.log

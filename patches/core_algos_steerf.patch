@@ -1,6 +1,6 @@
 --- a/verl/trainer/ppo/core_algos.py	2026-08-15 03:52:01.141189071 +0000
 +++ b/verl/trainer/ppo/core_algos.py	2026-08-15 03:52:50.177821967 +0000
-@@ -587,9 +587,18 @@
+@@ -587,9 +587,21 @@
      token_weight_max: float = 1.2,
      linear: bool = True,
      mode: str = "symmetric",
@@ -10,6 +10,9 @@
 +    steerf_eta: float = 1.0,
 +    steerf_clip_c: float = 1.0,
 +    steerf_norm: str = "scale",
++    steerf_apply: str = "metric",
++    steerf_iclip: bool = False,
++    steerf_ratio: bool = False,
 +    cliprange_low: float = 0.2,
 +    cliprange_high: float = 0.28,
 +    return_stats: bool = False,
@@ -20,7 +23,7 @@
      Args:
          advantages (torch.Tensor): advantage values, shape (batch_size, response_length)
          entropys (torch.Tensor): entropy values, shape (batch_size, response_length)
-@@ -610,15 +619,47 @@
+@@ -610,15 +619,50 @@
                For directional entropy control (e.g. anti-collapse), use
                token_weight_max=1.0 to avoid amplifying entropy-increasing
                tokens.
@@ -60,6 +63,9 @@
 +            eta=steerf_eta,
 +            clip_c=steerf_clip_c,
 +            norm=steerf_norm,
++            apply=steerf_apply,
++            use_iclip=steerf_iclip,
++            use_ratio=steerf_ratio,
 +            return_stats=return_stats,
 +        )
  
@@ -96,7 +102,7 @@
  
  
  
-@@ -730,6 +773,12 @@
+@@ -730,6 +773,15 @@
      token_weight_max: float = 1.2,
      linear: bool = True,  # token weight mapping strategy
      entropy_control_mode: str = "symmetric",
@@ -106,6 +112,9 @@
 +    steerf_eta: float = 1.0,
 +    steerf_clip_c: float = 1.0,
 +    steerf_norm: str = "scale",
++    steerf_iclip: bool = False,
++    steerf_ratio: bool = False,
++    steerf_apply: str = "metric",
  ):
      """
      Implementation of Stabilizing Token-level Entropy-changE via Reweighting (STEER), following the function compute_policy_loss.
@@ -120,7 +129,7 @@
          advantages=advantages,
          entropys=entropys,
          old_log_prob=old_log_prob,
-@@ -791,8 +842,17 @@
+@@ -791,8 +842,20 @@
          token_weight_max=token_weight_max,
          linear=linear,  # whether linear mode is used
          mode=entropy_control_mode,
@@ -129,6 +138,9 @@
 +        steerf_eta=steerf_eta,
 +        steerf_clip_c=steerf_clip_c,
 +        steerf_norm=steerf_norm,
++        steerf_apply=steerf_apply,
++        steerf_iclip=steerf_iclip,
++        steerf_ratio=steerf_ratio,
 +        cliprange_low=cliprange_low if cliprange_low is not None else (cliprange or 0.2),
 +        cliprange_high=cliprange_high if cliprange_high is not None else (cliprange or 0.28),
 +        return_stats=True,

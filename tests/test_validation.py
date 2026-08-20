@@ -234,3 +234,27 @@ def test_selection_ignores_nan_entries():
 def test_selection_rejects_an_all_nan_grid():
     with pytest.raises(ValueError):
         select_kappa_gamma(_grid([(2, 0.85, float("nan"))]))
+
+
+# ----------------------------------------------------------------------
+# kappa = 1 is degenerate, not merely short: head 0 maps h_t to y_{t+1},
+# which is what the policy's own unembedding computes, so its "forecast"
+# correlates with the measurement by identity. Observed at rho = 0.997 for
+# every gamma on Qwen2.5-1.5B, against 0.71-0.81 for kappa >= 2.
+# ----------------------------------------------------------------------
+def test_kappa_one_is_excluded_by_default():
+    grid = _grid([(1, 0.85, 0.997), (2, 0.85, 0.81), (4, 0.85, 0.80)])
+    assert select_kappa_gamma(grid)["kappa"] == 2, (
+        "kappa=1 wins any unconstrained elbow search and reduces A_H to a "
+        "purely local quantity"
+    )
+
+
+def test_kappa_one_still_reachable_when_asked_for():
+    grid = _grid([(1, 0.85, 0.997), (2, 0.85, 0.81)])
+    assert select_kappa_gamma(grid, min_kappa=1)["kappa"] == 1
+
+
+def test_min_kappa_above_every_entry_raises():
+    with pytest.raises(ValueError):
+        select_kappa_gamma(_grid([(2, 0.85, 0.8)]), min_kappa=4)

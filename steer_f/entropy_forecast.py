@@ -40,6 +40,8 @@ __all__ = [
     "HeadCalibration",
     "h_togo",
     "entropy_advantage",
+    "oracle_h_togo",
+    "sibling_support",
     "sibling_prefix_baseline",
     "group_mean_baseline",
     "fit_head_calibration",
@@ -187,6 +189,116 @@ def first_divergence(responses: torch.Tensor, mask: Optional[torch.Tensor] = Non
     any_diff = differs.any(dim=-1)
     first = differs.float().argmax(dim=-1)
     return torch.where(any_diff, first, torch.full_like(first, t)).to(torch.int64)
+
+
+def oracle_h_togo(
+    entropys: torch.Tensor,
+    mask: torch.Tensor,
+    kappa: int,
+    gamma_h: float,
+) -> torch.Tensor:
+    """``H_togo`` read from the policy's own realised entropy, no forecast.
+
+    RLVR updates after the rollout has finished, so the entropy the policy
+    actually had at ``t+1 .. t+kappa`` is already known -- verl computes the
+    whole ``entropys`` tensor in the same pass that would otherwise drive the
+    MTP heads.  This function is the discounted sum of those values:
+
+        H_togo(t) = sum_{k=1..kappa}  gamma_h^k * H_policy(t + k)
+
+    It is the *control* the forecast has to beat.  ``A_H`` built on it is free
+    -- no heads, no warm-up, no extra forward -- so if it moves pass@16 as much
+    as the MTP version does, the forecaster is not earning its parameters and
+    the method simplifies to "reweight by realised downstream entropy".  If the
+    MTP version wins, the difference is attributable to estimating the
+    *expected* future entropy rather than the single realised draw, which is
+    the only thing the heads can be buying.
+
+    Positions within ``kappa`` of the end of a response have no future left;
+    their missing terms contribute zero, which biases ``H_togo`` down there.
+    That matches the MTP path, where the heads forecast past the end of a
+    finished sequence, only in the sense that both are masked out of ``A_H``
+    wherever the response has ended -- the sibling baseline compares like with
+    like because siblings share the same ``t``.
+
+    Args:
+        entropys: ``[B, T]`` per-token policy entropy, response-aligned.
+        mask: ``[B, T]`` response mask.
+        kappa: horizon.
+        gamma_h: discount; weight of offset ``+k`` is ``gamma_h ** k``.
+
+    Returns:
+        ``[B, T]`` float32, zero outside ``mask``.
+    """
+    if entropys.dim() != 2:
+        raise ValueError(f"entropys must be [B, T], got {tuple(entropys.shape)}")
+    if entropys.shape != mask.shape:
+        raise ValueError(f"shape mismatch: {tuple(entropys.shape)} vs {tuple(mask.shape)}")
+    if kappa < 1:
+        raise ValueError(f"kappa must be >= 1, got {kappa}")
+
+    e = entropys.float()
+    m = mask.to(e.dtype)
+    t = e.shape[1]
+    out = torch.zeros_like(e)
+    for k in range(1, kappa + 1):
+        if k >= t:
+            break
+        shifted = torch.zeros_like(e)
+        shifted[:, : t - k] = e[:, k:] * m[:, k:]
+        out = out + (gamma_h ** k) * shifted
+    return out * m
+
+
+def sibling_support(
+    responses: torch.Tensor,
+    mask: torch.Tensor,
+    group_index: Sequence,
+) -> torch.Tensor:
+    """Positions where a rollout still has at least one sibling.
+
+    ``A_H`` is only defined where the sibling baseline averages over more than
+    the rollout itself; everywhere else :func:`sibling_prefix_baseline` returns
+    the rollout's own value and ``A_H`` is exactly zero.  That region is most of
+    a long response, which makes it the wrong denominator for any statistic
+    about how well ``A_H`` *ranks* positions:
+
+    * a true branch point requires a sibling, so it can only occur inside the
+      support;
+    * ``A_H`` is nonzero only inside the support.
+
+    A top-decile test run over all positions therefore scores the support
+    itself, and passes just as well with untrained heads — measured at recall
+    0.4711 untrained versus 0.4693 trained, i.e. no information about the
+    forecast at all.  Restricting both the selection and the null to this mask
+    makes the same test measure ranking.
+
+    Args:
+        responses: ``[B, T]`` token ids.
+        mask: ``[B, T]`` response mask.
+        group_index: length-``B`` prompt-group keys.
+
+    Returns:
+        ``[B, T]`` bool, True where the rollout has >= 2 alive prefix-matched
+        siblings (itself included).
+    """
+    _check_bt(torch.zeros_like(mask, dtype=torch.float32), responses, mask, group_index)
+    b, t = responses.shape
+    out = torch.zeros((b, t), dtype=torch.bool, device=responses.device)
+
+    for rows in _group_rows(group_index):
+        if len(rows) == 1:
+            continue
+        idx = torch.as_tensor(rows, dtype=torch.long, device=responses.device)
+        div = first_divergence(responses[idx], mask[idx])          # [g, g]
+        positions = torch.arange(t, device=responses.device).view(1, 1, t)
+        sibling = div.unsqueeze(-1) > (positions - 1)              # [g, g, T]
+        sibling = sibling & mask[idx].bool().unsqueeze(0)
+        n = torch.arange(len(rows), device=responses.device)
+        sibling[n, n, :] = True                                    # self counts
+        out[idx] = (sibling.sum(dim=1) >= 2) & mask[idx].bool()
+
+    return out
 
 
 def sibling_prefix_baseline(

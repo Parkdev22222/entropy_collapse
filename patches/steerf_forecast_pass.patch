@@ -11,15 +11,25 @@ STEER-F: produce the future-entropy forecast and turn it into A_H.
   ray_trainer.py    build A_H with the sibling baseline, which needs the whole
                     prompt group and therefore cannot live in the actor.
 
-SCOPE NOTE: unlike the other patches in this directory, this one could not be
-executed during development -- it needs a GPU, and the environment it was
-written in has none. The logic it calls is unit-tested (tests/), but the FSDP
-parameter-gathering path in _steerf_unembedding() is untested. Read the
-docstring there before the first multi-GPU run.
+SCOPE NOTE: the FSDP parameter-gathering path was untested when this patch was
+written and did in fact fail on its first run. Qwen2.5 ties lm_head.weight to
+embed_tokens.weight, FSDP frees that flat parameter when a forward returns, and
+the unembedding became a view onto empty storage. The forecast is now taken
+inside summon_full_params, entered AFTER the forward rather than around it --
+see the comment at _steerf_forecast. Reproduced and verified against the real
+1.5B model under verl's exact FSDP configuration.
 
 --- a/verl/workers/actor/dp_actor.py	2026-08-15 04:03:06.975868553 +0000
 +++ b/verl/workers/actor/dp_actor.py	2026-08-15 04:03:47.297861028 +0000
-@@ -301,8 +301,124 @@
+@@ -17,6 +17,7 @@
+ 
+ import itertools
+ import logging
++import contextlib
+ import os
+ from typing import Tuple
+ 
+@@ -301,8 +301,163 @@
              self.actor_optimizer.step()
          return grad_norm
  
@@ -72,13 +82,17 @@ docstring there before the first multi-GPU run.
 +    def _steerf_unembedding(self):
 +        """The policy's output embedding, reached through any FSDP wrapper.
 +
-+        KNOWN RISK — this is the one part of STEER-F that could not be tested
-+        without multi-GPU hardware. Under FSDP the unembedding parameters are
-+        sharded outside a forward pass, so calling it directly here can fail or
-+        silently see a shard. If a run dies here, the two documented fixes are
-+        (a) wrap the forecast in `FSDP.summon_full_params(..., writeback=False)`,
-+        or (b) set `steerf_forecast_device=cpu` and keep an unsharded copy of
-+        the unembedding. See docs/experiment_log.md "Phase 2 open risks".
++        Must be called inside `FSDP.summon_full_params`. Qwen2.5 ties
++        lm_head.weight to embed_tokens.weight — the same tensor object — and
++        FSDP frees that flat parameter when a forward returns, leaving this
++        module's weight as a view onto empty storage. Calling it directly after
++        a forward raises
++
++            setStorage: ... out of bounds for storage of size 0
++
++        which is what the first lambda>0 run did. `_steerf_forecast` owns the
++        context; entering it around the forward instead of after would not help,
++        because the forward frees the parameters again as it exits.
 +        """
 +        module = self.actor_module
 +        for _ in range(4):  # unwrap FSDP / compile / PEFT layers
@@ -102,6 +116,12 @@ docstring there before the first multi-GPU run.
 +        batch, no backward.
 +        """
 +        if not self._steerf_enabled():
++            return None
++        # In oracle mode H_togo is read from the policy's own entropy in
++        # ray_trainer, so there is nothing to forecast here and the extra
++        # no-grad forward -- the dominant cost of STEER-F, measured at 262 s/step
++        # against 83 s/step for lambda=0 -- is skipped entirely.
++        if str(self._steerf_config().get("steerf_forecast", "mtp")) == "oracle":
 +            return None
 +
 +        from steer_f.omega_tilde import SteerFConfig
@@ -128,16 +148,45 @@ docstring there before the first multi-GPU run.
 +        )
 +        hidden = output.hidden_states[-1]
 +
-+        return forecast_h_togo(
-+            hidden_states=hidden,
-+            lm_head=self._steerf_unembedding(),
-+            heads=heads,
-+            response_length=response_length,
-+            cfg=sf_cfg,
-+            calib=calib,
-+            temperature=temperature,  # match verl's entropys scale
-+            chunk_size=int(cfg.get("steerf_chunk_size", 4096)),
++        # The forward above must finish OUTSIDE summon_full_params. Qwen2.5 ties
++        # lm_head.weight to embed_tokens.weight (one object, verified with
++        # `is`), FSDP frees that flat parameter when a forward returns, and the
++        # unembedding is then a view onto empty storage:
++        #
++        #   RuntimeError: setStorage: sizes [1536, 151936] ... out of bounds
++        #                 for storage of size 0
++        #
++        # summon_full_params materialises it again, but only for code that is
++        # not itself a forward through the wrapped module — running the forward
++        # inside the context frees the parameters again on the way out, which
++        # is why the remedy recorded in docs/experiment_log.md as fix (a) does
++        # not work as written. Forward first, summon second.
++        #
++        # Summoning restores the ORIGINAL parameter dtype (fp32), while `hidden`
++        # is the mixed-precision bf16 output, so the cast is required rather
++        # than incidental.
++        ctx = (
++            FSDP.summon_full_params(self.actor_module, writeback=False, recurse=True)
++            if isinstance(self.actor_module, FSDP)
++            else contextlib.nullcontext()
 +        )
++        with ctx:
++            unembedding = self._steerf_unembedding()
++            weight_dtype = unembedding.weight.dtype
++
++            def lm_head(x):
++                return unembedding(x.to(weight_dtype))
++
++            return forecast_h_togo(
++                hidden_states=hidden,
++                lm_head=lm_head,
++                heads=heads,
++                response_length=response_length,
++                cfg=sf_cfg,
++                calib=calib,
++                temperature=temperature,  # match verl's entropys scale
++                chunk_size=int(cfg.get("steerf_chunk_size", 4096)),
++            )
 +
      @GPUMemoryLogger(role="dp actor", logger=logger)
 -    def compute_log_prob(self, data: DataProto, calculate_entropy=False) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -211,7 +260,7 @@ docstring there before the first multi-GPU run.
                  meta_info={"temperature": self.config.rollout.temperature},
 --- a/verl/trainer/ppo/ray_trainer.py	2026-08-15 04:03:06.975978010 +0000
 +++ b/verl/trainer/ppo/ray_trainer.py	2026-08-15 04:04:09.273862334 +0000
-@@ -1213,10 +1213,48 @@
+@@ -1213,10 +1213,78 @@
                          # add entropys and max_prob_log_probs to batch for update_policy use
                          batch.batch["entropys"] = entropys
                          batch.batch["max_prob_log_probs"] = max_prob_log_probs
@@ -221,38 +270,68 @@ docstring there before the first multi-GPU run.
 +                        # advantage A_H. This must happen here, not in the actor:
 +                        # the sibling baseline needs every rollout of a prompt
 +                        # group at once, and a micro-batch only sees a slice.
-+                        if "h_togo" in old_log_prob.batch.keys():
++                        steerf_cfg_src = self.config.actor_rollout_ref.actor.policy_loss
++                        _sf_lam = float(steerf_cfg_src.get("steerf_lam", 0.0))
++                        _sf_mode = str(steerf_cfg_src.get("steerf_forecast", "mtp"))
++                        _sf_oracle = _sf_mode == "oracle" and _sf_lam != 0.0
++                        if "h_togo" in old_log_prob.batch.keys() or _sf_oracle:
 +                            from steer_f.monitors import branch_recall_at_k
 +                            from steer_f.omega_tilde import SteerFConfig
 +                            from steer_f.verl_integration import compute_a_h
 +
-+                            steerf_cfg_src = self.config.actor_rollout_ref.actor.policy_loss
 +                            steerf_cfg = SteerFConfig(
-+                                lam=float(steerf_cfg_src.get("steerf_lam", 0.0)),
++                                lam=_sf_lam,
 +                                baseline=str(steerf_cfg_src.get("steerf_baseline", "sibling")),
 +                            )
++                            if _sf_oracle:
++                                # The control arm: no heads, no forecast, no extra
++                                # forward -- just the realised downstream entropy.
++                                from steer_f.entropy_forecast import oracle_h_togo
++
++                                _h_togo = oracle_h_togo(
++                                    entropys, response_masks,
++                                    kappa=int(steerf_cfg_src.get("steerf_kappa", 4)),
++                                    gamma_h=float(steerf_cfg_src.get("steerf_gamma_h", 0.85)),
++                                )
++                            else:
++                                _h_togo = old_log_prob.batch["h_togo"]
 +                            a_h = compute_a_h(
-+                                h_togo_vals=old_log_prob.batch["h_togo"],
++                                h_togo_vals=_h_togo,
 +                                responses=batch.batch["responses"],
 +                                response_mask=response_masks,
 +                                uid=batch.non_tensor_batch["uid"],
 +                                cfg=steerf_cfg,
 +                            )
 +                            batch.batch["a_h"] = a_h
++                            # Without `support` this statistic scores the region
++                            # where A_H is *defined* rather than how the forecast
++                            # ranks inside it, and passes identically with
++                            # untrained heads (0.4711 untrained vs 0.4693
++                            # trained, docs/phase1_recall*.json). Restricting it
++                            # to the sibling support is what makes it a test of
++                            # the forecast.
++                            from steer_f.entropy_forecast import sibling_support
++
++                            _support = sibling_support(
++                                batch.batch["responses"], response_masks,
++                                batch.non_tensor_batch["uid"],
++                            )
 +                            recall = branch_recall_at_k(
 +                                a_h, batch.batch["responses"], response_masks,
-+                                batch.non_tensor_batch["uid"],
++                                batch.non_tensor_batch["uid"], support=_support,
 +                            )
 +                            metrics.update({
 +                                "steerf/h_togo_mean": float(
-+                                    old_log_prob.batch["h_togo"][response_masks.bool()].mean()
++                                    _h_togo[response_masks.bool()].mean()
 +                                ),
++                                "steerf/forecast_oracle": float(_sf_oracle),
 +                                "steerf/a_h_abs_mean": float(a_h[response_masks.bool()].abs().mean()),
 +                                "steerf/branch_recall": recall["recall"],
 +                                "steerf/branch_lift": recall["lift"],
 +                                "steerf/n_branch_points": float(recall["n_branch"]),
 +                            })
-+                            old_log_prob.batch.pop("h_togo")
++                            if "h_togo" in old_log_prob.batch.keys():
++                                old_log_prob.batch.pop("h_togo")
 +
                          old_log_prob.batch.pop("entropys")
                          old_log_prob.batch.pop("max_prob_log_probs")  # remove max_prob_log_probs

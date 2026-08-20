@@ -1,0 +1,18 @@
+{
+  "recall_stats": {
+    "recall": 0.47112323783537974,
+    "baseline": 0.10000060265529925,
+    "lift": 4.711232378353797,
+    "n_branch": 2199,
+    "n_hit": 1036,
+    "n_valid": 497797
+  },
+  "selection_rate": 0.10000060265529925,
+  "rho_mean": NaN,
+  "kappa": 1,
+  "gamma_h": 0.7,
+  "baseline": "sibling",
+  "n_groups": 96,
+  "gate_passed": false,
+  "gate_summary": "GATE: FAIL\n  [ ] within-problem rho >= 0.20: rho_mean=nan\n  [x] branch recall@10% above chance (p<0.05): recall=0.4711 vs chance=0.1000, p=0 (1036/2199)\n  ! rho_mean is nan: every problem was constant or below min_per_problem"
+}

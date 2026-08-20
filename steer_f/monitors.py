@@ -180,6 +180,36 @@ def mtp_policy_kl(
     return float((p * (p_logprob - q_logprob)).sum(dim=-1).mean())
 
 
+def _top_k_selection(values: torch.Tensor, k: int) -> torch.Tensor:
+    """Boolean mask selecting exactly ``k`` entries of a 1-D tensor.
+
+    The obvious spelling — take the k-th largest as a threshold and keep
+    everything ``>=`` it — silently returns far more than ``k`` when the values
+    have a point mass, and ``A_H`` always does.  With ``baseline="sibling"``
+    a rollout that has become unique is its own only sibling, so its ``A_H`` is
+    *exactly* zero (``sibling_prefix_baseline``'s documented behaviour); past
+    the first divergence that is almost every position.  Measured on 8 siblings
+    with a shared 5-token prefix:
+
+        T=  96   A_H == 0 at 93.8% of positions  ->  ">= thresh" keeps 96.7%
+        T= 512   A_H == 0 at 98.8% of positions  ->  ">= thresh" keeps 99.4%
+        T=1024   A_H == 0 at 99.4% of positions  ->  ">= thresh" keeps 99.7%
+
+    A "top decile" holding 99.7% of tokens breaks both gates that rest on it:
+    G1's binomial test gets a null selection rate of 0.997 and can never reach
+    significance, and G2's `branch_entropy` / `nonbranch_entropy` split becomes
+    99.7% against 0.3%, so `branch_entropy_gap` reports nothing about branch
+    points.  Selecting by rank instead of by value fixes both.
+
+    Ties are broken by ``torch.topk``'s index order, which is deterministic but
+    arbitrary; when the tie block straddles the cut there is no better answer
+    available from ``A_H`` alone.
+    """
+    sel = torch.zeros(values.numel(), dtype=torch.bool, device=values.device)
+    sel[torch.topk(values, min(k, values.numel())).indices] = True
+    return sel
+
+
 @torch.no_grad()
 def branch_token_entropy(
     entropys: torch.Tensor,
@@ -217,8 +247,7 @@ def branch_token_entropy(
     ent_v = entropys[valid].float()
     a_v = a_h[valid].float()
     k = max(1, int(round(n * top_frac)))
-    thresh = torch.topk(a_v, k).values.min()
-    is_branch = a_v >= thresh
+    is_branch = _top_k_selection(a_v, k)
 
     branch = float(ent_v[is_branch].mean())
     other = float(ent_v[~is_branch].mean()) if int((~is_branch).sum()) > 0 else float("nan")
@@ -278,6 +307,7 @@ def branch_recall_at_k(
     mask: torch.Tensor,
     group_index: Sequence,
     top_frac: float = 0.1,
+    support: Optional[torch.Tensor] = None,
 ) -> dict:
     """Do high-``A_H`` positions coincide with real sibling divergences?
 
@@ -291,6 +321,15 @@ def branch_recall_at_k(
         mask: ``[B, T]`` response mask.
         group_index: length-``B`` prompt-group keys.
         top_frac: decile fraction.
+        support: optional ``[B, T]`` mask restricting BOTH the selection and
+            the null.  Pass
+            :func:`steer_f.entropy_forecast.sibling_support` to make this a
+            test of how ``A_H`` *ranks* positions rather than of where it is
+            defined at all.  Without it the statistic is dominated by the fact
+            that ``A_H`` is nonzero only where siblings remain, which is also
+            the only place branch points can occur — so it passes identically
+            with untrained heads (0.4711 untrained vs 0.4693 trained on the
+            Phase-0 rollouts) and carries no information about the forecast.
 
     Returns:
         ``recall`` (fraction of true branch points inside the top decile),
@@ -300,6 +339,8 @@ def branch_recall_at_k(
         test are returned as ``n_branch`` / ``n_hit`` / ``n_valid``.
     """
     valid = mask.bool()
+    if support is not None:
+        valid = valid & support.bool()
     n_valid = int(valid.sum())
     if n_valid == 0:
         return {"recall": float("nan"), "baseline": top_frac, "lift": float("nan"),
@@ -318,9 +359,8 @@ def branch_recall_at_k(
 
     a_v = a_h[valid].float()
     k = max(1, int(round(n_valid * top_frac)))
-    thresh = torch.topk(a_v, k).values.min()
     selected = torch.zeros_like(mask, dtype=torch.bool)
-    selected[valid] = a_v >= thresh
+    selected[valid] = _top_k_selection(a_v, k)
 
     n_branch = int(is_branch.sum())
     n_hit = int((is_branch & selected).sum())

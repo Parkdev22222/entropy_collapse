@@ -1,0 +1,36 @@
+{
+  "kappa": 2,
+  "gamma_h": 0.7,
+  "results": {
+    "parallel": {
+      "rho_pooled": 0.8185255984331931,
+      "rho_mean": 0.9886612367692157,
+      "n_branch_points": 149,
+      "n_obs": 818
+    },
+    "parallel-untrained": {
+      "rho_pooled": 0.7114107474976734,
+      "rho_mean": 0.977493054715615,
+      "n_branch_points": 149,
+      "n_obs": 818
+    },
+    "sequential": {
+      "rho_pooled": 0.796297684234837,
+      "rho_mean": 0.9987602727828172,
+      "n_branch_points": 149,
+      "n_obs": 818
+    },
+    "sequential-untrained": {
+      "rho_pooled": 0.7144205218153707,
+      "rho_mean": 0.9816327703170246,
+      "n_branch_points": 149,
+      "n_obs": 818
+    },
+    "oracle": {
+      "rho_pooled": 1.0,
+      "rho_mean": 0.999999,
+      "n_branch_points": 149,
+      "n_obs": 818
+    }
+  }
+}

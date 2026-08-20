@@ -1,0 +1,21 @@
+Sliding Window Attention is enabled but not implemented for `sdpa`; unexpected results may be encountered.
+[align] 5284 prompts, 3685 with a unanimous verdict (no signal, and zero GRPO advantage), 120 usable
+[align] 10/120 groups, 34 discriminating branch points
+[align] 20/120 groups, 73 discriminating branch points
+[align] 30/120 groups, 108 discriminating branch points
+[align] 40/120 groups, 140 discriminating branch points
+[align] 50/120 groups, 171 discriminating branch points
+[align] 60/120 groups, 204 discriminating branch points
+[align] 70/120 groups, 234 discriminating branch points
+[align] 80/120 groups, 270 discriminating branch points
+[align] 90/120 groups, 310 discriminating branch points
+[align] 100/120 groups, 335 discriminating branch points
+[align] 110/120 groups, 372 discriminating branch points
+[align] 120/120 groups, 410 discriminating branch points
+
+[align] 410 branch points where sibling outcomes differed
+predictor   win rate    pairs  p (> chance)
+oracle        0.3549     2274             1
+local         0.0000     2274             1
+mtp           0.2801     2274             1
+[align] wrote docs/ah_vs_correctness.json

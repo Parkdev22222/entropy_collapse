@@ -1,0 +1,9 @@
+[queue 07:38:41] GPU free
+[queue 07:38:41] starting ARM=steer
+[phase0] ARM=steer steps=100 -> /workspace/entropy_collapse/logs/phase0_steer.log
+[queue 10:06:20] ARM=steer exited 0
+[queue 10:06:20] building throwaway heads for the lambda>0 smoke test
+[dummy-heads] wrote UNTRAINED heads to checkpoints/mtp_heads_smoke.pt (H=1536, V=151936, K=8)
+[dummy-heads] plumbing test only — not a STEER-F result
+[queue 10:06:23] starting steerf smoke (2 steps, lambda=0.5, random heads)
+[queue 10:08:48] steerf smoke exited 1 -> logs/smoke_steerf.log

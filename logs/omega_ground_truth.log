@@ -1,0 +1,11 @@
+[gt] 6 mixed-outcome groups, eta=0.0001
+Sliding Window Attention is enabled but not implemented for `sdpa`; unexpected results may be encountered.
+[gt] group 2/6  n=768 tokens  |dH|mean=1.058e-03
+[gt] group 4/6  n=768 tokens  |dH|mean=1.787e-03
+[gt] group 6/6  n=768 tokens  |dH|mean=3.358e-03
+
+form                     MSE       PCC      SRCC   (paper reports PCC ~+0.4, SRCC ~+0.6..0.7)
+released           1.632e-05     0.309     0.416
+theorem_r          1.632e-05     0.408     0.419
+
+wrote docs/omega_ground_truth.json

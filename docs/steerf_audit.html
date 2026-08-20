@@ -1,0 +1,551 @@
+<title>STEER-F 실행 원장</title>
+<style>
+:root{
+  --ground:#EEF0F3; --surface:#FFFFFF; --surface-2:#F6F7F9;
+  --ink:#161A22; --ink-2:#39414F; --muted:#5A6472; --rule:#D3D8DF;
+  --accent:#2F4B7C; --accent-soft:#E3E9F3;
+  --ok:#2C6A55; --ok-soft:#DFEDE7;
+  --open:#8A5214; --open-soft:#F4E9DA;
+  --void:#8C2F22; --void-soft:#F5E2DE;
+  --shadow:0 1px 2px rgba(22,26,34,.06),0 8px 24px -12px rgba(22,26,34,.14);
+  --mono:ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,"D2Coding","Liberation Mono",monospace;
+  --sans:"Pretendard","Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",
+         -apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ground:#12151B; --surface:#191D25; --surface-2:#1F242D;
+    --ink:#E4E7EC; --ink-2:#C2C8D2; --muted:#8B95A5; --rule:#2C3340;
+    --accent:#7EA2DA; --accent-soft:#1E2836;
+    --ok:#5FB394; --ok-soft:#172A24;
+    --open:#D89A4A; --open-soft:#2B2114;
+    --void:#DE7A66; --void-soft:#2E1A16;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -12px rgba(0,0,0,.6);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#12151B; --surface:#191D25; --surface-2:#1F242D;
+  --ink:#E4E7EC; --ink-2:#C2C8D2; --muted:#8B95A5; --rule:#2C3340;
+  --accent:#7EA2DA; --accent-soft:#1E2836;
+  --ok:#5FB394; --ok-soft:#172A24;
+  --open:#D89A4A; --open-soft:#2B2114;
+  --void:#DE7A66; --void-soft:#2E1A16;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -12px rgba(0,0,0,.6);
+}
+*{box-sizing:border-box}
+body{
+  margin:0;background:var(--ground);color:var(--ink);
+  font-family:var(--sans);font-size:16px;line-height:1.75;
+  word-break:keep-all;-webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1080px;margin:0 auto;padding:0 24px 96px}
+code,.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+code{font-size:.86em;background:var(--surface-2);border:1px solid var(--rule);
+     border-radius:3px;padding:.08em .34em;word-break:break-all}
+h1,h2,h3{font-weight:700;text-wrap:balance;margin:0}
+a{color:var(--accent)}
+
+header{padding:56px 0 32px;border-bottom:2px solid var(--ink)}
+.eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--muted)}
+h1{font-size:clamp(30px,5vw,46px);letter-spacing:-.03em;line-height:1.14;margin:14px 0 0}
+.standfirst{font-size:18px;color:var(--ink-2);max-width:44ch;margin:18px 0 0;line-height:1.7}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+  gap:1px;background:var(--rule);border:1px solid var(--rule);margin-top:34px}
+.tile{background:var(--surface);padding:16px 18px}
+.tile .n{font-family:var(--mono);font-size:29px;font-weight:600;letter-spacing:-.03em;
+  display:block;line-height:1.1;font-variant-numeric:tabular-nums}
+.tile .l{font-size:11.5px;letter-spacing:.02em;color:var(--muted);display:block;margin-top:5px}
+
+section{padding-top:56px}
+h2{font-family:var(--mono);font-size:12.5px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--accent);padding-bottom:10px;border-bottom:1px solid var(--rule)}
+.lede{font-size:17px;color:var(--ink-2);max-width:48ch;margin:18px 0 0}
+h3{font-size:19.5px;letter-spacing:-.02em;line-height:1.45;margin:34px 0 0}
+p{margin:14px 0 0;max-width:50ch}
+.callout p,.evidence{max-width:none}
+
+.finding{display:grid;grid-template-columns:78px 1fr;gap:20px;
+  padding:26px 0;border-bottom:1px solid var(--rule)}
+.gutter{display:flex;flex-direction:column;gap:8px;align-items:flex-start}
+.idx{font-family:var(--mono);font-size:23px;font-weight:600;color:var(--muted);
+  letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1}
+.chip{font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;
+  padding:3px 6px;border-radius:2px;white-space:nowrap;font-weight:600}
+.chip.ok{background:var(--ok-soft);color:var(--ok);border:1px solid color-mix(in srgb,var(--ok) 34%,transparent)}
+.chip.open{background:var(--open-soft);color:var(--open);border:1px solid color-mix(in srgb,var(--open) 34%,transparent)}
+.chip.void{background:var(--void-soft);color:var(--void);border:1px solid color-mix(in srgb,var(--void) 34%,transparent)}
+.finding h3{margin:0}
+.meta{font-family:var(--mono);font-size:11.5px;color:var(--muted);margin-top:7px}
+.evidence{background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--accent);
+  padding:12px 14px;margin-top:14px;font-family:var(--mono);font-size:12.5px;line-height:1.75;
+  overflow-x:auto;color:var(--ink-2)}
+.evidence b{color:var(--ink);font-weight:600}
+.fix{margin-top:12px;font-size:15px;color:var(--ink-2)}
+.fix strong{font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--muted);display:block;margin-bottom:2px;font-weight:600}
+
+.tablewrap{overflow-x:auto;margin-top:20px;border:1px solid var(--rule);background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:14px;min-width:520px}
+th,td{text-align:left;padding:9px 14px;border-bottom:1px solid var(--rule);vertical-align:top;line-height:1.6}
+th{font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--muted);background:var(--surface-2);font-weight:600;white-space:nowrap}
+td.num,th.num{font-family:var(--mono);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.key{font-family:var(--mono);font-size:12.5px;color:var(--ink);white-space:nowrap}
+tbody tr:last-child td{border-bottom:none}
+.hi{background:var(--accent-soft)}
+.warn{color:var(--void);font-weight:700}
+caption{caption-side:bottom;text-align:left;padding:10px 14px;font-size:13px;
+  color:var(--muted);border-top:1px solid var(--rule);line-height:1.65}
+
+.metric{border-top:1px solid var(--rule);padding:20px 0}
+.metric:first-of-type{border-top:none}
+.mname{font-family:var(--mono);font-size:14px;font-weight:600;color:var(--ink)}
+.mrole{font-size:11px;letter-spacing:.04em;color:var(--accent);margin-left:10px;font-weight:600}
+.mdef{margin-top:9px}
+.mwatch{margin-top:10px;padding-left:13px;border-left:2px solid var(--open);
+  color:var(--ink-2);font-size:15px;max-width:50ch}
+.mwatch b{font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--open);font-weight:600}
+
+.callout{background:var(--surface);border:1px solid var(--rule);padding:20px 22px;margin-top:24px;
+  box-shadow:var(--shadow)}
+.callout p{max-width:56ch}
+.callout p:first-child{margin-top:0}
+.callout.grave{border-left:3px solid var(--void)}
+.callout.note{border-left:3px solid var(--accent)}
+footer{margin-top:64px;padding-top:22px;border-top:1px solid var(--rule);
+  font-family:var(--mono);font-size:11.5px;color:var(--muted);line-height:1.8}
+@media (max-width:640px){
+  .finding{grid-template-columns:1fr;gap:10px}
+  .gutter{flex-direction:row;align-items:center;gap:12px}
+  .idx{font-size:18px}
+}
+</style>
+
+<div class="wrap">
+<header>
+  <div class="eyebrow">STEER-F · Qwen2.5-1.5B-Instruct · A100-80GB × 1</div>
+  <h1>실행 원장</h1>
+  <p class="standfirst">“테스트 213개 통과, 실행은 전무” 상태의 저장소를 Phase 0 게이트 통과까지 끌고 가면서 발견한 모든 이슈, 그리고 기록되는 각 수치가 실제로 무엇을 재는지.</p>
+  <div class="tiles">
+    <div class="tile"><span class="n">18</span><span class="l">발견된 이슈</span></div>
+    <div class="tile"><span class="n">15</span><span class="l">수정 완료</span></div>
+    <div class="tile"><span class="n">3</span><span class="l">미해결</span></div>
+    <div class="tile"><span class="n">7</span><span class="l">게이트 무효화</span></div>
+    <div class="tile"><span class="n">222</span><span class="l">통과 테스트</span></div>
+  </div>
+</header>
+
+<section>
+  <h2>현재 위치</h2>
+  <p class="lede">게이트 하나 통과, 게이트 하나는 판정 기준 자체가 검정 불가로 판명, 본실험은 미시작.</p>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>게이트</th><th>상태</th><th>근거</th></tr></thead>
+    <tbody>
+      <tr><td class="key">G0</td><td><span class="chip ok">통과</span></td><td>GRPO 엔트로피 0.700→0.314, STEER 0.700→0.630. 단, STEER의 <em>asymmetric</em> 설정으로 바꿔야 했음 — 기본 symmetric 설정에서는 실패(발견 06).</td></tr>
+      <tr><td class="key">G1 · 조건 1</td><td><span class="chip ok">통과</span></td><td>문제-내 ρ = 0.841 (κ=2, γ<sub>H</sub>=0.7, 25문제). κ ≥ 2 어디서도 0.71~0.81 유지.</td></tr>
+      <tr><td class="key">G1 · 조건 2</td><td><span class="chip void">검정 불가</span></td><td>분기 recall이 학습된 예보기와 랜덤 예보기를 구분하지 못함(발견 16). 형제 랭킹 검정으로 대체.</td></tr>
+      <tr><td class="key">G2</td><td><span class="chip open">미시작</span></td><td>λ × 시드 12런 그리드. 설정만 완료, 실행 전. <strong>λ&gt;0 학습은 아직 한 번도 안 돌림.</strong></td></tr>
+      <tr><td class="key">G3 · Ablation</td><td><span class="chip open">미시작</span></td><td>—</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="callout grave">
+    <p><strong>저장소가 뒷받침하는 주장은 크게 달라지지 않았습니다.</strong> 여전히 “λ = 0에서 stock STEER와 비트 동일하고, λ &gt; 0에서 크래시 없이 돈다”입니다. 여기에 추가된 것은 작동하는 기준선, 실측 미래 엔트로피와 상관하는 예보, 그리고 그 예보가 로컬 엔트로피를 넘어서는 형제 랭킹 신호를 <em>일부</em> 갖는다는 증거입니다. 그것이 pass@16으로 이어지는지는 전혀 측정되지 않았습니다.</p>
+  </div>
+</section>
+
+<section>
+  <h2>PART 1 · 파이프라인 차단 요인</h2>
+  <p class="lede">실행을 멈추거나, 조용히 아무것도 만들지 않는 결함. 전부 README 순서대로 진행하다 부딪힌 것들입니다.</p>
+
+  <div class="finding">
+    <div class="gutter"><span class="idx">01</span><span class="chip ok">수정</span></div>
+    <div>
+      <h3>학습 롤아웃 덤프가 주석 처리되어 있었음</h3>
+      <div class="meta">verl/trainer/ppo/ray_trainer.py · 첫 실행 전 발견</div>
+      <p>STEER 포크는 프롬프트와 응답을 디코드해 놓고 <code>_dump_generations</code> 호출을 주석 처리해 뒀습니다. <code>trainer.rollout_data_dir</code>은 명령줄에서 받아들여지지만 파일을 쓰지 않습니다. Phase 1의 헤드 워밍업이 바로 그 덤프를 입력으로 쓰므로, <strong>Phase 1은 시작 자체가 불가능했고 Phase 0는 산출물을 남기지 못했습니다.</strong></p>
+      <p class="fix"><strong>수정</strong><code>patches/rollout_dump_steerf.patch</code> 추가 — 주석 해제만으로 충분합니다(헬퍼와 인자가 이미 스코프에 있음). 덤프 형식이 워밍업이 기대하는 것과 달라 <code>scripts/phase0_collect_rollouts.py</code>가 <code>{input,output,score}</code> → <code>{text,prompt,response}</code>로 변환합니다.</p>
+    </div>
+  </div>
+
+  <div class="finding">
+    <div class="gutter"><span class="idx">02</span><span class="chip ok">수정</span></div>
+    <div>
+      <h3>소형 모델 래퍼가 모든 오버라이드를 삼킴</h3>
+      <div class="meta">run/run_steerf_small.sh</div>
+      <p><code>run_steerf_small.sh</code>는 자기 hydra 오버라이드만 <code>run_steerf.sh</code>에 넘기고 <code>"$@"</code>를 전달하지 않습니다. 래퍼에 준 오버라이드는 <strong>에러 없이 폐기</strong>됩니다. 2스텝짜리 스모크 테스트가 조용히 풀 배치 설정으로 도는 형태로 드러났습니다.</p>
+      <p class="fix"><strong>수정</strong><code>"$@"</code> 추가. hydra는 나중 할당이 이기므로 호출자 오버라이드가 정상 반영됩니다.</p>
+    </div>
+  </div>
+
+  <div class="finding">
+    <div class="gutter"><span class="idx">03</span><span class="chip ok">수정</span></div>
+    <div>
+      <h3>리워드 의존성 누락으로 첫 validation에서 사망</h3>
+      <div class="meta">verl/utils/reward_score/qwen_math_eval_toolkit</div>
+      <p><code>math500</code>과 <code>aime24</code>는 <code>multi_datasets_eval</code> 경로를 타고, 이 모듈은 <code>word2number</code>를 임포트합니다. STEER requirements에 없습니다. <code>run_steerf.sh</code>의 기본 검증셋이 aime24이므로 <strong>원본 설정 그대로도</strong> <code>val_before_train</code>에서 <code>ModuleNotFoundError</code>로 죽습니다.</p>
+      <p class="fix"><strong>수정</strong>설치. 코드 결함이 아니라 의존성 누락이므로, 새 환경마다 재발합니다.</p>
+    </div>
+  </div>
+
+  <div class="finding">
+    <div class="gutter"><span class="idx">04</span><span class="chip ok">수정</span></div>
+    <div>
+      <h3>코어 255개에서 torch가 스래싱</h3>
+      <div class="meta">환경</div>
+      <p>기본 스레드 수로 테스트 스위트가 2700 % CPU에서 10분 이상 걸렸고, 제한 후 6.2초에 끝났습니다. 토크나이징, 리워드 경로, Phase 1 스크립트 등 CPU 단계 전부가 이 비용을 냅니다.</p>
+      <p class="fix"><strong>수정</strong><code>run/env_1gpu.sh</code>에 <code>OMP_NUM_THREADS=8</code> 고정. 모든 런처가 이 파일을 source합니다.</p>
+    </div>
+  </div>
+
+  <div class="finding">
+    <div class="gutter"><span class="idx">05</span><span class="chip ok">수정</span></div>
+    <div>
+      <h3>FSDP에서 예보 경로가 크래시 — 그리고 문서에 적힌 처방이 틀렸음</h3>
+      <div class="meta">dp_actor.py <code>_steerf_forecast</code> · 한 번도 실행된 적 없던 유일한 경로</div>
+      <p>첫 λ&gt;0 실행이 unembedding에 도달하며 죽었습니다. 원인은 코드 주석이 가정한 샤딩이 아니라 <strong>weight tying</strong>이었습니다. Qwen2.5는 <code>tie_word_embeddings=True</code>라 <code>lm_head.weight</code>가 <code>embed_tokens.weight</code>와 <em>같은 객체</em>이고, FSDP는 forward가 반환될 때 그 flat 파라미터를 해제합니다.</p>
+      <div class="evidence">
+lm_head.weight is embed_tokens.weight   → <b>True</b><br>
+forward 이후 storage                    → <b>0 bytes</b><br>
+RuntimeError: setStorage: sizes [1536, 151936] … out of bounds for storage of size 0
+      </div>
+      <p>로그에 처방 (a)로 적혀 있던 “예보를 <code>summon_full_params</code>로 감싸기”는 <strong>그대로는 작동하지 않습니다.</strong> 컨텍스트를 forward <em>주위에</em> 두면 그 forward가 빠져나오며 파라미터를 다시 해제하기 때문입니다. verl의 FSDP 구성을 그대로 복제해 실제 1.5B에서 재현했고, <strong>작은 모델로는 재현조차 되지 않습니다</strong> — 아마 그래서 틀린 처방이 문서에 남았을 것입니다.</p>
+      <p class="fix"><strong>수정</strong>forward를 먼저 끝내고, 예보만 summon으로 감싸고, 캐스팅. summon은 <em>원본</em> fp32 파라미터를 복원하는데 hidden은 mixed-precision bf16이라 캐스팅이 부수적이 아니라 필수입니다. 실제 학습 루프 안에서 검증 완료 — λ&gt;0 진단이 출력되고 스텝이 완주합니다.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>PART 2 · 실험 설계</h2>
+  <p class="lede">실행은 완주하지만, 나온 수치가 정작 묻고자 한 질문에 답할 수 없는 결함.</p>
+
+  <div class="finding">
+    <div class="gutter"><span class="idx">06</span><span class="chip ok">수정</span></div>
+    <div>
+      <h3>G0 실패 — 기준선이 GRPO보다 엔트로피를 더 빨리 붕괴시킴</h3>
+      <div class="meta">Phase 0 · 100 step · symmetric [0.8, 1.2]</div>
+      <p><code>run_linear.sh</code>가 쓰는 설정에서 토큰 가중치가 거의 상수 1.07로 퇴화했습니다 — 균일 ~7 % 학습률 배수입니다. 감쇠 구간은 100스텝 내내 비어 있었습니다. 엔트로피를 붙들어야 할 메커니즘이 아예 작동하지 않았습니다.</p>
+      <div class="tablewrap">
+      <table>
+        <thead><tr><th>팔</th><th class="num">엔트로피 @100</th><th class="num">tw_mean</th><th class="num">tw_std</th><th class="num">tw_frac_low</th></tr></thead>
+        <tbody>
+          <tr><td>GRPO</td><td class="num">0.314</td><td class="num">—</td><td class="num">—</td><td class="num">—</td></tr>
+          <tr><td>STEER · symmetric</td><td class="num warn">0.168</td><td class="num">1.070</td><td class="num">0.005</td><td class="num warn">0.000</td></tr>
+          <tr class="hi"><td>STEER · asymmetric</td><td class="num">0.630</td><td class="num">0.946</td><td class="num">0.005</td><td class="num">0.126</td></tr>
+        </tbody>
+        <caption>README가 명시한 실패 트리거(한 구간 점유율 90 % 초과)는 발화하지 않았습니다. 병리가 <em>쏠림</em>이 아니라 <em>폭 없음</em>의 형태로 나타났기 때문입니다.</caption>
+      </table>
+      </div>
+      <p class="fix"><strong>수정</strong>STEER 자신의 <code>run_asymmetric.sh</code> 값으로 전환(min 0.9, max 1.0, linear). 상류 값이지 제가 지어낸 값이 아니라 재현성은 유지되지만, <strong>기준선이 재현되는 조건이 좁아졌다는 사실은 논문에 명시해야 합니다.</strong></p>
+    </div>
+  </div>
+
+  <div class="finding">
+    <div class="gutter"><span class="idx">07</span><span class="chip ok">수정</span></div>
+    <div>
+      <h3>G2의 주 지표인 pass@16이 아예 계산되지 않고 있었음</h3>
+      <div class="meta">rollout.val_kwargs.n</div>
+      <p>G2는 “평균 pass@16 +1.0 pp 이상, pass@1 비열화”로 규정됩니다. verl 기본값 <code>val_kwargs.n = 1</code>에서는 <code>acc/mean@1</code>만 나오므로, <strong>게이트의 주 지표가 조용히 존재하지 않게 됩니다.</strong></p>
+      <p class="fix"><strong>수정</strong>Phase 2에 <code>n=16</code> 적용 → verl이 <code>best@16/mean</code>을 산출. 검증 비용이 16배(500 → 8000 생성, 회당 약 9분)라 <code>test_freq</code>를 50으로 낮췄습니다.</p>
+    </div>
+  </div>
+
+  <div class="finding">
+    <div class="gutter"><span class="idx">08</span><span class="chip ok">수정</span></div>
+    <div>
+      <h3>1시드로는 게이트가 요구하는 효과 크기를 분해할 수 없음</h3>
+      <div class="meta">통계적 검정력</div>
+      <p>MATH500은 500문제이므로 <code>mean@1</code>의 이항 표준오차가 약 <strong>2.2 pp</strong>입니다. 게이트가 검정하려는 +1.0 pp보다 큽니다. 재현성 체크리스트의 “팔당 시드 3개 이상”은 부가 항목이 아니라 <strong>G2가 성립하기 위한 전제</strong>입니다. 3시드에서도 SE ≈ 1.3 pp이므로 시드별 원값을 평균과 함께 실어야 합니다.</p>
+      <p class="fix"><strong>수정</strong>λ ∈ {0, 0.25, 0.5, 1.0} × 시드 {1,2,3} 전수 그리드. 시드는 dataloader와 vLLM 샘플러 <em>양쪽</em>에 부여 — 한쪽만 주면 복제가 데이터 순서로만 갈립니다. 큐는 시드-메이저 순서라 중단돼도 “1시드에서 완성된 그리드”가 남습니다.</p>
+    </div>
+  </div>
+
+  <div class="finding">
+    <div class="gutter"><span class="idx">09</span><span class="chip open">미해결 · 수용</span></div>
+    <div>
+      <h3>Phase 0 팔들을 pass@16으로 재평가할 수 없음</h3>
+      <div class="meta">trainer.save_freq = -1</div>
+      <p>G0는 곡선만 필요하고 가중치는 불필요해서 체크포인트를 껐습니다. 결과는 나중에야 드러났습니다 — Phase 0 세 팔을 사후에 pass@16으로 채점할 수 없고, 따라서 GRPO 대비 STEER의 다양성 이득을 정량화할 수 없습니다.</p>
+      <p class="fix"><strong>판단</strong>재실행하지 않고 수용. Phase 0의 역할은 G0였고 통과했으며, 재실행에 드는 약 5 GPU-시간은 Phase 2 시드를 늘리는 데 쓰는 편이 같은 비용으로 더 강한 주장을 만듭니다.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>PART 3 · 측정 타당성</h2>
+  <p class="lede">가장 위험한 부류. 코드가 돌고, 그럴듯한 수치가 나오고, 묻지 않은 질문에 답합니다. 이 중 여섯 건은 그대로 과학적 결과로 읽혔을 것들입니다.</p>
+
+  <div class="finding">
+    <div class="gutter"><span class="idx">10</span><span class="chip ok">수정</span></div>
+    <div>
+      <h3>검증 프롬프트가 Python repr 상태로 모델에 입력됨</h3>
+      <div class="meta">scripts/phase1_validate.py</div>
+      <p>parquet의 <code>prompt</code> 셀(채팅 메시지 배열)에 <code>str()</code>을 적용했습니다. verl은 학습에서 <code>apply_chat_template</code>을 쓰는데, 모델이 실제로 받은 문자열은 이것이었습니다.</p>
+      <div class="evidence">[{'content': 'If $2^8=4^x$, what is the value of $x$?', 'role': 'user'}]</div>
+      <p>이 상태에서 나온 G1 실패는 “미래 항이 노이즈”로 읽히지만 실제 원인은 프롬프트 손상입니다. README는 G1을 <strong>“가장 싼 실패 지점”</strong>, 즉 방법을 포기해도 되는 지점으로 지정하고 있습니다.</p>
+      <p class="fix"><strong>수정</strong><code>render_prompt()</code>가 verl과 동일하게 렌더링. 평문 컬럼도 그대로 동작합니다.</p>
+    </div>
+  </div>
+
+  <div class="finding">
+    <div class="gutter"><span class="idx">11</span><span class="chip ok">수정</span></div>
+    <div>
+      <h3>EOS 이후 패딩이 ground truth로 채점됨</h3>
+      <div class="meta">scripts/phase1_validate.py</div>
+      <p><code>generate</code>는 배치 전원이 끝날 때까지 돌고 먼저 끝난 시퀀스를 패딩합니다. <code>measured_future_entropy</code>는 continuation이 지평선보다 <em>짧을</em> 때만 NaN을 넣는데, 패딩 때문에 절대 짧아지지 않습니다. offset 2에서 끝난 continuation이 <code>…&lt;eos&gt;&lt;pad&gt;&lt;pad&gt;</code>의 엔트로피를 실측치로 기여했고, 하류의 <code>isfinite</code> 필터가 그대로 통과시켰습니다.</p>
+      <p class="fix"><strong>수정</strong>각 continuation을 자기 EOS에서 절단하되 EOS 자체는 유지 — 그것을 만든 분포는 실제 정책 상태입니다. 이제 NaN 경로가 설계대로 작동합니다.</p>
+    </div>
+  </div>
+
+  <div class="finding">
+    <div class="gutter"><span class="idx">12</span><span class="chip ok">수정</span></div>
+    <div>
+      <h3>G1 조건 2를 계산하는 코드가 저장소에 없었음</h3>
+      <div class="meta">scripts/phase1_validate.py → evaluate_gate_g1</div>
+      <p>스크립트는 <code>recall=nan, n_branch=0</code>을 넘기면서 “이 값은 실제 rollout 그룹에서 재야 한다”는 안내만 출력했습니다. 그 계산을 하는 코드는 없었으므로 <strong>조건 2는 구조적으로 충족 불가였고 G1은 통과할 방법이 없었습니다.</strong></p>
+      <p class="fix"><strong>수정</strong><code>scripts/phase1_branch_recall.py</code> 신규. 학습 패치가 호출하는 것과 동일한 <code>forecast_h_togo</code>/<code>compute_a_h</code> 위에 구현해, Phase 2가 의존하는 인덱스 정렬을 오프라인에서 같이 검증합니다.</p>
+    </div>
+  </div>
+
+  <div class="finding">
+    <div class="gutter"><span class="idx">13</span><span class="chip ok">수정</span></div>
+    <div>
+      <h3>“상위 10분위”가 실제로는 토큰의 99.7 %를 선택하고 있었음</h3>
+      <div class="meta">steer_f/monitors.py</div>
+      <p>k번째 큰 값을 임계로 잡고 <code>≥</code>인 것을 전부 취하는 방식이었습니다. A<sub>H</sub>에는 정확히 0인 점질량이 있습니다 — sibling baseline에서 고유해진 rollout은 자기가 유일한 형제라 A<sub>H</sub>가 정확히 0이 되고, 첫 분기 이후 거의 모든 위치가 여기 해당합니다.</p>
+      <div class="tablewrap">
+      <table>
+        <thead><tr><th>응답 길이</th><th class="num">A<sub>H</sub> == 0</th><th class="num">“상위 10분위”가 실제 선택</th></tr></thead>
+        <tbody>
+          <tr><td>T = 96</td><td class="num">93.8 %</td><td class="num">96.7 %</td></tr>
+          <tr><td>T = 512</td><td class="num">98.8 %</td><td class="num">99.4 %</td></tr>
+          <tr class="hi"><td>T = 1024 <em>(실제 설정)</em></td><td class="num">99.4 %</td><td class="num warn">99.7 %</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p>이것이 두 게이트를 동시에 깼습니다. G1 이항검정의 귀무 선택률이 0.997이 되어 유의해질 수 없고, G2의 <code>branch_entropy</code> / <code>nonbranch_entropy</code> 분할이 99.7 % 대 0.3 %가 되어 <strong>README가 “메커니즘 확인의 핵심”이라 부른 지표가 분기점에 대해 아무것도 말하지 않게 됩니다.</strong></p>
+      <p class="fix"><strong>수정</strong>순위 기반 선택(<code>_top_k_selection</code>)으로 정확히 k개 선택. 실측 선택률 98.0 % → 10.03 %. 회귀 테스트 3건 추가.</p>
+    </div>
+  </div>
+
+  <div class="finding">
+    <div class="gutter"><span class="idx">14</span><span class="chip ok">수정</span></div>
+    <div>
+      <h3>지평선 탐색이 κ = 1을 선택 — 예보가 아니라 항등식</h3>
+      <div class="meta">steer_f/validation.py <code>select_kappa_gamma</code></div>
+      <p>head 0은 h<sub>t</sub>를 y<sub>t+1</sub>의 분포로 보내는데, 이는 정책 자신의 unembedding이 하는 일과 정확히 같습니다. 게다가 <code>tie_unembedding</code> + <code>zero_init_output</code>이라 <em>그 예측기의 복사본으로 초기화</em>됩니다. 따라서 H<sub>togo</sub>(κ=1)은 정책의 next-token 엔트로피와 거의 같고, offset +1의 실측값도 <em>바로 그 엔트로피</em>입니다.</p>
+      <div class="tablewrap">
+      <table>
+        <thead><tr><th>κ</th><th class="num">γ = 0.7</th><th class="num">γ = 0.85</th><th class="num">γ = 1.0</th></tr></thead>
+        <tbody>
+          <tr class="hi"><td>1</td><td class="num warn">0.9972</td><td class="num warn">0.9972</td><td class="num warn">0.9972</td></tr>
+          <tr><td>2</td><td class="num">0.8122</td><td class="num">0.7991</td><td class="num">0.7875</td></tr>
+          <tr><td>4</td><td class="num">0.7716</td><td class="num">0.7488</td><td class="num">0.7278</td></tr>
+          <tr><td>8</td><td class="num">0.7688</td><td class="num">0.7420</td><td class="num">0.7092</td></tr>
+        </tbody>
+        <caption>κ = 1에서 세 γ가 비트 단위로 같은 ρ를 냅니다. 항이 하나뿐이면 γ가 순위상관에서 소거되기 때문이며, 그 자체가 퇴화의 징후입니다.</caption>
+      </table>
+      </div>
+      <p>제약 없는 엘보 탐색은 항상 여기로 갑니다. 이를 선택하면 A<sub>H</sub>는 <em>로컬</em> 엔트로피의 형제 평균 대비 편차로 축소됩니다 — STEER-F가 고치려는 바로 그 미시성입니다. 못 잡았다면 <strong>미래 항이 없는 상태로 λ 12런을 돌렸을 것입니다.</strong></p>
+      <p class="fix"><strong>수정</strong><code>min_kappa=2</code>를 기본값으로. 재선택 결과 κ = 2, γ<sub>H</sub> = 0.7, ρ = 0.841.</p>
+    </div>
+  </div>
+
+  <div class="finding">
+    <div class="gutter"><span class="idx">15</span><span class="chip ok">수정</span></div>
+    <div>
+      <h3>prefix 예산이 25문제 중 5문제에 소진됨</h3>
+      <div class="meta">scripts/phase1_validate.py</div>
+      <p>주 지표는 <em>문제-내</em> 상관을 문제에 걸쳐 평균낸 값이므로, 해상도를 만드는 것은 문제 커버리지입니다. <code>--max-prefixes</code>에 도달할 때까지 탐욕적으로 모으면 600개 예산이 첫 5문제에서 끝납니다(문제당 32궤적 × 4절단 = 128개). ρ는 5개 값의 Fisher-z 평균이었습니다.</p>
+      <p class="fix"><strong>수정</strong><code>--max-prefixes-per-problem</code> 추가, 기본값은 균등 분배. 이제 25문제가 각각 24개씩 기여합니다.</p>
+    </div>
+  </div>
+
+  <div class="finding">
+    <div class="gutter"><span class="idx">16</span><span class="chip void">판정 무효</span></div>
+    <div>
+      <h3>G1 조건 2는 학습된 예보기와 랜덤 예보기를 구분할 수 없음</h3>
+      <div class="meta">가장 깊은 문제 · README §G1</div>
+      <p>이 조건은 “높은 A<sub>H</sub> 위치가 형제 발산과 일치하는가”를 묻습니다. 일치할 수밖에 없습니다 — A<sub>H</sub>가 형제 발산으로부터 <em>구성</em>되기 때문입니다. 형제들이 같은 토큰을 고르면 은닉상태가 동일하므로 H<sub>togo</sub>도 동일하고 A<sub>H</sub>는 정확히 0입니다. 세 가지 형태를 시도했고 <strong>셋 다 예보가 아니라 형제 부기를 쟀습니다.</strong></p>
+      <div class="tablewrap">
+      <table>
+        <thead><tr><th>통계</th><th class="num">학습된 헤드</th><th class="num">랜덤 헤드</th><th>실패 이유</th></tr></thead>
+        <tbody>
+          <tr><td>recall@10 % (명세대로)</td><td class="num">0.3424</td><td class="num">0.3424</td><td>포화. <code>n_hit == k</code>라 recall이 k / n_branch로 고정됨.</td></tr>
+          <tr><td>부호 있는 A<sub>H</sub>의 AUC</td><td class="num">0.447</td><td class="num">0.472</td><td>A<sub>H</sub>는 형제 평균 대비 편차라 정의상 0 중심 — 분기점의 절반이 음수.</td></tr>
+          <tr><td>|A<sub>H</sub>|의 AUC</td><td class="num warn">1.0000</td><td class="num warn">1.0000</td><td>항등식. |A<sub>H</sub>| &gt; 0 ⟺ 형제가 다름 ⟺ 분기점.</td></tr>
+        </tbody>
+        <caption>학습·랜덤 헤드에서 값이 비트 단위로 같다는 것이 증명입니다. 우연이 아닙니다.</caption>
+      </table>
+      </div>
+      <p class="fix"><strong>대체</strong>방법이 A<sub>H</sub>에서 실제로 필요로 하는 것은 분기점 <em>탐지</em>가 아니라 <em>한 분기점에서 형제들 간의 랭킹</em> — 어느 continuation의 미래가 더 다양한가입니다. <code>scripts/phase1_rank_test.py</code>가 이를 실제 관측된 하류 엔트로피에 대고 재며, 헤드 유형마다 미학습 대조군을 함께 돌립니다.</p>
+      <div class="tablewrap">
+      <table>
+        <thead><tr><th>예측기</th><th class="num">ρ pooled</th><th>해석</th></tr></thead>
+        <tbody>
+          <tr><td>oracle · 실현된 롤아웃 엔트로피</td><td class="num">1.0000</td><td>자명하게 1 — 그것이 <em>목표값 자체</em>입니다. 상한이 아니라 정합성 확인용.</td></tr>
+          <tr class="hi"><td>병렬 헤드 (워밍업)</td><td class="num">0.8185</td><td>현재 방법.</td></tr>
+          <tr><td>순차형 헤드 (워밍업)</td><td class="num">0.7963</td><td>DeepSeek-V3 방식. 토큰 예측은 훨씬 좋은데 <em>더 나쁨</em>.</td></tr>
+          <tr><td>순차형 · 미학습 대조군</td><td class="num">0.7144</td><td rowspan="2">항등 초기화 헤드는 H<sub>togo</sub>를 로컬 엔트로피의 상수배로 축소합니다. 예보가 넘어야 할 바닥선.</td></tr>
+          <tr><td>병렬 · 미학습 대조군</td><td class="num">0.7114</td></tr>
+        </tbody>
+        <caption>분기점 149개, 형제 관측 818개, κ=2, γ<sub>H</sub>=0.7.</caption>
+      </table>
+      </div>
+      <p>예보는 기여하지만 폭이 좁습니다. <strong>로컬 엔트로피만으로 0.711이 나오고, 워밍업된 예보가 약 11 포인트를 더해 0.819입니다. 이 증분이 이 스케일에서 미래 항의 경험적 근거 전부입니다.</strong></p>
+    </div>
+  </div>
+
+  <div class="finding">
+    <div class="gutter"><span class="idx">17</span><span class="chip open">미해결</span></div>
+    <div>
+      <h3><code>visit_rel_mag</code>가 “효과가 작음”과 “효과가 희소함”을 구분하지 못함</h3>
+      <div class="meta">steer_f/omega_tilde.py · Phase 2 모니터링 표</div>
+      <p>λ = 0.5에서 이 지표가 0.019로 나왔습니다. 정규화 후 두 항 모두 단위 RMS이므로, 곧이곧대로 읽으면 λ가 거의 아무 일도 안 한다는 뜻이 됩니다. 아닙니다 — A<sub>H</sub>가 위치의 약 99 %에서 정확히 0이라, 방문 항은 작동하는 곳에서는 크고 나머지에서는 0인데 전체 평균이 그 사실을 가립니다.</p>
+      <p class="fix"><strong>제안</strong>A<sub>H</sub> ≠ 0인 위치로 한정한 동일 비율을 현재 값과 나란히 기록. 미구현이며, 랜덤 헤드로 측정한 값이라 Phase 2 초반에 재확인이 필요합니다.</p>
+    </div>
+  </div>
+
+  <div class="finding">
+    <div class="gutter"><span class="idx">18</span><span class="chip ok">정정</span></div>
+    <div>
+      <h3><code>mean@1</code>을 성능 비교로 읽은 것</h3>
+      <div class="meta">보고 오류 · 제 쪽</div>
+      <p>Phase 0 정확도를 팔 순위인 것처럼 제시했고, 엔트로피를 보존한 팔이 가장 나빠 보였습니다. <code>mean@1</code>은 greedy 디코딩이 아닙니다 — verl은 <code>do_sample=True, temperature=1.0, top_p=0.7</code>로 문제당 <em>1개</em>를 샘플링합니다. 엔트로피가 낮은 정책은 분포가 뾰족해 단일 샘플이 최빈 경로에 가깝게 나오므로 <strong>구조적으로 유리합니다.</strong></p>
+      <div class="tablewrap">
+      <table>
+        <thead><tr><th>팔</th><th class="num">엔트로피 @100</th><th class="num">mean@1</th></tr></thead>
+        <tbody>
+          <tr><td>GRPO</td><td class="num">0.314</td><td class="num">0.538</td></tr>
+          <tr><td>STEER · symmetric</td><td class="num">0.168</td><td class="num">0.564</td></tr>
+          <tr><td>STEER · asymmetric</td><td class="num">0.630</td><td class="num">0.526</td></tr>
+        </tbody>
+        <caption>교란 요인 셋이 겹칩니다. 지표가 다양성 이득을 숨기고, 뾰족한 정책에 유리하며, 1시드에서 차이가 2.2 pp 표준오차 안에 있습니다. 이 수치들은 아무 순위도 매기지 않습니다.</caption>
+      </table>
+      </div>
+      <p>그리고 이것은 방법이 예측하는 바 그대로입니다 — 엔트로피 보존은 k = 1이 아니라 큰 k에서 값을 해야 하고, 그래서 게이트가 “pass@16 상승, pass@1 비열화”로 규정된 것입니다.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>PART 4 · 각 수치가 무엇을 재는가</h2>
+  <p class="lede">용도별로 묶었습니다. 해석 가능해 보이지만 실제로는 아닌 지표가 여럿이라, 주의사항이 정의만큼 중요합니다.</p>
+
+  <h3>학습 동역학</h3>
+  <div class="metric">
+    <span class="mname">actor/entropy</span><span class="mrole">G0 판정</span>
+    <p class="mdef">응답 위치에 걸친 평균 토큰 엔트로피. 방법 전체가 지키려는 값입니다. GRPO는 하락, STEER는 유지되어야 합니다.</p>
+    <p class="mwatch"><b>주의</b> 이것은 <em>전역</em> 엔트로피입니다. STEER-F의 실제 주장인 “분기점에서 엔트로피가 보존되는가”에 대해서는 아무 말도 하지 않습니다. 그건 <code>branch_entropy_gap</code>의 몫이고, λ &gt; 0에서만 존재합니다.</p>
+  </div>
+  <div class="metric">
+    <span class="mname">critic/score/mean</span><span class="mrole">학습 신호</span>
+    <p class="mdef">{−1, +1} 검증자 리워드의 평균. −0.85 ≈ 정답률 7 %. 실제 용도는 죽은 배치 진단입니다 — 롤아웃이 전부 오답(또는 전부 정답)인 그룹은 어드밴티지가 0이라 그래디언트에 기여하지 않습니다.</p>
+  </div>
+  <div class="metric">
+    <span class="mname">critic/advantages/{mean,max,min}</span>
+    <p class="mdef">그룹 상대 어드밴티지. 전부 0이면 그 배치에 혼합 결과 그룹이 없었다는 뜻입니다. 정답률 9.5 %, n = 8에서 약 45 %의 그룹이 전부-오답입니다.</p>
+  </div>
+  <div class="metric">
+    <span class="mname">response_length/mean · clip_ratio</span>
+    <p class="mdef">길이는 엔트로피 붕괴의 독립적 교차확인입니다 — 붕괴는 보통 답변이 짧고 정형화되는 형태로 같이 나타납니다. <code>clip_ratio</code>는 토큰 예산에서 잘린 비율로, 실측 0.104가 2048 → 1024 축소를 정당화한 근거입니다.</p>
+  </div>
+  <div class="metric">
+    <span class="mname">actor/grad_norm · ppo_kl · pg_clipfrac</span>
+    <p class="mdef">안정성 계기. <code>grad_norm</code>은 발견 06을 두 번째 각도에서 잡아내기도 했습니다 — symmetric 팔이 0.297, GRPO가 0.222로, 1보다 큰 균일 가중치가 학습률 배수로 작동한다는 것과 일치합니다.</p>
+  </div>
+
+  <h3>토큰 가중치</h3>
+  <div class="metric">
+    <span class="mname">steerf/tw_frac_{low,mid,high}</span><span class="mrole">G0 건전성</span>
+    <p class="mdef">[w<sub>min</sub>, w<sub>max</sub>] 3등분 구간의 점유율. 논문의 밴드와 이산 α는 구현에 존재하지 않고 실제로는 Ω를 마이크로배치별 min-max로 재스케일하므로, 이것이 “가중치가 어떻게 분포하는가”의 대응물입니다.</p>
+    <p class="mwatch"><b>주의</b> 문서화된 트리거는 “한 구간 90 % 초과”입니다. 발견 06은 이를 빠져나갔습니다 — 점유율이 0.64 / 0.36 / 0.00으로 90 %를 넘는 구간이 없는데도 가중치가 무력했습니다. <strong>실제로 중요한 신호는 <code>tw_frac_low == 0</code>과 <code>tw_std ≈ 0</code>입니다.</strong></p>
+  </div>
+  <div class="metric">
+    <span class="mname">steerf/tw_mean · tw_std</span>
+    <p class="mdef">적용된 가중치의 평균과 폭. 재가중이 실제로 무언가 하고 있는지는 <code>tw_std</code>를 범위 폭 대비로 보는 것이 정직합니다 — 폭 0.4에서 0.005는 1.2 %, 즉 아무것도 아닙니다. <code>tw_mean</code>이 1을 넘으면 그 팔은 전역 학습률 배수를 겸하게 되어 GRPO와의 통제 비교가 성립하지 않습니다.</p>
+  </div>
+
+  <h3>미래 엔트로피 항 · λ &gt; 0에서만</h3>
+  <div class="metric">
+    <span class="mname">H<sub>togo</sub></span>
+    <p class="mdef">다음 κ 스텝에 걸친 예보 엔트로피의 할인 합, Σ γ<sub>H</sub><sup>k</sup> · H(p<sub>MTP</sub>). y<sub>t</sub>를 소비한 <em>이후</em>의 은닉상태에서 읽으므로 샘플된 토큰에 조건화됩니다.</p>
+  </div>
+  <div class="metric">
+    <span class="mname">A<sub>H</sub></span><span class="mrole">분기 점수</span>
+    <p class="mdef">H<sub>togo</sub>(s<sub>t</sub> ⊕ y<sub>t</sub>) − H̄<sub>togo</sub>(s<sub>t</sub>). sibling-prefix baseline은 t 직전까지 모두 일치하는 rollout들의 평균입니다.</p>
+    <p class="mwatch"><b>주의</b> 여기에 얹힌 모든 통계를 지배하는 구조적 성질이 둘 있습니다. 형제가 남지 않은 위치에서 <em>정확히 0</em>이며(T = 1024에서 위치의 99.4 %), 평균 대비 편차이므로 어느 분기점에서든 형제의 절반가량이 구조적으로 음수입니다. 발견 13·16·17이 전부 여기서 나옵니다.</p>
+  </div>
+  <div class="metric">
+    <span class="mname">steerf/branch_entropy · nonbranch_entropy · branch_entropy_gap</span><span class="mrole">G2 메커니즘</span>
+    <p class="mdef">A<sub>H</sub> 상위 10분위 토큰과 나머지의 엔트로피. 전역 엔트로피가 평평한데 gap이 오르는 것이 의도된 메커니즘의 서명이며, 균일 엔트로피 보너스와 구분되는 지점입니다 — “STEER-F가 설계대로 작동함”과 “STEER-F는 엔트로피 보너스임”을 가르는 유일한 수치입니다.</p>
+    <p class="mwatch"><b>주의</b> 발견 13 수정 전에는 무의미했습니다(분할이 99.7 % 대 0.3 %). <strong>gap을 읽기 전에 Phase 2 첫 로그에서 <code>branch_token_frac ≈ 0.10</code>부터 확인할 것.</strong></p>
+  </div>
+  <div class="metric">
+    <span class="mname">steerf/visit_rel_mag · local_term_mag · visit_term_mag</span>
+    <p class="mdef">λ · norm(방문 항)의 크기를 norm(로컬 항) 대비로 본 값. λ가 아무것도 안 하지도, 전부를 덮어쓰지도 않음을 보이기 위한 지표입니다.</p>
+    <p class="mwatch"><b>주의</b> 발견 17 — A<sub>H</sub>가 0인 약 99 %의 위치가 평균을 희석해서, 건전한 희소 보정이 ~0.02로 읽히며 무력해 보입니다.</p>
+  </div>
+  <div class="metric">
+    <span class="mname">steerf/a_h_clip_frac · a_h_std</span>
+    <p class="mdef">clip(A<sub>H</sub>, ±c)의 포화율과 A<sub>H</sub>의 폭. 클립이 포화하면 분기를 구별할 수 없고, <code>a_h_std ≈ 0</code>이면 예보가 토큰을 분리하지 못하는 것입니다. 배관 실행에서 각각 0.014, 0.169로 측정됐습니다.</p>
+  </div>
+
+  <h3>평가</h3>
+  <div class="metric">
+    <span class="mname">val-core/…/acc/mean@N</span>
+    <p class="mdef">문제당 N개 <em>샘플</em> 생성의 평균 정확도. <code>@N</code>은 디코딩 방식이 아니라 <strong>샘플 개수</strong>입니다. 검증은 temperature 1.0, top-p 0.7로 샘플링합니다.</p>
+    <p class="mwatch"><b>주의</b> <code>mean@1</code>은 정책 실력과 샘플링 운을 섞고, 저엔트로피 정책에 구조적으로 유리합니다(발견 18). 비열화 확인용이지 순위 지표가 아닙니다.</p>
+  </div>
+  <div class="metric">
+    <span class="mname">val-core/…/acc/best@16/mean</span><span class="mrole">G2 주 지표</span>
+    <p class="mdef">검증 샘플 16개에 대한 verl의 부트스트랩 best-of-n — 즉 pass@16. 엔트로피 보존이 값을 해야 하는 지표이자, 이 프로젝트에서 <strong>주장을 뒷받침할 수 있는 유일한 정확도 수치</strong>입니다.</p>
+  </div>
+
+  <h3>게이트 G1 통계</h3>
+  <div class="metric">
+    <span class="mname">문제-내 Spearman ρ</span><span class="mrole">조건 1 · 통과</span>
+    <p class="mdef">예보 H<sub>togo</sub>와 Monte-Carlo 실측치의 순위상관. 문제별로 계산해 Fisher-z 평균을 내므로 문제 간 난이도 차가 지배하지 않습니다. 실측치에도 예보와 <em>같은</em> γ<sub>H</sub>를 적용합니다 — 할인 예보를 무할인 실측에 대고 채점하면 γ &lt; 1이 품질과 무관한 이유로 손해를 봅니다. <strong>κ=2, γ=0.7, 25문제에서 0.841.</strong></p>
+    <p class="mwatch"><b>주의</b> ρ는 예보가 미래 엔트로피의 <em>절대 수준</em>을 맞히는지를 잽니다. STEER-F는 수준을 쓰지 않습니다 — 형제 평균을 뺀 편차인 A<sub>H</sub>를 씁니다. <strong>높은 ρ는 필요조건이지 충분조건이 아닙니다.</strong></p>
+  </div>
+  <div class="metric">
+    <span class="mname">분기 recall@10 % · baseline · lift</span><span class="mrole">조건 2 · 폐기</span>
+    <p class="mdef">진짜 분기점이 A<sub>H</sub> 상위 10분위에 드는 비율. 명목 0.1이 아니라 <em>실제</em> 선택률을 귀무로 삼는 정확 이항검정으로 판정합니다.</p>
+    <p class="mwatch"><b>주의</b> 발견 16으로 폐기 — 어떤 형태로도 학습된 헤드와 랜덤 헤드를 구분하지 못합니다. 완결성을 위해 기록할 뿐 증거가 아닙니다.</p>
+  </div>
+  <div class="metric">
+    <span class="mname">형제 랭킹 ρ</span><span class="mrole">조건 2 · 대체</span>
+    <p class="mdef">각 분기점에서 형제들을 예보 H<sub>togo</sub>로 순위매긴 것과 실제 관측된 하류 엔트로피의 상관. 방법이 실제로 소비하는 순서이므로 검정할 가치가 있는 대상입니다. 항등 초기화 헤드가 로컬 엔트로피만으로 이미 0.711에 도달하므로 <strong>항상 미학습 대조군과 함께</strong> 보고합니다.</p>
+  </div>
+  <div class="metric">
+    <span class="mname">헤드별 cross-entropy, k = 1…K</span><span class="mrole">워밍업 건전성</span>
+    <p class="mdef">k에 대해 단조 증가해야 합니다 — 먼 offset이 실제로 더 어렵기 때문입니다. 꼬리에서 단조성이 깨지면 원거리 헤드가 수렴하지 않은 것입니다.</p>
+    <div class="tablewrap">
+    <table>
+      <thead><tr><th>헤드</th><th class="num">+1</th><th class="num">+2</th><th class="num">+4</th><th class="num">+6</th><th class="num">+8</th></tr></thead>
+      <tbody>
+        <tr><td>병렬</td><td class="num">0.554</td><td class="num">1.396</td><td class="num">3.038</td><td class="num">3.885</td><td class="num">4.199</td></tr>
+        <tr><td>순차형</td><td class="num">0.791</td><td class="num">1.256</td><td class="num">1.812</td><td class="num">2.000</td><td class="num">2.084</td></tr>
+      </tbody>
+      <caption>둘 다 단조. 순차형 헤드는 원거리 토큰 예측이 압도적으로 좋으면서, 정작 방법이 의존하는 형제 랭킹에서는 <em>약간 더 나쁩니다</em>(발견 16). <strong>여기서 cross-entropy는 예보 유용성의 대리지표가 아닙니다.</strong></caption>
+    </table>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>아직 모르는 것</h2>
+  <div class="callout note">
+    <p><strong>λ &gt; 0 학습은 한 번도 실행되지 않았습니다.</strong> 지금까지의 모든 λ &gt; 0 실행은 랜덤 초기화 헤드로 돌린 2스텝 배관 테스트입니다. 이 원장의 어떤 내용도 STEER-F가 무언가를 개선한다는 증거가 아닙니다.</p>
+    <p><strong>RL 중 헤드는 freeze 상태입니다.</strong> MTP 보조 손실과 λ 표류 컨트롤러는 구현·단위테스트까지 됐지만 학습 루프에 연결되지 않았습니다. 즉 Phase 2는 사실상 ablation A7 조건이며, 이는 결과가 뒷받침할 수 있는 범위를 제한하므로 추론에 맡기지 말고 명시해야 합니다.</p>
+    <p><strong>더 싼 방법이 숨어 있을 수 있습니다.</strong> RLVR은 롤아웃이 완결된 뒤 업데이트하므로, 실현된 할인 미래 엔트로피를 롤아웃에서 그냥 읽을 수 있습니다 — verl이 이미 엔트로피 텐서를 계산합니다. 헤드도, 워밍업도, 추가 forward도 필요 없습니다. 예보가 사는 유일한 근거는 실현값이 아닌 <em>기대</em>값을 추정한다는 것뿐이고, 이는 실험으로 답할 문제이며 Phase 2에 무료로 추가할 수 있는 arm입니다.</p>
+  </div>
+</section>
+
+<footer>
+  Qwen2.5-1.5B-Instruct · 풀 파인튜닝, FSDP · torch 2.6.0 / vLLM 0.8.5.post1 / verl 0.4.1.dev / flash-attn 2.7.4 · STEER 핀 08add1cc · ppo_micro_batch_size_per_gpu = 8, 전 팔 고정
+</footer>
+</div>

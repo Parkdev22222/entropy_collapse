@@ -60,13 +60,53 @@ from steer_f.validation import (  # noqa: E402
 GAMMA_GRID = [0.7, 0.85, 1.0]
 
 
+def render_prompt(raw, tokenizer):
+    """Turn one parquet `prompt` cell into the string the policy actually sees.
+
+    STEER's datasets store the prompt in chat form -- a list of
+    ``{"role", "content"}`` dicts, loaded by pyarrow as a numpy object array --
+    and verl renders it with
+    ``tokenizer.apply_chat_template(messages, add_generation_prompt=True)``
+    (`verl/utils/dataset/rl_dataset.py`).
+
+    Rendering it any other way puts this script off the training distribution.
+    `str()` on the cell, in particular, yields the literal text
+    ``[{'content': 'If $2^8=4^x$...', 'role': 'user'}]`` -- the model is then
+    conditioned on a Python repr, and the trajectories it produces are not the
+    ones Phase 2 will see.  A G1 FAIL reached that way would read as "the
+    future term is noise" when it is really "the prompt was malformed", so the
+    conversion is done here rather than left to `str()`.
+    """
+    if hasattr(raw, "tolist"):
+        raw = raw.tolist()
+    if isinstance(raw, (list, tuple)) and raw and isinstance(raw[0], dict):
+        messages = [{"role": m["role"], "content": m["content"]} for m in raw]
+        return tokenizer.apply_chat_template(
+            messages, add_generation_prompt=True, tokenize=False
+        )
+    if isinstance(raw, dict):
+        return render_prompt([raw], tokenizer)
+    return str(raw)
+
+
 # ----------------------------------------------------------------------
 # generation helpers
 # ----------------------------------------------------------------------
 @torch.no_grad()
 def sample_continuations(model, tokenizer, prefix_ids, n, max_new_tokens,
                          temperature, top_p, device):
-    """Sample `n` continuations from one prefix.  Returns a list of id tensors."""
+    """Sample `n` continuations from one prefix.  Returns a list of id tensors.
+
+    Each returned tensor stops at its own EOS.  `generate` runs until every
+    sequence in the batch is done and right-pads the ones that finished early,
+    so the raw slice would hand back real tokens followed by padding.
+    `measured_future_entropy` reads those positions as policy states and only
+    emits NaN when the tensor is *shorter* than the horizon — with padding it
+    never is, so a continuation that ended at offset 2 would silently
+    contribute the entropy of `...<eos><pad><pad>` as if it were ground truth,
+    and the `isfinite` filter downstream would keep it.  Trimming here is what
+    makes that NaN path work as designed.
+    """
     batch = prefix_ids.unsqueeze(0).expand(n, -1).to(device)
     out = model.generate(
         input_ids=batch,
@@ -77,7 +117,26 @@ def sample_continuations(model, tokenizer, prefix_ids, n, max_new_tokens,
         max_new_tokens=max_new_tokens,
         pad_token_id=tokenizer.pad_token_id,
     )
-    return [out[i, batch.shape[1]:] for i in range(n)]
+    eos_ids = {tokenizer.eos_token_id}
+    if getattr(model, "generation_config", None) is not None:
+        extra = model.generation_config.eos_token_id
+        if isinstance(extra, int):
+            eos_ids.add(extra)
+        elif extra:
+            eos_ids.update(extra)
+    eos_ids.discard(None)
+
+    conts = []
+    for i in range(n):
+        c = out[i, batch.shape[1]:]
+        # Keep the EOS itself: the distribution that produced it is a real
+        # policy state and head k is meant to forecast it. Drop only what
+        # follows, which is padding rather than sampled text.
+        hit = [j for j, tok in enumerate(c.tolist()) if tok in eos_ids]
+        if hit:
+            c = c[: hit[0] + 1]
+        conts.append(c)
+    return conts
 
 
 @torch.no_grad()
@@ -172,6 +231,11 @@ def build_argparser():
     p.add_argument("--n-continuations", type=int, default=16, help="K_mc")
     p.add_argument("--fractions", default="0.2,0.4,0.6,0.8")
     p.add_argument("--max-prefixes", type=int, default=600, help="plan targets ~600")
+    p.add_argument("--max-prefixes-per-problem", type=int, default=None,
+                   help="cap per problem; default spreads --max-prefixes evenly over "
+                        "--n-problems. Without a cap the budget is consumed by the "
+                        "first few problems and the within-problem average is taken "
+                        "over far fewer problems than requested")
     p.add_argument("--traj-max-tokens", type=int, default=1024)
     p.add_argument("--cont-max-tokens", type=int, default=64,
                    help="only the first kappa_max offsets are scored")
@@ -219,12 +283,25 @@ def main(argv=None):
         embed_model = SentenceTransformer(args.embed_model, device=args.device)
 
     df = pd.read_parquet(args.problems)
-    prompts = [str(x) for x in df[args.prompt_column].tolist()[: args.n_problems]]
+    prompts = [render_prompt(x, tokenizer)
+               for x in df[args.prompt_column].tolist()[: args.n_problems]]
     fractions = [float(x) for x in args.fractions.split(",")]
     print(f"[validate] {len(prompts)} problems, fractions={fractions}")
 
+    # The primary metric is a *within-problem* correlation averaged over
+    # problems, so problem coverage is what gives it its resolution. Collecting
+    # greedily, one problem at a time, until --max-prefixes is reached spends
+    # the whole budget on the first few: with 32 trajectories x 4 cuts = 128
+    # prefixes per problem, a 600-prefix budget was exhausted after 5 of 25
+    # problems, and rho was a Fisher-z average over 5 values.
+    per_problem = args.max_prefixes_per_problem
+    if per_problem is None:
+        per_problem = max(1, args.max_prefixes // max(1, len(prompts)))
+    print(f"[validate] budget: {args.max_prefixes} prefixes, <= {per_problem} per problem")
+
     records = []
     for pi, prompt in enumerate(prompts):
+        problem_start = len(records)
         prompt_ids = tokenizer(prompt, return_tensors="pt")["input_ids"][0]
         trajectories = sample_continuations(
             model, tokenizer, prompt_ids, args.n_trajectories, args.traj_max_tokens,
@@ -234,6 +311,8 @@ def main(argv=None):
         for ti, traj in enumerate(trajectories):
             for cut in build_prefixes(traj, fractions):
                 if len(records) >= args.max_prefixes:
+                    break
+                if len(records) - problem_start >= per_problem:
                     break
                 prefix_ids = torch.cat([prompt_ids, traj[:cut].cpu()])
 
@@ -263,7 +342,10 @@ def main(argv=None):
                 })
             if len(records) >= args.max_prefixes:
                 break
-        print(f"[validate] problem {pi+1}/{len(prompts)}: {len(records)} prefixes", flush=True)
+            if len(records) - problem_start >= per_problem:
+                break
+        print(f"[validate] problem {pi+1}/{len(prompts)}: "
+              f"+{len(records)-problem_start} (total {len(records)})", flush=True)
         if len(records) >= args.max_prefixes:
             break
 

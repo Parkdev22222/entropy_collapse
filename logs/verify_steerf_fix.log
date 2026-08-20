@@ -1,0 +1,4 @@
+[verify 13:13:02] GPU free — starting steerf plumbing re-test
+[phase0] ARM=steerf steps=2 -> /workspace/entropy_collapse/logs/phase0_steerf_fixcheck.log
+[verify 13:20:25] steerf plumbing re-test exited rc=0 -> logs/phase0_steerf_fixcheck.log
+[verify 13:20:25] PASS: lambda>0 diagnostics were emitted

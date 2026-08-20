@@ -1,0 +1,54 @@
+[phase2-queue 08-16 23:57:40] starting phase2-lam0.0-s1
+[phase2] ARM=steer lambda=0.0 seed=1 steps=100 -> /workspace/entropy_collapse/logs/phase2-lam0.0-s1.log
+[phase2-queue 08-17 02:46:38] phase2-lam0.0-s1 exited rc=0 after 168m
+[phase2-queue 08-17 02:46:38] starting phase2-lam0.25-s1
+[phase2] ARM=steerf lambda=0.25 seed=1 steps=100 -> /workspace/entropy_collapse/logs/phase2-lam0.25-s1.log
+nohup: failed to run command './run/phase2_handover2.sh': No such file or directory
+[handover2 08-17 12:54:04] waiting for the in-flight phase2-lam0.5-s1
+[handover2 08-17 18:32:21] phase2-lam0.5-s1 finished
+[handover2 08-17 18:32:22] recorded: 0.5	1	ok	0.4800	-0.1080	0.5439	0.7832	100	474
+[handover2 08-17 18:32:22] starting the corrected queue
+[phase2-queue 08-17 18:32:22] phase2-lam0.0-s1 already recorded ok — skipping
+[phase2-queue 08-17 18:32:22] phase2-lam0.25-s1 already recorded ok — skipping
+[phase2-queue 08-17 18:32:22] phase2-lam0.5-s1 already recorded ok — skipping
+[phase2-queue 08-17 18:32:22] starting phase2-lam1.0-s1
+[phase2] ARM=steerf lambda=1.0 seed=1 steps=100 -> /workspace/entropy_collapse/logs/phase2-lam1.0-s1.log
+[phase2-queue 08-18 02:24:59] phase2-lam1.0-s1 exited rc=127 after 472m
+[phase2-queue 08-18 02:24:59] starting phase2-oracle-lam0.25-s1
+[phase2] ARM=steerf lambda=0.25 seed=1 steps=100 -> /workspace/entropy_collapse/logs/phase2-oracle-lam0.25-s1.log
+[phase2-queue 08-18 02:27:34] phase2-oracle-lam0.25-s1 exited rc=1 after 2m
+[phase2-queue 08-18 02:27:34] starting phase2-oracle-lam0.5-s1
+[phase2] ARM=steerf lambda=0.5 seed=1 steps=100 -> /workspace/entropy_collapse/logs/phase2-oracle-lam0.5-s1.log
+[phase2-queue 08-18 02:29:58] phase2-oracle-lam0.5-s1 exited rc=1 after 2m
+[phase2-queue 08-18 02:29:58] starting phase2-grpo-s1
+[phase2] ARM=grpo seed=1 steps=100 -> /workspace/entropy_collapse/logs/phase2-grpo-s1.log
+[phase2-queue 08-18 05:27:20] phase2-grpo-s1 exited rc=0 after 177m
+[phase2-queue 08-18 05:27:20] seed 1 pass complete — grid is usable at 1 seed(s)
+[phase2-queue 08-18 05:27:20] starting phase2-lam0.0-s2
+[phase2] ARM=steer lambda=0.0 seed=2 steps=100 -> /workspace/entropy_collapse/logs/phase2-lam0.0-s2.log
+[phase2-queue 08-18 05:29:51] phase2-lam0.0-s2 exited rc=1 after 2m
+[phase2-queue 08-18 05:29:51] starting phase2-lam0.25-s2
+[phase2] ARM=steerf lambda=0.25 seed=2 steps=100 -> /workspace/entropy_collapse/logs/phase2-lam0.25-s2.log
+[phase2-queue 08-18 05:32:04] phase2-lam0.25-s2 exited rc=1 after 2m
+[phase2-queue 08-18 05:32:04] starting phase2-lam0.5-s2
+[phase2] ARM=steerf lambda=0.5 seed=2 steps=100 -> /workspace/entropy_collapse/logs/phase2-lam0.5-s2.log
+[phase2-queue 08-18 05:34:19] phase2-lam0.5-s2 exited rc=1 after 2m
+[phase2-queue 08-18 05:34:19] starting phase2-lam1.0-s2
+[phase2] ARM=steerf lambda=1.0 seed=2 steps=100 -> /workspace/entropy_collapse/logs/phase2-lam1.0-s2.log
+[phase2-queue 08-18 05:36:32] phase2-lam1.0-s2 exited rc=1 after 2m
+[phase2-queue 08-18 05:36:32] starting phase2-oracle-lam0.25-s2
+[phase2] ARM=steerf lambda=0.25 seed=2 steps=100 -> /workspace/entropy_collapse/logs/phase2-oracle-lam0.25-s2.log
+[phase2-queue 08-18 05:38:57] phase2-oracle-lam0.25-s2 exited rc=1 after 2m
+[phase2-queue 08-18 05:38:58] starting phase2-oracle-lam0.5-s2
+[phase2] ARM=steerf lambda=0.5 seed=2 steps=100 -> /workspace/entropy_collapse/logs/phase2-oracle-lam0.5-s2.log
+[phase2-queue 08-18 05:41:58] phase2-oracle-lam0.5-s2 exited rc=1 after 3m
+[phase2-queue 08-18 05:41:59] starting phase2-grpo-s2
+[phase2] ARM=grpo seed=2 steps=100 -> /workspace/entropy_collapse/logs/phase2-grpo-s2.log
+[phase2-queue 08-18 08:38:38] phase2-grpo-s2 exited rc=0 after 176m
+[phase2-queue 08-18 08:38:38] seed 2 pass complete — grid is usable at 2 seed(s)
+[phase2-queue 08-18 08:38:38] starting phase2-lam0.0-s3
+[phase2] ARM=steer lambda=0.0 seed=3 steps=100 -> /workspace/entropy_collapse/logs/phase2-lam0.0-s3.log
+[phase2-queue 08-18 08:42:14] phase2-lam0.0-s3 exited rc=1 after 3m
+[phase2-queue 08-18 14:16:31] starting phase2-lam0.25-s3
+[phase2] ARM=steerf lambda=0.25 seed=3 steps=100 -> /workspace/entropy_collapse/logs/phase2-lam0.25-s3.log
+[phase2-queue 08-18 14:17:13] phase2-lam0.25-s3 exited rc=1 after 0m
