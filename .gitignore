@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+rollout_data/
+evaluation_results/
+checkpoints/
+wandb/
+outputs/
+*.pt
+*.safetensors

@@ -722,11 +722,14 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
         with self.ulysses_sharding_manager:
             data = self.ulysses_sharding_manager.preprocess_data(data)
             with adapter_ctx:
-                output, entropys, max_prob_log_probs = self.actor.compute_log_prob(data=data, calculate_entropy=True)
-            
+                output, entropys, max_prob_log_probs, h_togo = self.actor.compute_log_prob(data=data, calculate_entropy=True)
+
             # Prepare tensors dictionary
             tensors = {"old_log_probs": output, "entropys": entropys, "max_prob_log_probs": max_prob_log_probs}
-            
+            if h_togo is not None:  # STEER-F
+                tensors["h_togo"] = h_togo
+
+
             output = DataProto.from_dict(
                 tensors=tensors,
                 meta_info={"temperature": self.config.rollout.temperature},

@@ -587,9 +587,23 @@ def compute_token_weights(
     token_weight_max: float = 1.2,
     linear: bool = True,
     mode: str = "symmetric",
+    # ---- STEER-F ----
+    a_h: torch.Tensor = None,
+    steerf_lam: float = 0.0,
+    steerf_eta: float = 1.0,
+    steerf_clip_c: float = 1.0,
+    steerf_norm: str = "scale",
+    steerf_apply: str = "metric",
+    steerf_mapping: str = "minmax",
+    steerf_winsor_q: float = 0.01,
+    steerf_iclip: bool = False,
+    steerf_ratio: bool = False,
+    cliprange_low: float = 0.2,
+    cliprange_high: float = 0.28,
+    return_stats: bool = False,
 ) -> torch.Tensor:
     """
-    
+
     Args:
         advantages (torch.Tensor): advantage values, shape (batch_size, response_length)
         entropys (torch.Tensor): entropy values, shape (batch_size, response_length)
@@ -610,15 +624,55 @@ def compute_token_weights(
               For directional entropy control (e.g. anti-collapse), use
               token_weight_max=1.0 to avoid amplifying entropy-increasing
               tokens.
-        
+        a_h (torch.Tensor, optional): STEER-F entropy advantage A_H, shape
+            (batch_size, response_length). None disables STEER-F.
+        steerf_lam (float): STEER-F lambda. 0.0 (default) is bit-identical to
+            stock STEER — see tests/test_lambda_zero_equiv.py.
+        steerf_eta, steerf_clip_c, steerf_norm: see steer_f.SteerFConfig.
+        cliprange_low, cliprange_high: used to rebuild w = clip(ratio) * A.
+        return_stats (bool): also return the STEER-F diagnostics dict.
+
     Returns:
         torch.Tensor: computed token weights, shape (batch_size, response_length)
                      all valid tokens have weights in [token_weight_min, token_weight_max] range
     """
+    # STEER-F: when lambda is non-zero the whole metric-and-mapping path lives
+    # in steer_f.omega_tilde, which carries a copy of the mapping below and is
+    # unit-tested against this function for exact equality at lambda == 0.
+    # steerf_mapping != "minmax" also routes there even at lambda == 0: metric
+    # reshaping (winsor / rank) is orthogonal to the future term and can be
+    # ablated on stock STEER alone.
+    if (steerf_lam != 0.0 and a_h is not None) or steerf_mapping != "minmax":
+        from steer_f.omega_tilde import compute_token_weights_steerf
+
+        return compute_token_weights_steerf(
+            advantages=advantages,
+            entropys=entropys,
+            old_log_prob=old_log_prob,
+            log_prob=log_prob,
+            response_mask=response_mask,
+            token_weight_min=token_weight_min,
+            token_weight_max=token_weight_max,
+            linear=linear,
+            mode=mode,
+            a_h=a_h,
+            cliprange_low=cliprange_low,
+            cliprange_high=cliprange_high,
+            lam=steerf_lam,
+            eta=steerf_eta,
+            clip_c=steerf_clip_c,
+            norm=steerf_norm,
+            apply=steerf_apply,
+            mapping=steerf_mapping,
+            winsor_q=steerf_winsor_q,
+            use_iclip=steerf_iclip,
+            use_ratio=steerf_ratio,
+            return_stats=return_stats,
+        )
 
     with torch.no_grad():
 
-        
+
         # Calculate \delta
         x = torch.exp(log_prob)  # Convert log_prob to probability values
         x = torch.clamp(x, min=1e-8, max=1.0 - 1e-8)
@@ -654,8 +708,10 @@ def compute_token_weights(
         
         valid_metric = metric[response_mask.bool()]
         if valid_metric.numel() == 0:
-            return torch.zeros_like(response_mask, dtype=torch.float)
-            
+            empty = torch.zeros_like(response_mask, dtype=torch.float)
+            return (empty, {"steerf/lam": 0.0}) if return_stats else empty
+
+
         metric_min = valid_metric.min()
         metric_max = valid_metric.max()
         
@@ -708,9 +764,9 @@ def compute_token_weights(
             token_weights[valid_mask] = valid_weights
         
         token_weights = token_weights * response_mask.float()
-        
-        
-        return token_weights
+
+
+        return (token_weights, {"steerf/lam": 0.0}) if return_stats else token_weights
 
 
 
@@ -730,6 +786,17 @@ def compute_policy_loss_with_entropy(
     token_weight_max: float = 1.2,
     linear: bool = True,  # token weight mapping strategy
     entropy_control_mode: str = "symmetric",
+    # ---- STEER-F ----
+    a_h=None,
+    steerf_lam: float = 0.0,
+    steerf_eta: float = 1.0,
+    steerf_clip_c: float = 1.0,
+    steerf_norm: str = "scale",
+    steerf_iclip: bool = False,
+    steerf_ratio: bool = False,
+    steerf_apply: str = "metric",
+    steerf_mapping: str = "minmax",
+    steerf_winsor_q: float = 0.01,
 ):
     """
     Implementation of Stabilizing Token-level Entropy-changE via Reweighting (STEER), following the function compute_policy_loss.
@@ -781,7 +848,9 @@ def compute_policy_loss_with_entropy(
     """
 
     # Compute token weights
-    token_weights = compute_token_weights(
+    # STEER-F: a_h / steerf_lam default to None / 0.0, which routes through the
+    # untouched stock path above.
+    token_weights, steerf_stats = compute_token_weights(
         advantages=advantages,
         entropys=entropys,
         old_log_prob=old_log_prob,
@@ -791,8 +860,22 @@ def compute_policy_loss_with_entropy(
         token_weight_max=token_weight_max,
         linear=linear,  # whether linear mode is used
         mode=entropy_control_mode,
+        a_h=a_h,
+        steerf_lam=steerf_lam,
+        steerf_eta=steerf_eta,
+        steerf_clip_c=steerf_clip_c,
+        steerf_norm=steerf_norm,
+        steerf_mapping=steerf_mapping,
+        steerf_winsor_q=steerf_winsor_q,
+        steerf_apply=steerf_apply,
+        steerf_iclip=steerf_iclip,
+        steerf_ratio=steerf_ratio,
+        cliprange_low=cliprange_low if cliprange_low is not None else (cliprange or 0.2),
+        cliprange_high=cliprange_high if cliprange_high is not None else (cliprange or 0.28),
+        return_stats=True,
     )
-    
+
+
     assert clip_ratio_c > 1.0, "The lower bound of the clip_ratio_c for dual-clip PPO should be greater than 1.0," + f" but get the value: {clip_ratio_c}."
 
     negative_approx_kl = log_prob - old_log_prob
@@ -846,6 +929,19 @@ def compute_policy_loss_with_entropy(
         "token_weights_min": token_weights_min,
         "token_weights_max": token_weights_max,
     }
+
+    # STEER-F: diagnostics ride along inside clip_stats so the 9-value return
+    # arity stays intact (dp_actor.py unpacks it positionally).
+    clip_stats.update(steerf_stats)
+    from steer_f.monitors import token_weight_distribution
+
+    clip_stats.update(
+        token_weight_distribution(token_weights, response_mask, token_weight_min, token_weight_max)
+    )
+    if a_h is not None:
+        from steer_f.monitors import branch_token_entropy
+
+        clip_stats.update(branch_token_entropy(entropys, a_h, response_mask))
     
     
     return pg_loss, pg_clipfrac, ppo_kl, pg_clipfrac_lower, pg_clipfrac_high, pg_clipfrac_low, clipped_by_high, clipped_by_low, clip_stats

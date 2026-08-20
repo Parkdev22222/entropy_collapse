@@ -1213,10 +1213,78 @@ class RayPPOTrainer:
                         # add entropys and max_prob_log_probs to batch for update_policy use
                         batch.batch["entropys"] = entropys
                         batch.batch["max_prob_log_probs"] = max_prob_log_probs
-                        
+
+                        # STEER-F: turn the per-token forecast into the entropy
+                        # advantage A_H. This must happen here, not in the actor:
+                        # the sibling baseline needs every rollout of a prompt
+                        # group at once, and a micro-batch only sees a slice.
+                        steerf_cfg_src = self.config.actor_rollout_ref.actor.policy_loss
+                        _sf_lam = float(steerf_cfg_src.get("steerf_lam", 0.0))
+                        _sf_mode = str(steerf_cfg_src.get("steerf_forecast", "mtp"))
+                        _sf_oracle = _sf_mode == "oracle" and _sf_lam != 0.0
+                        if "h_togo" in old_log_prob.batch.keys() or _sf_oracle:
+                            from steer_f.monitors import branch_recall_at_k
+                            from steer_f.omega_tilde import SteerFConfig
+                            from steer_f.verl_integration import compute_a_h
+
+                            steerf_cfg = SteerFConfig(
+                                lam=_sf_lam,
+                                baseline=str(steerf_cfg_src.get("steerf_baseline", "sibling")),
+                            )
+                            if _sf_oracle:
+                                # The control arm: no heads, no forecast, no extra
+                                # forward -- just the realised downstream entropy.
+                                from steer_f.entropy_forecast import oracle_h_togo
+
+                                _h_togo = oracle_h_togo(
+                                    entropys, response_masks,
+                                    kappa=int(steerf_cfg_src.get("steerf_kappa", 4)),
+                                    gamma_h=float(steerf_cfg_src.get("steerf_gamma_h", 0.85)),
+                                )
+                            else:
+                                _h_togo = old_log_prob.batch["h_togo"]
+                            a_h = compute_a_h(
+                                h_togo_vals=_h_togo,
+                                responses=batch.batch["responses"],
+                                response_mask=response_masks,
+                                uid=batch.non_tensor_batch["uid"],
+                                cfg=steerf_cfg,
+                            )
+                            batch.batch["a_h"] = a_h
+                            # Without `support` this statistic scores the region
+                            # where A_H is *defined* rather than how the forecast
+                            # ranks inside it, and passes identically with
+                            # untrained heads (0.4711 untrained vs 0.4693
+                            # trained, docs/phase1_recall*.json). Restricting it
+                            # to the sibling support is what makes it a test of
+                            # the forecast.
+                            from steer_f.entropy_forecast import sibling_support
+
+                            _support = sibling_support(
+                                batch.batch["responses"], response_masks,
+                                batch.non_tensor_batch["uid"],
+                            )
+                            recall = branch_recall_at_k(
+                                a_h, batch.batch["responses"], response_masks,
+                                batch.non_tensor_batch["uid"], support=_support,
+                            )
+                            metrics.update({
+                                "steerf/h_togo_mean": float(
+                                    _h_togo[response_masks.bool()].mean()
+                                ),
+                                "steerf/forecast_oracle": float(_sf_oracle),
+                                "steerf/a_h_abs_mean": float(a_h[response_masks.bool()].abs().mean()),
+                                "steerf/branch_recall": recall["recall"],
+                                "steerf/branch_lift": recall["lift"],
+                                "steerf/n_branch_points": float(recall["n_branch"]),
+                            })
+                            if "h_togo" in old_log_prob.batch.keys():
+                                old_log_prob.batch.pop("h_togo")
+
                         old_log_prob.batch.pop("entropys")
                         old_log_prob.batch.pop("max_prob_log_probs")  # remove max_prob_log_probs
-                        
+
+
                         batch = batch.union(old_log_prob)
 
 
@@ -1324,13 +1392,13 @@ class RayPPOTrainer:
                             inputs = self.tokenizer.batch_decode(batch.batch["prompts"], skip_special_tokens=True)
                             outputs = self.tokenizer.batch_decode(batch.batch["responses"], skip_special_tokens=True)
                             scores = batch.batch["token_level_scores"].sum(-1).cpu().tolist()
-                            # self._dump_generations(
-                            #     inputs=inputs,
-                            #     outputs=outputs,
-                            #     scores=scores,
-                            #     reward_extra_infos_dict=reward_extra_infos_dict,
-                            #     dump_path=rollout_data_dir,
-                            # )
+                            self._dump_generations(
+                                inputs=inputs,
+                                outputs=outputs,
+                                scores=scores,
+                                reward_extra_infos_dict=reward_extra_infos_dict,
+                                dump_path=rollout_data_dir,
+                            )
 
                     # 6. validation
                     # validate

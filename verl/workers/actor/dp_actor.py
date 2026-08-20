@@ -19,6 +19,7 @@ Single Process Actor
 
 import itertools
 import logging
+import contextlib
 import os
 from typing import Tuple
 
@@ -301,8 +302,163 @@ class DataParallelPPOActor(BasePPOActor):
             self.actor_optimizer.step()
         return grad_norm
 
+    # ------------------------------------------------------------------
+    # STEER-F: future-entropy forecast
+    # ------------------------------------------------------------------
+    def _steerf_config(self):
+        return self.config.get("policy_loss", {})
+
+    def _steerf_enabled(self) -> bool:
+        return float(self._steerf_config().get("steerf_lam", 0.0)) != 0.0
+
+    def _steerf_load_heads(self):
+        """Lazily load the MTP heads and calibration onto this rank."""
+        if getattr(self, "_steerf_heads_cache", None) is not None:
+            return self._steerf_heads_cache
+
+        import json
+
+        from steer_f.entropy_forecast import HeadCalibration
+        from steer_f.mtp_heads import MTPHeads
+
+        cfg = self._steerf_config()
+        heads_path = cfg.get("steerf_heads_path")
+        if not heads_path:
+            raise ValueError(
+                "STEER-F is enabled (steerf_lam != 0) but policy_loss.steerf_heads_path is unset. "
+                "Train heads with scripts/phase1_warmup_heads.py first."
+            )
+        ckpt = torch.load(heads_path, map_location="cpu")
+        heads = MTPHeads(**ckpt["config"])
+        heads.load_state_dict(ckpt["state_dict"])
+        param = next(self.actor_module.parameters())
+        heads = heads.to(device=param.device, dtype=param.dtype).eval()
+        heads.requires_grad_(False)
+
+        calib = None
+        calib_path = cfg.get("steerf_calib_path")
+        if calib_path and os.path.exists(calib_path):
+            calib = HeadCalibration.from_dict(json.load(open(calib_path)))
+        else:
+            print(
+                "[STEER-F] no calibration file; distant heads will over-estimate entropy "
+                "(ablation A6 measures this). Pass policy_loss.steerf_calib_path to fix."
+            )
+
+        self._steerf_heads_cache = (heads, calib)
+        return self._steerf_heads_cache
+
+    def _steerf_unembedding(self):
+        """The policy's output embedding, reached through any FSDP wrapper.
+
+        Must be called inside `FSDP.summon_full_params`. Qwen2.5 ties
+        lm_head.weight to embed_tokens.weight — the same tensor object — and
+        FSDP frees that flat parameter when a forward returns, leaving this
+        module's weight as a view onto empty storage. Calling it directly after
+        a forward raises
+
+            setStorage: ... out of bounds for storage of size 0
+
+        which is what the first lambda>0 run did. `_steerf_forecast` owns the
+        context; entering it around the forward instead of after would not help,
+        because the forward frees the parameters again as it exits.
+        """
+        module = self.actor_module
+        for _ in range(4):  # unwrap FSDP / compile / PEFT layers
+            if hasattr(module, "get_output_embeddings"):
+                emb = module.get_output_embeddings()
+                if emb is not None:
+                    return emb
+            module = getattr(module, "module", module)
+        raise RuntimeError(
+            "could not reach the policy's output embedding for the STEER-F forecast"
+        )
+
+    @torch.no_grad()
+    def _steerf_forecast(self, micro_batch, temperature):
+        """H_togo for one micro-batch, or None when STEER-F is off.
+
+        Runs one extra no-grad forward with output_hidden_states=True. verl's
+        own pass discards hidden states, and re-deriving them from the packed
+        (remove_padding) path is far more fragile than paying for one forward,
+        so the cost is accepted deliberately: roughly +1 forward per rollout
+        batch, no backward.
+        """
+        if not self._steerf_enabled():
+            return None
+        # In oracle mode H_togo is read from the policy's own entropy in
+        # ray_trainer, so there is nothing to forecast here and the extra
+        # no-grad forward -- the dominant cost of STEER-F, measured at 262 s/step
+        # against 83 s/step for lambda=0 -- is skipped entirely.
+        if str(self._steerf_config().get("steerf_forecast", "mtp")) == "oracle":
+            return None
+
+        from steer_f.omega_tilde import SteerFConfig
+        from steer_f.verl_integration import forecast_h_togo
+
+        cfg = self._steerf_config()
+        heads, calib = self._steerf_load_heads()
+        sf_cfg = SteerFConfig(
+            kappa=int(cfg.get("steerf_kappa", 4)),
+            gamma_h=float(cfg.get("steerf_gamma_h", 0.85)),
+        )
+
+        response_length = micro_batch["responses"].size(1)
+        position_ids = micro_batch["position_ids"]
+        if position_ids.dim() == 3:  # qwen2vl mrope
+            position_ids = position_ids.transpose(0, 1)
+
+        output = self.actor_module(
+            input_ids=micro_batch["input_ids"],
+            attention_mask=micro_batch["attention_mask"],
+            position_ids=position_ids,
+            output_hidden_states=True,
+            use_cache=False,
+        )
+        hidden = output.hidden_states[-1]
+
+        # The forward above must finish OUTSIDE summon_full_params. Qwen2.5 ties
+        # lm_head.weight to embed_tokens.weight (one object, verified with
+        # `is`), FSDP frees that flat parameter when a forward returns, and the
+        # unembedding is then a view onto empty storage:
+        #
+        #   RuntimeError: setStorage: sizes [1536, 151936] ... out of bounds
+        #                 for storage of size 0
+        #
+        # summon_full_params materialises it again, but only for code that is
+        # not itself a forward through the wrapped module — running the forward
+        # inside the context frees the parameters again on the way out, which
+        # is why the remedy recorded in docs/experiment_log.md as fix (a) does
+        # not work as written. Forward first, summon second.
+        #
+        # Summoning restores the ORIGINAL parameter dtype (fp32), while `hidden`
+        # is the mixed-precision bf16 output, so the cast is required rather
+        # than incidental.
+        ctx = (
+            FSDP.summon_full_params(self.actor_module, writeback=False, recurse=True)
+            if isinstance(self.actor_module, FSDP)
+            else contextlib.nullcontext()
+        )
+        with ctx:
+            unembedding = self._steerf_unembedding()
+            weight_dtype = unembedding.weight.dtype
+
+            def lm_head(x):
+                return unembedding(x.to(weight_dtype))
+
+            return forecast_h_togo(
+                hidden_states=hidden,
+                lm_head=lm_head,
+                heads=heads,
+                response_length=response_length,
+                cfg=sf_cfg,
+                calib=calib,
+                temperature=temperature,  # match verl's entropys scale
+                chunk_size=int(cfg.get("steerf_chunk_size", 4096)),
+            )
+
     @GPUMemoryLogger(role="dp actor", logger=logger)
-    def compute_log_prob(self, data: DataProto, calculate_entropy=False) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def compute_log_prob(self, data: DataProto, calculate_entropy=False) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Compute the log probability of the responses given input_ids, attention_mask and position_ids
 
         Args:
@@ -367,15 +523,20 @@ class DataParallelPPOActor(BasePPOActor):
         entropy_lst = []
         max_prob_log_probs_lst = []  # collect max_prob_log_probs
         
+        h_togo_lst = []  # STEER-F
+
         for micro_batch in micro_batches:
             if isinstance(micro_batch, DataProto):
                 micro_batch = {**micro_batch.batch, **micro_batch.non_tensor_batch}
             with torch.no_grad():
                 entropy, log_probs, max_prob_log_probs = self._forward_micro_batch(micro_batch, temperature=temperature, calculate_entropy=calculate_entropy)
+                h_togo_mb = self._steerf_forecast(micro_batch, temperature)  # STEER-F
             log_probs_lst.append(log_probs)
             max_prob_log_probs_lst.append(max_prob_log_probs)  # collect max_prob_log_probs
             if calculate_entropy and entropy is not None:
                 entropy_lst.append(entropy)
+            if h_togo_mb is not None:
+                h_togo_lst.append(h_togo_mb)
 
         log_probs = torch.concat(log_probs_lst, dim=0)
         max_prob_log_probs = torch.concat(max_prob_log_probs_lst, dim=0)  # concat max_prob_log_probs
@@ -383,7 +544,9 @@ class DataParallelPPOActor(BasePPOActor):
         entropys = None
         if calculate_entropy and entropy_lst:
             entropys = torch.concat(entropy_lst, dim=0)
-            
+
+        h_togo_vals = torch.concat(h_togo_lst, dim=0) if h_togo_lst else None  # STEER-F
+
         if use_dynamic_bsz:
             indices = list(itertools.chain.from_iterable(indices))
             assert len(indices) == log_probs.size(0), f"{len(indices)} vs. {log_probs.size()}"
@@ -392,8 +555,10 @@ class DataParallelPPOActor(BasePPOActor):
             max_prob_log_probs = max_prob_log_probs[revert_indices]  # handle max_prob_log_probs
             if calculate_entropy and entropys is not None:
                 entropys = entropys[revert_indices]
+            if h_togo_vals is not None:  # STEER-F
+                h_togo_vals = h_togo_vals[revert_indices]
 
-        return log_probs, entropys, max_prob_log_probs
+        return log_probs, entropys, max_prob_log_probs, h_togo_vals
 
     @GPUMemoryLogger(role="dp actor", logger=logger)
     def update_policy(self, data: DataProto):
@@ -404,6 +569,10 @@ class DataParallelPPOActor(BasePPOActor):
         multi_turn = data.meta_info.get("multi_turn", False)
 
         select_keys = ["responses", "input_ids", "attention_mask", "position_ids", "old_log_probs", "advantages", "max_prob_log_probs", "entropys"]
+        # STEER-F: A_H is precomputed in ray_trainer (it needs the whole rollout
+        # group to build the sibling baseline, which a micro-batch cannot see).
+        if "a_h" in data.batch.keys():
+            select_keys.append("a_h")
         if multi_turn:
             select_keys.append("loss_mask")
         if self.config.get("use_kl_loss", False):
@@ -530,7 +699,37 @@ class DataParallelPPOActor(BasePPOActor):
                         token_weight_max = self.config.get("policy_loss", {}).get("token_weight_max", 1.05)
                         linear = self.config.get("policy_loss", {}).get("linear", True)  # get linear parameter
                         entropy_control_mode = self.config.get("policy_loss", {}).get("entropy_control_mode", "symmetric")
-                        
+
+                        # STEER-F knobs; steerf_lam=0.0 reproduces stock STEER exactly.
+                        steerf_lam = self.config.get("policy_loss", {}).get("steerf_lam", 0.0)
+                        steerf_eta = self.config.get("policy_loss", {}).get("steerf_eta", 1.0)
+                        steerf_clip_c = self.config.get("policy_loss", {}).get("steerf_clip_c", 1.0)
+                        steerf_norm = self.config.get("policy_loss", {}).get("steerf_norm", "scale")
+                        # "metric": add the branch term to Omega and let STEER's
+                        # min-max map it (ships today). "weight": map Omega
+                        # exactly as upstream does, then adjust the resulting
+                        # weights at branch points -- offline the metric form
+                        # lost the signal to min-max compression while still
+                        # costing the attenuating range its occupancy, see
+                        # docs/weight_forms.json.
+                        steerf_apply = self.config.get("policy_loss", {}).get("steerf_apply", "metric")
+                        # What the band mapping sees: "minmax" (stock), "winsor"
+                        # (clamp the metric to its [q, 1-q] quantiles first) or
+                        # "rank" (within-micro-batch normalised ranks). Omega's
+                        # 1/pi_old tail otherwise hands the min-max to one or
+                        # two outliers and the mapped weights collapse to a
+                        # point -- see steer_f.omega_tilde.reshape_metric.
+                        steerf_mapping = self.config.get("policy_loss", {}).get("steerf_mapping", "minmax")
+                        steerf_winsor_q = self.config.get("policy_loss", {}).get("steerf_winsor_q", 0.01)
+                        # Theorem 1 carries I_clip; the released STEER code drops
+                        # it. False reproduces the released code (and the paper's
+                        # reported numbers); True reproduces the theorem.
+                        steerf_iclip = bool(self.config.get("policy_loss", {}).get("steerf_iclip", False))
+                        # r*A (Theorem 1) vs A/pi_old (released code). See
+                        # local_omega_signed's docstring and docs/omega_forms.json.
+                        steerf_ratio = bool(self.config.get("policy_loss", {}).get("steerf_ratio", False))
+                        a_h = data.get("a_h", None) if steerf_lam != 0.0 else None
+
                         result = compute_policy_loss_with_entropy(
                             old_log_prob=old_log_prob,
                             log_prob=log_prob,
@@ -546,6 +745,16 @@ class DataParallelPPOActor(BasePPOActor):
                             token_weight_max=token_weight_max,
                             linear=linear,  # linear parameter
                             entropy_control_mode=entropy_control_mode,
+                            a_h=a_h,
+                            steerf_lam=steerf_lam,
+                            steerf_eta=steerf_eta,
+                            steerf_clip_c=steerf_clip_c,
+                            steerf_norm=steerf_norm,
+                            steerf_apply=steerf_apply,
+                            steerf_mapping=steerf_mapping,
+                            steerf_winsor_q=steerf_winsor_q,
+                            steerf_iclip=steerf_iclip,
+                            steerf_ratio=steerf_ratio,
                         )
                         # Now returns 9 values, directly unpack
                         pg_loss, pg_clipfrac, ppo_kl, pg_clipfrac_lower, pg_clipfrac_high, pg_clipfrac_low, clipped_by_high, clipped_by_low, clip_stats = result
@@ -754,7 +963,13 @@ class DataParallelPPOActor(BasePPOActor):
                             "actor/token_weights_min": float(clip_stats["token_weights_min"]),
                             "actor/token_weights_max": float(clip_stats["token_weights_max"]),
                         })
-                    
+
+                    # STEER-F diagnostics ride along in clip_stats under a "steerf/" prefix.
+                    micro_batch_metrics.update(
+                        {k: float(v) for k, v in clip_stats.items() if k.startswith("steerf/")}
+                    )
+
+
                     micro_batch_metrics.update(
                         {
                             "actor/pg_loss": pg_loss.detach().item(),
