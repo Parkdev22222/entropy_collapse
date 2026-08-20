@@ -38,7 +38,7 @@ python3 ${STEER_ROOT}/scripts/phase1_warmup_heads.py \
 python3 ${STEER_ROOT}/scripts/phase1_validate.py \
     --model "${model_path}" \
     --heads "${heads_out}" \
-    --problems ${STEER_ROOT}/datasets/math500.parquet \
+    --problems ${PROBLEMS:-${STEER_ROOT}/datasets/math500.parquet} \
     --n-problems 25 --n-trajectories 32 --n-continuations 16 \
     --max-prefixes 600 --calibrate \
     --out "${results_out}"

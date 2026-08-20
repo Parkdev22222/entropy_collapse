@@ -52,7 +52,7 @@ export WANDB_MAX_RETRIES=10
 
 save_contents="['hf_model']"
 current_datetime=$(date +"%Y%m%d_%H%M%S")
-run_name="STEERF-extreme-${model_tag}-lam${STEERF_LAM}-k${STEERF_KAPPA}-g${STEERF_GAMMA_H}-${STEERF_APPLY}-${STEERF_MAPPING}_${current_datetime}"
+run_name=${RUN_NAME:-"STEERF-extreme-${model_tag}-lam${STEERF_LAM}-k${STEERF_KAPPA}-g${STEERF_GAMMA_H}-${STEERF_APPLY}-${STEERF_MAPPING}_${current_datetime}"}
 
 train_files="['$train_path']"
 test_files="['$test_path']"

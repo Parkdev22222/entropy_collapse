@@ -56,7 +56,27 @@ python -m pytest tests/ -q
 > 최적이다. 우리 스크립트 기본값은 **0.7**이며, 릴리스 재현이 필요하면
 > `TOKEN_WEIGHT_MIN=0.8`로 오버라이드한다.
 
-### 실행 순서 (모델당)
+### 원샷 실행 — 전체 스위트
+
+```bash
+pip install -e . && python -m pytest tests/ -q     # 1회
+bash run/run_all_experiments.sh                     # 전부 (재개 가능)
+```
+
+논문 표 전부(Table 3/4/5-LCB/6/12, Fig 6/20a, RLOO/OPO 팔)를 순차 큐로 돌린다.
+스테이지별 완료 마커(`experiments_state/`)가 있어 **중단 후 재실행하면 끝난
+스테이지는 건너뛴다**. 실패한 스테이지는 기록하고 큐는 계속 진행하며, 종료 시
+요약과 함께 `results/summary.tsv`(표에 넣을 숫자, 시드별 + 평균)를 쓴다.
+
+부분 실행 토글: `RUN_MATH/RUN_CODE/RUN_EXTREME/RUN_RL_ALGOS`(기본 1),
+`RUN_PASSK`(기본 0 — 고비용), `MATH_MODELS/CODE_MODELS/SEEDS`.
+예: 7B 메인만 → `MATH_MODELS=Qwen/Qwen2.5-Math-7B RUN_CODE=0 RUN_EXTREME=0 RUN_RL_ALGOS=0 bash run/run_all_experiments.sh`
+
+체크포인트 선택(논문 규칙: AIME24 최고)은 `scripts/select_best_checkpoint.py`가
+tensorboard 이벤트에서 자동으로 수행하고, 결과 수집은
+`scripts/collect_results.py`가 eval 로그에서 자동으로 뽑는다.
+
+### 실행 순서 (수동, 모델당)
 
 ```bash
 # 0) 헤드 워밍업용 base-policy 롤아웃 (~32k 시퀀스, 짧은 GRPO 런의 덤프)

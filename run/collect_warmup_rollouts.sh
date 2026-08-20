@@ -20,8 +20,8 @@ dump_dir=${STEER_ROOT}/rollout_data/warmup/${model_tag}
 
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
-    data.train_files="['${STEER_ROOT}/datasets/DAPO-Math-17k.parquet']" \
-    data.val_files="['${STEER_ROOT}/datasets/aime24.parquet']" \
+    data.train_files="['${TRAIN_PATH:-${STEER_ROOT}/datasets/DAPO-Math-17k.parquet}']" \
+    data.val_files="['${TEST_PATH:-${STEER_ROOT}/datasets/aime24.parquet}']" \
     data.train_batch_size=512 \
     data.max_prompt_length=1024 \
     data.max_response_length=3072 \
