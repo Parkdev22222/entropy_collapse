@@ -68,9 +68,15 @@ def main() -> int:
     # "The current node timed out during startup". Reproduce the agent's
     # import here, in-process, so the failure is a one-line fix instead of a
     # 30-second timeout with the real error buried in dashboard.log.
-    if (importlib.util.find_spec("ray") is not None
-            and importlib.util.find_spec(
-                "ray._private.telemetry.open_telemetry_metric_recorder") is not None):
+    # find_spec on a dotted path RAISES ModuleNotFoundError when a parent
+    # package is absent (e.g. ray 2.46, which predates ray._private.telemetry
+    # entirely) — absence of the module means absence of the conflict.
+    try:
+        _otel_spec = importlib.util.find_spec(
+            "ray._private.telemetry.open_telemetry_metric_recorder")
+    except ModuleNotFoundError:
+        _otel_spec = None
+    if _otel_spec is not None:
         try:
             importlib.import_module(
                 "ray._private.telemetry.open_telemetry_metric_recorder")
