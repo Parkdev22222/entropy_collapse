@@ -22,3 +22,7 @@ venv/
 # patch leftovers
 *.orig
 *.rej
+checkpoints/
+*.pt
+*.safetensors
+wandb/
