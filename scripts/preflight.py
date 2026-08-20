@@ -228,9 +228,17 @@ def main() -> int:
                         f"VRAM(generation): {m} needs ~{gen:.0f} GiB "
                         f"(vLLM pool {util * vram:.0f} + resident weights/optimizer) "
                         f"of {vram:.0f} GiB — this is where single-GPU runs OOM.\n"
-                        f"    fix: GPU_MEM_UTIL=0.35 (inference-only knob, results "
-                        "unchanged) — run_all_experiments.sh sets this automatically "
-                        "on one GPU"
+                        + ("    fix: OFFLOAD=1 — the resident weights+AdamW alone are "
+                           f"{(p * 14) / 2**30 / max(n, 1):.0f} GiB here, so lowering "
+                           "GPU_MEM_UTIL cannot save it; verl only moves them off the "
+                           "GPU during generation when param_offload=True."
+                           # Can lowering the vLLM pool alone rescue it? Test the
+                           # smallest pool that still serves generation (~0.15).
+                           if (not offload and
+                               (p * 14) / 2**30 / max(n, 1) + 0.15 * vram > vram * 0.90)
+                           else "    fix: GPU_MEM_UTIL=0.35 (inference-only knob, results "
+                                "unchanged) — run_all_experiments.sh sets this "
+                                "automatically on one GPU")
                     )
                 if static + act > vram * 0.92:
                     hint = ("" if offload else
