@@ -555,7 +555,7 @@ docstring에 이미 있었고("Ω is heavy-tailed … the bulk of tokens land wi
 metric = reshape_metric(metric, mask, mapping=mapping, winsor_q=winsor_q, mode=mode)
 ```
 
-### 13.1 `"minmax"` — 항등 (기본)
+### 13.1 `"minmax"` — 항등 
 
 stock 동작. **기본값인 이유는 λ=0 동치성 테스트가 이것을 기준으로 비교하기
 때문**이다. `mapping != "minmax"`인 팔은 λ=0이어도 더 이상 stock STEER가
@@ -575,7 +575,7 @@ metric ← clamp(metric, lo, hi)
 원소 위에서 거부하므로, 마이크로배치는 한참 아래지만 오프라인 pooled 배치에서도
 그대로 쓸 수 있게.
 
-### 13.3 `"rank"` — 순위 매핑
+### 13.3 `"rank"` — 순위 매핑 (기본)
 
 ```
 r_i = avg_rank(metric_i) / (n−1)        ∈ [0, 1]        # 동점은 평균 순위
