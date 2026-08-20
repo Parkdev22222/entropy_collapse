@@ -1,17 +1,24 @@
 #!/usr/bin/env bash
 # STEER-F training, paper-parity.
 #
-# Every hyperparameter below that is not prefixed steerf_ is IDENTICAL to the
-# authors' run_exp.sh (the paper's main math setting: symmetric mode,
-# exponential mapping, token weights in [0.8, 1.0], GRPO recipe on
-# DAPO-Math-17k, 10 epochs, 8 GPUs, TP=4). STEER-F adds only the
-# policy_loss.steerf_* knobs; steerf_lam=0 is bit-identical to stock STEER
-# (tests/test_lambda_zero_equiv.py).
+# Every hyperparameter below that is not prefixed steerf_ matches the paper
+# (arXiv:2510.10150v4 §6.1 + Appendix E.2): symmetric mode, exponential
+# mapping, lambda_min = 0.7 (paper v4; the released run_exp.sh still says 0.8
+# — the paper is authoritative for table parity, override with
+# TOKEN_WEIGHT_MIN to reproduce the release), GRPO on DAPO-Math-17k,
+# 512/32/8, n=8, lr 1e-6, rollout temp 1.0 / top-p 1.0, AT MOST 200 rollout
+# steps, checkpoints every 10 steps with the highest-AIME24 one selected for
+# the final test, 8 GPUs. Main-table numbers are the average of TWO
+# independent runs (SEED=1 / SEED=2). steerf_lam=0 is bit-identical to stock
+# STEER (tests/test_lambda_zero_equiv.py).
 #
 # Paper table slots this run feeds (model chosen via MODEL_PATH):
-#   Qwen/Qwen2.5-Math-1.5B   -> Table 1 row
-#   Qwen/Qwen2.5-Math-7B     -> Table 3 row (default)
-#   Qwen/Qwen2.5-14B         -> 14B table row
+#   Qwen/Qwen2.5-Math-7B          -> Table 3  (default)
+#   Qwen/Qwen2.5-Math-1.5B        -> Table 12 (appendix F.3)
+#   Qwen/Qwen2.5-14B              -> Table 4
+#   meta-llama/Llama-3.2-3B-Instruct -> Figure 20a (appendix F.3)
+# RL-algorithm generalization (appendix F.3): append
+#   algorithm.adv_estimator=rloo   (or opo)   as a trailing hydra override.
 # Evaluate the saved checkpoint with run/eval_steerf.sh to get the
 # avg@32 / avg@1 numbers that drop into the tables.
 #
@@ -96,7 +103,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.clip_ratio_low=0.2 \
     actor_rollout_ref.actor.clip_ratio_c=10.0 \
     actor_rollout_ref.actor.policy_loss.loss_mode=entropy_control \
-    +actor_rollout_ref.actor.policy_loss.token_weight_min=0.8 \
+    +actor_rollout_ref.actor.policy_loss.token_weight_min=${TOKEN_WEIGHT_MIN:-0.7} \
     +actor_rollout_ref.actor.policy_loss.token_weight_max=1.0 \
     +actor_rollout_ref.actor.policy_loss.linear=False \
     +actor_rollout_ref.actor.policy_loss.steerf_lam=${STEERF_LAM} \
@@ -120,6 +127,10 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.6 \
     actor_rollout_ref.actor.checkpoint.save_contents=${save_contents} \
     actor_rollout_ref.rollout.n=8 \
+    actor_rollout_ref.rollout.val_kwargs.n=32 \
+    actor_rollout_ref.rollout.val_kwargs.do_sample=True \
+    actor_rollout_ref.rollout.val_kwargs.temperature=1.0 \
+    actor_rollout_ref.rollout.val_kwargs.top_p=0.7 \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=8 \
     actor_rollout_ref.ref.fsdp_config.param_offload=False \
     algorithm.use_kl_in_reward=False \
@@ -131,10 +142,13 @@ python3 -m verl.trainer.main_ppo \
     trainer.n_gpus_per_node=${N_GPUS:-8} \
     trainer.nnodes=1 \
     trainer.save_freq=10 \
-    trainer.test_freq=1 \
+    trainer.test_freq=10 \
     trainer.total_epochs=10 \
+    trainer.total_training_steps=200 \
     trainer.resume_mode=disable \
     +trainer.save_best_only=False \
     +trainer.delete_old_best_checkpoint=True \
     +trainer.save_after=80 \
+    +trainer.best_metric_key=val-core/aime_2024_dapo_boxed/acc/mean@32 \
+    ${SEED:+"+data.seed=${SEED}"} \
     "$@"

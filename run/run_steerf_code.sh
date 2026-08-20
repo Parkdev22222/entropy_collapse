@@ -1,8 +1,20 @@
 #!/usr/bin/env bash
-# STEER-F in the paper's EXTREME entropy-control scenario (§6.3, Table 6,
-# Figure 8): clip_ratio_low=0.99, clip_ratio_high=5 — ratio clipping all but
-# removed. Everything else identical to run_steerf.sh. Table 6 numbers come
-# from eval_steerf.sh on the selected checkpoint; Figure 8 is actor/entropy.
+# STEER-F on the paper's CODE-GENERATION track (Table 5, LCB-v5 rows).
+#
+# Paper protocol (arXiv:2510.10150v4 §6.1, Appendix E):
+#   models    : Qwen2.5-Coder-3B / 7B / 14B  (one run per model = one Table 5 cell)
+#   training  : ArcherCodeR (6,753 tasks; DeepCoder/CodeContests/CodeForces
+#               with regenerated tests) — build with scripts/prepare_code_data.py
+#   recipe    : identical to math (512/32/8, n=8, lr 1e-6, prompt 1024 /
+#               response 3072, no KL, temp 1.0 / top-p 1.0, <=200 steps,
+#               checkpoint every 10 steps)
+#   evaluation: LiveCodeBench v5 (279 problems), avg@4, temp 1.0 / top_p 0.7
+#   reward    : prime_code (APPS-style stdin/stdout tests) via
+#               data_source="codecontests"; set SANDBOX_FUSION_URL to route
+#               through a sandbox instead of local execution.
+#
+# The paper's code-EDITING track (internal 51k corpus + Zeta) is not
+# reproducible from public data and is out of scope.
 set -x
 
 export PYTHONHASHSEED=42
@@ -18,10 +30,14 @@ echo "Current VERL path:"
 python3 -c "import verl; print(verl.__file__)"
 python3 -c "import steer_f; print(steer_f.__file__)"
 
-project_name='STEER-F'
-train_path=${STEER_ROOT}/datasets/DAPO-Math-17k.parquet
-test_path=${STEER_ROOT}/datasets/aime24.parquet
-model_path=${MODEL_PATH:-"Qwen/Qwen2.5-Math-7B"}
+project_name='STEER-F-code'
+train_path=${STEER_ROOT}/datasets/archercoder.parquet
+test_path=${STEER_ROOT}/datasets/livecodebench_v5.parquet
+model_path=${MODEL_PATH:-"Qwen/Qwen2.5-Coder-7B"}
+if [ ! -f "${train_path}" ] || [ ! -f "${test_path}" ]; then
+    echo "FATAL: code parquets missing. Run scripts/prepare_code_data.py --archer --lcb first."
+    exit 1
+fi
 model_tag=$(basename "${model_path}")
 
 # ---- STEER-F knobs (everything else stays at the paper's values) ----
@@ -52,7 +68,7 @@ export WANDB_MAX_RETRIES=10
 
 save_contents="['hf_model']"
 current_datetime=$(date +"%Y%m%d_%H%M%S")
-run_name="STEERF-extreme-${model_tag}-lam${STEERF_LAM}-k${STEERF_KAPPA}-g${STEERF_GAMMA_H}-${STEERF_APPLY}-${STEERF_MAPPING}_${current_datetime}"
+run_name="STEERF-code-${model_tag}-lam${STEERF_LAM}-k${STEERF_KAPPA}-g${STEERF_GAMMA_H}-${STEERF_APPLY}-${STEERF_MAPPING}_${current_datetime}"
 
 train_files="['$train_path']"
 test_files="['$test_path']"
@@ -75,8 +91,8 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.kl_loss_coef=0.001 \
     actor_rollout_ref.actor.kl_loss_type=low_var_kl \
     actor_rollout_ref.actor.entropy_coeff=0 \
-    actor_rollout_ref.actor.clip_ratio_high=5 \
-    actor_rollout_ref.actor.clip_ratio_low=0.99 \
+    actor_rollout_ref.actor.clip_ratio_high=0.28 \
+    actor_rollout_ref.actor.clip_ratio_low=0.2 \
     actor_rollout_ref.actor.clip_ratio_c=10.0 \
     actor_rollout_ref.actor.policy_loss.loss_mode=entropy_control \
     +actor_rollout_ref.actor.policy_loss.token_weight_min=${TOKEN_WEIGHT_MIN:-0.7} \
@@ -103,7 +119,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.6 \
     actor_rollout_ref.actor.checkpoint.save_contents=${save_contents} \
     actor_rollout_ref.rollout.n=8 \
-    actor_rollout_ref.rollout.val_kwargs.n=32 \
+    actor_rollout_ref.rollout.val_kwargs.n=4 \
     actor_rollout_ref.rollout.val_kwargs.do_sample=True \
     actor_rollout_ref.rollout.val_kwargs.temperature=1.0 \
     actor_rollout_ref.rollout.val_kwargs.top_p=0.7 \
@@ -125,6 +141,6 @@ python3 -m verl.trainer.main_ppo \
     +trainer.save_best_only=False \
     +trainer.delete_old_best_checkpoint=True \
     +trainer.save_after=80 \
-    +trainer.best_metric_key=val-core/aime_2024_dapo_boxed/acc/mean@32 \
+    +trainer.best_metric_key=val-core/codecontests/acc/mean@4 \
     ${SEED:+"+data.seed=${SEED}"} \
     "$@"

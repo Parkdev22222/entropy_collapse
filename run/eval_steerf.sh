@@ -13,6 +13,8 @@
 # and paste them into the corresponding table column.
 #
 #   MODEL_PATH=/path/to/checkpoint/hf_model bash run/eval_steerf.sh
+#   CODE=1  ... -> Table 5 LCB-v5 avg@4 pass instead
+#   PASSK=1 ... -> Figure 6 Pass@256/512/1024 pass instead (n=1024, expensive)
 set -x
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -75,9 +77,22 @@ run_eval () {
         trainer.resume_mode=disable
 }
 
-run_eval "$files_at32" 32 "avg32"
-run_eval "$files_at1"   1 "avg1"
+if [ "${CODE:-0}" = "1" ]; then
+    # Table 5 (LCB-v5 row): avg@4 on LiveCodeBench v5. Needs
+    # datasets/livecodebench_v5.parquet from scripts/prepare_code_data.py.
+    run_eval "['$d/livecodebench_v5.parquet']" 4 "code-avg4"
+elif [ "${PASSK:-0}" = "1" ]; then
+    # Figure 6: Pass@256/512/1024 on AIME24/25. verl reports these as
+    # val-core/<dataset>/acc/best@{256,512,1024}/mean when n=1024.
+    # EXPENSIVE: 2 x 30 problems x 1024 samples.
+    run_eval "['$d/aime24.parquet', '$d/aime25.parquet']" 1024 "passk"
+else
+    run_eval "$files_at32" 32 "avg32"
+    run_eval "$files_at1"   1 "avg1"
+fi
 
 echo "Done. Table numbers:"
 echo "  avg@32 -> val-core/<aime24|aime25|amc23>/acc/mean@32 in the avg32 pass"
 echo "  avg@1  -> val-core/<math500|minerva_math|olympiadbench|gsm8k>/acc/mean@1 in the avg1 pass"
+echo "  avg@4  -> val-core/codecontests/acc/mean@4 (CODE=1 pass)"
+echo "  Pass@k -> val-core/<aime24|aime25>/acc/best@{256,512,1024}/mean (PASSK=1 pass)"

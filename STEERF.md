@@ -32,21 +32,29 @@ python -m pytest tests/ -q
 ## 실험 프로토콜 — 논문과의 패리티
 
 원칙: **STEER-F 팔만 새로 돌리고, 비교군 숫자는 논문 표의 값을 그대로 쓴다.**
-그러려면 학습·평가 세팅이 논문과 동일해야 하며, 아래 스크립트의 모든
-하이퍼파라미터는 저자 릴리스 `run/run_exp.sh`·`run/eval.sh`에서 **STEER-F 노브를
-제외하고 한 글자도 다르지 않다**:
+세팅의 1차 근거는 논문 v4 (arXiv:2510.10150v4) §6.1 + Appendix E이며, 릴리스
+스크립트와 다른 지점은 논문을 따른다 (아래 λ_min 주 참조).
 
-| 항목 | 값 (저자 릴리스 = 논문) |
+| 항목 | 값 (논문 v4) |
 |---|---|
-| 학습 데이터 | DAPO-Math-17k (레포 동봉) |
-| 레시피 | GRPO, `train_batch=512`, `mini=32`, `micro/GPU=8`, rollout `n=8` |
-| 길이 | prompt 1024 / response 3072 |
-| 최적화 | lr 1e-6, KL 없음(loss·reward 모두), entropy_coeff 0 |
-| 클리핑 | 0.2 / 0.28, dual-clip c=10 |
-| STEER 매핑 | **symmetric + 지수 매핑 + token weights [0.8, 1.0]** |
-| 스케줄 | 10 epochs (~340 steps), 8×H20, TP=4 |
-| 평가 샘플링 | temperature 1.0, top_p 0.7, max 3072 tokens |
-| 평가 지표 | **avg@32**: AIME24 / AIME25 / AMC23 · **avg@1**: MATH500 / Minerva / OlympiadBench / GSM8K |
+| 학습 데이터 (수학) | DAPO-Math-17k, 17,398 프롬프트 (레포 동봉) |
+| 학습 데이터 (코드 생성) | ArcherCodeR 6,753 태스크 — `scripts/prepare_code_data.py --archer` |
+| 레시피 | GRPO, `train_batch=512`, `mini=32`, `micro/GPU=8`, rollout `n=8`, lr 1e-6, warmup 없음 |
+| 롤아웃 샘플링 | temperature 1.0, top-p 1.0 |
+| 길이 | prompt 1024 / response 3072 (수학·코드 생성 공통) |
+| 정규화 | KL 없음(loss·reward), entropy loss 없음, token-level loss norm, dynamic sampling 없음 |
+| STEER | symmetric + 지수 매핑, **λ_min = 0.7** |
+| 스케줄 | **최대 200 rollout steps**, 체크포인트 10스텝마다, **AIME24 최고 체크포인트 선택** |
+| 반복 | 메인 표는 **독립 2런 평균** (`SEED=1`, `SEED=2`) |
+| 평가 샘플링 | temperature 1.0, top_p 0.7, max 3072, zero-shot, Math-Verify + Qwen-Verify |
+| 평가 지표 (수학) | **avg@32**: AIME24/AIME25/AMC23 · **avg@1**: MATH500/Minerva/OlympiadBench |
+| 평가 지표 (코드) | **avg@4**: LiveCodeBench v5 (279문제) |
+| 하드웨어 | 8×H20 (TP=4) |
+
+> **λ_min 주의**: 릴리스 `run_exp.sh`는 `token_weight_min=0.8`이지만 논문 v4
+> §6.1은 "λ_min is set to **0.7**"이고 민감도 분석(Fig 18–19)에서도 0.7이
+> 최적이다. 우리 스크립트 기본값은 **0.7**이며, 릴리스 재현이 필요하면
+> `TOKEN_WEIGHT_MIN=0.8`로 오버라이드한다.
 
 ### 실행 순서 (모델당)
 
@@ -59,37 +67,48 @@ MODEL_PATH=Qwen/Qwen2.5-Math-7B bash run/warmup_and_validate.sh
 #    출력의 STEERF_KAPPA / STEERF_GAMMA_H 를 다음 단계에 전달할 것.
 #    recall 판정은 반드시 _control(미학습 헤드) 파일과 비교해서 읽는다.
 
-# 2) STEER-F 본학습 (논문 세팅 그대로, STEER-F 노브만 추가)
-MODEL_PATH=Qwen/Qwen2.5-Math-7B STEERF_LAM=0.25 STEERF_KAPPA=<κ> STEERF_GAMMA_H=<γ> \
-    bash run/run_steerf.sh
+# 2) STEER-F 본학습 — 논문 세팅 그대로, 독립 2런
+for SEED in 1 2; do
+  MODEL_PATH=Qwen/Qwen2.5-Math-7B SEED=$SEED \
+  STEERF_LAM=0.25 STEERF_KAPPA=<κ> STEERF_GAMMA_H=<γ> bash run/run_steerf.sh
+done
 
-# 3) 논문 지표 평가 (avg@32 3종 + avg@1 4종, 두 패스)
-MODEL_PATH=<체크포인트>/hf_model bash run/eval_steerf.sh
+# 3) 체크포인트 선택: 학습 로그의 val-core/aime_2024_dapo_boxed/acc/mean@32 가
+#    최고인 스텝(10의 배수)의 hf_model — 논문의 선택 규칙 그대로.
+
+# 4) 논문 지표 평가, 두 런 각각 → 표에는 평균 기입
+MODEL_PATH=<선택된 체크포인트>/hf_model bash run/eval_steerf.sh
 ```
 
-### 논문 표 ↔ 이 레포의 매핑
+### 논문 표/그림 ↔ 이 레포의 매핑
 
-| 논문 표 | 세팅 | 우리 런 | 표에 넣을 숫자 |
+**우리 행(STEER-F)을 추가할 수 있는 표** — 전부 위 파이프라인으로 채워진다:
+
+| 논문 표/그림 | 세팅 | 우리 런 | 표에 넣을 숫자 |
 |---|---|---|---|
-| Table 1 (Qwen2.5-Math-1.5B, 비교군 10종) | 본문 메인 | `MODEL_PATH=Qwen/Qwen2.5-Math-1.5B run/run_steerf.sh` → `eval_steerf.sh` | `val-core/<bench>/acc/mean@{32,1}` 을 STEER-F 행으로 추가 |
-| Table 3 (Qwen2.5-Math-7B) | 본문 메인 | `MODEL_PATH=Qwen/Qwen2.5-Math-7B ...` 동일 | 동일 |
-| 14B 표 (Qwen2.5-14B) | 본문 메인 | `MODEL_PATH=Qwen/Qwen2.5-14B ...` 동일 | 동일 |
-| 극한 시나리오 (clip 0.99/5) | 엔트로피 제어 스트레스 | `run/run_steerf_extreme.sh` | 엔트로피 곡선 (`actor/entropy`) |
-| λ_min 스윕 (STEER의 유일 하이퍼) | ablation | `token_weight_min` 오버라이드는 스크립트 끝에 hydra 인자로 전달: `bash run/run_steerf.sh +actor_rollout_ref.actor.policy_loss.token_weight_min=0.9` — 오버라이드가 나중에 오므로 앞의 값을 이긴다 | 동일 |
-| 코딩 벤치 (LiveCodeBench v5, avg@4) | ACL판 추가 실험 | **공식 릴리스에 코드 트랙의 데이터·스크립트·리워드가 없음.** 아래 "코드 트랙" 참조 | — |
+| **Table 3** — Qwen2.5-Math-7B, 12행 (GRPO/SimpleRL-Zoo/Eurus-PRIME/OPO/clip-high/Entro.Loss/Fork Tokens/W-REINFORCE/Entro.Adv./Clip-Cov/KL-Cov/STEER) | 본문 메인 | `MODEL_PATH=Qwen/Qwen2.5-Math-7B run/run_steerf.sh` ×2런 → `eval_steerf.sh` | `val-core/<bench>/acc/mean@{32,1}` 2런 평균 |
+| **Table 12** (App. F.3) — Qwen2.5-Math-1.5B, 6행 (Base/GRPO/OPO/Entro.Adv./Clip-Cov/STEER) | 동일 | `MODEL_PATH=Qwen/Qwen2.5-Math-1.5B ...` | 동일 |
+| **Table 4** — Qwen2.5-14B, 6행 (Base/GRPO/OPO/Entro.Adv./Clip-Cov/STEER) | 동일 | `MODEL_PATH=Qwen/Qwen2.5-14B ...` | 동일 |
+| **Table 5** — 코드, LCB-v5 행 (GRPO vs STEER × Coder-3B/7B/14B) | ArcherCodeR 학습 | `scripts/prepare_code_data.py --archer --lcb` → `MODEL_PATH=Qwen/Qwen2.5-Coder-{3B,7B,14B} run/run_steerf_code.sh` → `CODE=1 eval_steerf.sh` | `val-core/codecontests/acc/mean@4` |
+| **Table 6** — 극한 시나리오 (ε_low=0.99, ε_high=5), 5행 (GRPO/Entro.Adv./Entro.Loss/Clip-Cov/STEER) | 7B | `run/run_steerf_extreme.sh` → `eval_steerf.sh` | 동일 6개 벤치 |
+| **Figure 6** — Pass@256/512/1024, AIME24/25 | 7B 선택 체크포인트 | `PASSK=1 MODEL_PATH=... eval_steerf.sh` | `val-core/<aime>/acc/best@{256,512,1024}/mean` |
+| **Figure 7** — 학습 중 test acc 곡선 | 7B | 학습 로그의 `val-core/aime_2024_dapo_boxed/acc/mean@32` per step | 곡선 |
+| **Figure 8** — 극한 시나리오 엔트로피 곡선 | 7B | `run_steerf_extreme.sh` 로그의 `actor/entropy` | 곡선 |
+| **App. F.3 Fig 20a** — Llama-3.2-3B 수학 (GRPO vs STEER) | 동일 레시피 | `MODEL_PATH=meta-llama/Llama-3.2-3B-Instruct run/run_steerf.sh` | 6개 벤치 + Avg |
+| **App. F.3** — RL 알고리즘 일반화 (RLOO 45.8→46.8, OPO 46.4→47.5) | 7B | `run/run_steerf.sh algorithm.adv_estimator=rloo` (또는 `opo`) — 후행 hydra 인자가 앞의 값을 이긴다 | 6개 벤치 평균 |
 
-비교군(GRPO, SimpleRL-Zoo, Eurus-PRIME, OPO, clip-high, entropy-loss,
-Fork Tokens, W-REINFORCE, Entropy Adversarial, Clip-Cov, KL-Cov, STEER)은
-**재실험하지 않는다** — 논문 표의 값을 그대로 옮긴다. 같은 세팅에서 돌았음이
-스크립트 동일성으로 보장되는 것이 이 브랜치의 요점이다.
+**추가 불가/비대상 표**:
 
-### 코드 트랙에 관하여
+| 표/그림 | 이유 |
+|---|---|
+| Table 1, 2, 7, Fig 1–5, 9–17 | Ω 추정 정확도·4분면 분석 등 **분석용** — 방법 성능 표가 아님. STEER-F의 대응물은 `docs/STEERF_method.md`의 검증 절 + `steerf/*` 로그 지표 |
+| Table 5의 Internal/Zeta 행 (코드 편집) | 학습 코퍼스가 **내부 데이터 51,474건** — 공개 재현 불가. Mistral-7B 일반화(Fig 20b)도 동일 사유 |
+| Table 10 (ε 클립 스윕), Table 11 (매핑 exp/linear/binary), Fig 18–19 (λ_min) | **STEER 자체의 ablation** — 우리 행을 추가하는 표가 아니다. STEER-F의 대응 ablation은 `STEERF_*` 노브로 동일하게 수행 (λ 스윕, `STEERF_MAPPING`, `STEERF_APPLY`, oracle 팔) |
 
-논문 ACL판은 LiveCodeBench v5 (avg@4)를 보고하지만, 공식 릴리스에는 코드 학습
-데이터·리워드·스크립트가 포함되어 있지 않다. 저자 세팅을 추정으로 재구성하면
-"동일 세팅" 주장이 깨지므로 이 브랜치는 코드 트랙을 **의도적으로 비워 둔다**.
-논문 부록에서 코드 트랙의 데이터셋·리워드 구성을 확인해 오면
-`run/run_steerf.sh`는 train_files/val_files 교체만으로 재사용 가능하다.
+비교군 숫자는 재실험하지 않고 논문 값을 그대로 옮긴다. 훈련·평가 스크립트가
+저자 프로토콜과 동일함이 그 정당화이며, 유일하게 저자 릴리스와 다른 두 지점
+(λ_min 0.7, 학습 중 val을 AIME24 avg@32로 측정해 선택 규칙을 논문 문면대로
+구현)은 모두 논문 쪽을 따른 것이다.
 
 ## STEER-F 노브 (전부 env로 노출, 기본값 = 권장값)
 
@@ -113,7 +132,9 @@ Fork Tokens, W-REINFORCE, Entropy Adversarial, Clip-Cov, KL-Cov, STEER)은
 2. `ppo_micro_batch_size_per_gpu=8` 고정 — STEER의 min-max가 마이크로배치
    단위라 이 값이 방법의 일부다.
 3. λ>0 팔을 보고하기 전에 **oracle 팔과 λ=0 팔을 같은 시드로** 함께 돌린다.
-4. 시드 3개 이상 — avg@1 500문제의 이항 SE ≈ 2.2pp로, 1시드 차이는 대부분 잡음.
+4. **독립 2런 평균** — 논문 메인 표의 규약(§6.1). avg@1 500문제의 이항 SE가
+   ≈2.2pp라 1런 차이는 대부분 잡음이며, 2런 평균으로도 빠듯하니 시드별 원값을
+   함께 보고할 것.
 
 ## 감시 지표
 
