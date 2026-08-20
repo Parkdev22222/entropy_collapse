@@ -61,6 +61,27 @@ def main() -> int:
     want("wandb", "pip install wandb (or keep trainer.logger console+tensorboard)",
          "run scripts default to the wandb logger")
 
+    # --- ray <-> opentelemetry conflict --------------------------------------
+    # Newer Ray (>= ~2.47) imports opentelemetry's prometheus exporter inside
+    # the dashboard agent; if vllm pinned an older opentelemetry-semconv, the
+    # agent crash-loops, the raylet never registers, and ray.init dies with
+    # "The current node timed out during startup". Reproduce the agent's
+    # import here, in-process, so the failure is a one-line fix instead of a
+    # 30-second timeout with the real error buried in dashboard.log.
+    if importlib.util.find_spec("ray") is not None and        importlib.util.find_spec("ray._private.telemetry.open_telemetry_metric_recorder") is not None:
+        try:
+            importlib.import_module("ray._private.telemetry.open_telemetry_metric_recorder")
+        except Exception as e:
+            FAILS.append(
+                "ray dashboard agent cannot import its telemetry stack "
+                f"({type(e).__name__}: {e}).
+"
+                '    fix: pip install "ray[default]==2.46.0" && ray stop --force
+'
+                "    (2.46 predates the opentelemetry-prometheus dependency and is "
+                "the combination proven with vllm 0.8.5.post1 / torch 2.6)"
+            )
+
     # --- GPUs ----------------------------------------------------------------
     n_want = int(os.environ.get("N_GPUS", "8"))
     tp = int(os.environ.get("TP_SIZE", "4"))

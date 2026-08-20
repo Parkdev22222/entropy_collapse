@@ -34,6 +34,17 @@ python -m pytest tests/ -q
 python scripts/preflight.py          # 큐를 걸기 전 환경 검증 (run_all이 자동 수행)
 ```
 
+**검증된 버전 조합** (이 조합에서 실제 학습이 돌았다 — 다른 조합은 자기 책임):
+
+| 패키지 | 버전 | 어긋나면 생기는 일 |
+|---|---|---|
+| torch | 2.6.0+cu124 | vllm 0.8.5가 요구 |
+| vllm | 0.8.5.post1 | 상위 버전은 verl 0.4.1 rollout 어댑터와 불일치 |
+| **ray[default]** | **2.46.0** | ≥2.47은 대시보드가 opentelemetry-prometheus를 import — vllm이 핀한 구버전 semconv와 충돌해 **raylet 등록 타임아웃**으로 죽는다 (`pip install "ray[default]==2.46.0" && ray stop --force`) |
+| flash-attn | 2.7.4.post1 | 프리빌트 휠 기준 |
+| transformers | 4.51.3 | |
+| tensorboard | 2.18.0 | 상위 버전은 protobuf 충돌 이력 |
+
 `pip install -e .`가 필수인 이유: Ray 워커는 `steer_f`를 절대 경로로 import하며,
 재사용된 raylet에는 부모 셸의 PYTHONPATH가 닿지 않는다 (실측된 사고).
 `run/run_all_experiments.sh`는 시작 시 `scripts/preflight.py`로 위 전부를
