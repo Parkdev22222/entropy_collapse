@@ -82,6 +82,19 @@ if [ -z "${TP_SIZE:-}" ]; then
 fi
 export N_GPUS TP_SIZE
 echo "[all] GPU topology: N_GPUS=${N_GPUS} TP_SIZE=${TP_SIZE}"
+
+# vLLM reserves gpu_memory_utilization x VRAM as a pool, and verl only moves the
+# FSDP model off the GPU during generation when param_offload=True. On one card
+# the paper's 0.6 therefore has to coexist with weights + AdamW: measured 67.7 of
+# ~73 addressable GiB for 1.5B, which OOMs on any fragmentation. Lower it when
+# there is a single GPU — this is an inference-engine memory knob only, it does
+# not change any training result.
+if [ "${N_GPUS}" -eq 1 ] && [ -z "${GPU_MEM_UTIL:-}" ]; then
+    GPU_MEM_UTIL=0.35
+    echo "[all] single GPU: GPU_MEM_UTIL=${GPU_MEM_UTIL} (paper default 0.6 does not fit"
+    echo "[all]   alongside the resident optimizer state; results are unaffected)"
+fi
+export GPU_MEM_UTIL=${GPU_MEM_UTIL:-0.6}
 if [ "${N_GPUS}" -lt 8 ]; then
     echo "[all] NOTE: the paper used 8xH20. The optimisation is unchanged on fewer"
     echo "[all]       GPUs (same global batch, more gradient accumulation), but"

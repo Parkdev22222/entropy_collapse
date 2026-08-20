@@ -12,6 +12,7 @@ set -xe
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STEER_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 export PYTHONPATH="${STEER_ROOT}:$PYTHONPATH"
+export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
 
 model_path=${MODEL_PATH:-"Qwen/Qwen2.5-Math-7B"}
 model_tag=$(basename "${model_path}")

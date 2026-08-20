@@ -107,6 +107,26 @@ GPU 1장 기준 피크(정적 + 활성화 9.7 GiB):
 스텝 시간이 상당히 늘어난다. `GPU_MEM_UTIL`(기본 0.6)은 vLLM이 선점하는 비율로,
 한 장에 vLLM과 FSDP가 같이 올라갈 때 조정 여지가 가장 큰 값이다.
 
+#### 단일 GPU의 진짜 병목은 학습이 아니라 **생성 단계**다
+
+`gpu_memory_utilization`은 vLLM이 **풀로 선점**하는 비율이고, verl은
+`param_offload=True`일 때만 생성 중 FSDP 모델을 CPU로 내린다. 논문 설정
+(`param_offload=False`, util 0.6)을 GPU 1장에서 그대로 쓰면 생성 단계에
+
+```
+vLLM 풀 44.7 + FSDP 가중치 2.9 + AdamW 17.2 + 가중치 동기화 사본 2.9 = 67.7 GiB
+                                                    (A100 80GB의 가용 ~73 GiB)
+```
+
+가 되어 **파편화만 조금 있어도 OOM**이다. 학습 단계(청킹 후 31 GiB)보다 여기가
+먼저 터진다. 그래서:
+
+- `run/run_all_experiments.sh`는 **GPU가 1장이면 `GPU_MEM_UTIL=0.35`를 자동 적용**한다.
+  이 값은 추론 엔진의 메모리 노브일 뿐이라 **학습 결과에 영향이 없다.**
+- 전 스크립트에 `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`를 기본 설정했다.
+  롤아웃↔학습이 매 스텝 수십 GiB를 잡았다 놨다 하는 이 워크로드에서 파편화를 크게 줄인다.
+- 그래도 OOM이면 `OFFLOAD=1`(가중치·AdamW를 CPU로) → 두 단계 모두 크게 여유가 생긴다.
+
 **요약**: A100 80GB ×1이면 사실상 1.5B(Table 12)만, **H200 141GB ×1이면 7B
 (Table 3)까지 오프로드 없이** 닿는다. 14B와 코드 3종(Table 4·5)은 오프로드를
 쓰더라도 시간이 문제이므로 다중 GPU 노드를 권한다. 실제 박스 기준 판정은

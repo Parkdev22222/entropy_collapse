@@ -216,11 +216,27 @@ def main() -> int:
                 # micro_batch_size_per_gpu is fixed at 8 by the method (STEER's
                 # min-max is per micro-batch), so this term does not shrink.
                 act = (8 * 3250 * 152064 * 2 + 2 * 2048 * 152064 * 4) / 2**30
+                # Generation phase: vLLM holds gpu_memory_utilization x VRAM as a
+                # pool while the FSDP model + optimizer stay resident (verl only
+                # offloads them when param_offload=True).
+                util = float(os.environ.get("GPU_MEM_UTIL", "0.6"))
+                gen = (util * vram
+                       + (0 if offload else (p * 2 + p * 12) / 2**30 / max(n, 1))
+                       + p * 2 / 2**30 / max(n, 1))          # state_dict copy for weight sync
+                if gen > vram * 0.90:
+                    WARNS.append(
+                        f"VRAM(generation): {m} needs ~{gen:.0f} GiB "
+                        f"(vLLM pool {util * vram:.0f} + resident weights/optimizer) "
+                        f"of {vram:.0f} GiB — this is where single-GPU runs OOM.\n"
+                        f"    fix: GPU_MEM_UTIL=0.35 (inference-only knob, results "
+                        "unchanged) — run_all_experiments.sh sets this automatically "
+                        "on one GPU"
+                    )
                 if static + act > vram * 0.92:
                     hint = ("" if offload else
                             "\n    try: OFFLOAD=1 (AdamW state to CPU, much slower)")
                     WARNS.append(
-                        f"VRAM: {m} peaks at ~{static + act:.0f} GiB per GPU "
+                        f"VRAM(training): {m} peaks at ~{static + act:.0f} GiB per GPU "
                         f"({static:.0f} static + {act:.0f} activations) across "
                         f"{n} GPU(s) of {vram:.0f} GiB — expect OOM."
                         + hint +
