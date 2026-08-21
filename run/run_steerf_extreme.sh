@@ -8,10 +8,13 @@ export PYTHONHASHSEED=42
 export PYTORCH_SEED=42
 export CUDA_DEVICE_ORDER="PCI_BUS_ID"
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
-# The rollout/train cycle allocates and frees tens of GiB every step; without
-# expandable segments the caching allocator fragments and OOMs on a single GPU
-# long before the totals say it should.
-export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
+# The rollout/train cycle allocates and frees tens of GiB every step, so the
+# caching allocator wants help against fragmentation. It must NOT be
+# expandable_segments:True: vLLM's sleep mode (rollout.free_cache_engine, on by
+# default) allocates its pool through the cuMem APIs and asserts against
+# expandable segments at engine construction -- see pytorch#147851. Sleep mode
+# hands the whole vLLM pool back every step, which is the bigger win anyway.
+export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-garbage_collection_threshold:0.8}
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STEER_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -57,9 +60,15 @@ fi
 # collect) can be proven end-to-end on a single GPU in about an hour; its
 # numbers are NOT comparable to the paper's tables and the run name says so.
 SCALE=${SCALE:-paper}
+# The avg@32 benchmarks are ALREADY replicated 32x inside their parquets
+# (aime24/aime25: 30 problems -> 960 rows; amc23: 40 -> 1280), which is how
+# upstream STEER's run/eval.sh gets avg@32 with val_kwargs.n=1. verl names the
+# metric mean@<samples-per-prompt>, so n>1 both multiplies the cost by n and
+# renames the metric out from under select_best_checkpoint.py /
+# collect_results.py, which look for mean@32.
 case "${SCALE}" in
-  paper) TRAIN_BS=512; MINI_BS=32; RESP_LEN=3072; STEPS=200; VAL_N=32; TEST_FREQ=10; SAVE_FREQ=10 ;;
-  smoke) TRAIN_BS=16;  MINI_BS=8;  RESP_LEN=512;  STEPS=3;   VAL_N=2;  TEST_FREQ=1;  SAVE_FREQ=1  ;;
+  paper) TRAIN_BS=512; MINI_BS=32; RESP_LEN=3072; STEPS=200; VAL_N=1;  TEST_FREQ=10; SAVE_FREQ=10 ;;
+  smoke) TRAIN_BS=16;  MINI_BS=8;  RESP_LEN=512;  STEPS=3;   VAL_N=1;  TEST_FREQ=1;  SAVE_FREQ=1  ;;
   *) echo "FATAL: SCALE must be 'paper' or 'smoke', got '${SCALE}'"; exit 1 ;;
 esac
 

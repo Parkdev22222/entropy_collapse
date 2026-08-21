@@ -15,14 +15,20 @@ STEER_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # shellcheck source=run/_gpu_defaults.sh
 . "${SCRIPT_DIR}/_gpu_defaults.sh"
 export PYTHONPATH="${STEER_ROOT}:$PYTHONPATH"
-export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
+# The rollout/train cycle allocates and frees tens of GiB every step, so the
+# caching allocator wants help against fragmentation. It must NOT be
+# expandable_segments:True: vLLM's sleep mode (rollout.free_cache_engine, on by
+# default) allocates its pool through the cuMem APIs and asserts against
+# expandable segments at engine construction -- see pytorch#147851. Sleep mode
+# hands the whole vLLM pool back every step, which is the bigger win anyway.
+export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-garbage_collection_threshold:0.8}
 
 model_path=${MODEL_PATH:-"Qwen/Qwen2.5-Math-7B"}
 model_tag=$(basename "${model_path}")
 SCALE=${SCALE:-paper}
 case "${SCALE}" in
-  paper) N_STEPS=${N_STEPS:-8};  TRAIN_BS=512; RESP_LEN=3072 ;;
-  smoke) N_STEPS=${N_STEPS:-2};  TRAIN_BS=16;  RESP_LEN=512  ;;
+  paper) N_STEPS=${N_STEPS:-8};  TRAIN_BS=512; MINI_BS=32; RESP_LEN=3072 ;;
+  smoke) N_STEPS=${N_STEPS:-2};  TRAIN_BS=16;  MINI_BS=8;  RESP_LEN=512  ;;
   *) echo "FATAL: SCALE must be 'paper' or 'smoke'"; exit 1 ;;
 esac
 OFFLOAD=${OFFLOAD:-0}
@@ -41,7 +47,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.model.path=$model_path \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.model.use_remove_padding=True \
-    actor_rollout_ref.actor.ppo_mini_batch_size=32 \
+    actor_rollout_ref.actor.ppo_mini_batch_size=${MINI_BS} \
     actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=8 \
     actor_rollout_ref.actor.use_kl_loss=False \
     actor_rollout_ref.actor.entropy_coeff=0 \

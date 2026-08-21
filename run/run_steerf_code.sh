@@ -12,10 +12,13 @@ export PYTHONHASHSEED=42
 export PYTORCH_SEED=42
 export CUDA_DEVICE_ORDER="PCI_BUS_ID"
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
-# The rollout/train cycle allocates and frees tens of GiB every step; without
-# expandable segments the caching allocator fragments and OOMs on a single GPU
-# long before the totals say it should.
-export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
+# The rollout/train cycle allocates and frees tens of GiB every step, so the
+# caching allocator wants help against fragmentation. It must NOT be
+# expandable_segments:True: vLLM's sleep mode (rollout.free_cache_engine, on by
+# default) allocates its pool through the cuMem APIs and asserts against
+# expandable segments at engine construction -- see pytorch#147851. Sleep mode
+# hands the whole vLLM pool back every step, which is the bigger win anyway.
+export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-garbage_collection_threshold:0.8}
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STEER_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"

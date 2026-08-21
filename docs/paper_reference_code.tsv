@@ -1,0 +1,9 @@
+# STEER paper Table 5 - real-world coding tasks. Exact-match for Internal/Zeta,
+# avg@4 for LCB-v5. Percentages.
+dataset	method	3B	7B	14B
+Internal	GRPO	39.7	40.1	42.6
+Internal	STEER	41.2	41.9	45.1
+Zeta	GRPO	17.4	22.0	22.3
+Zeta	STEER	19.3	24.0	24.1
+LCB-v5	GRPO	24.4	28.5	29.3
+LCB-v5	STEER	24.9	29.2	31.8

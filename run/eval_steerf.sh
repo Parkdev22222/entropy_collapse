@@ -90,7 +90,8 @@ elif [ "${PASSK:-0}" = "1" ]; then
     # EXPENSIVE: 2 x 30 problems x 1024 samples.
     run_eval "['$d/aime24.parquet', '$d/aime25.parquet']" 1024 "passk"
 else
-    run_eval "$files_at32" 32 "avg32"
+    # n=1: the parquets already carry the 32 replicas (see upstream run/eval.sh)
+    run_eval "$files_at32" 1 "avg32"
     run_eval "$files_at1"   1 "avg1"
 fi
 

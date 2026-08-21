@@ -64,6 +64,11 @@ def build_argparser():
     p.add_argument("--rollouts", required=True,
                    help="JSONL from scripts/phase0_collect_rollouts.py")
     p.add_argument("--calib", default=None, help="checkpoints/mtp_calibration.json")
+    p.add_argument("--allow-untrained", action="store_true",
+                   help="permit a make_dummy_heads.py checkpoint. Only for the "
+                        "deliberate control arm in run/warmup_and_validate.sh: the "
+                        "run is labelled a control in the output and its numbers are "
+                        "the chance floor, never a STEER-F result.")
     p.add_argument("--out", required=True)
     p.add_argument("--phase1-results", default=None,
                    help="docs/phase1_results.json — supplies rho for the joint verdict")
@@ -122,8 +127,13 @@ def main(argv=None):
     ).to(args.device).eval()
 
     ckpt = torch.load(args.heads, map_location="cpu", weights_only=False)
-    if ckpt.get("untrained"):
-        sys.exit("[recall] refusing: --heads is an UNTRAINED (dummy) checkpoint")
+    untrained_control = bool(ckpt.get("untrained"))
+    if untrained_control and not args.allow_untrained:
+        sys.exit("[recall] refusing: --heads is an UNTRAINED (dummy) checkpoint. "
+                 "Pass --allow-untrained if this is the control arm.")
+    if untrained_control:
+        print("[recall] CONTROL RUN: untrained heads. These numbers are the chance "
+              "floor the trained run must beat -- not a STEER-F result.")
     heads = MTPHeads(**ckpt["config"]).to(args.device, dtype=dtype)
     heads.load_state_dict(ckpt["state_dict"])
     heads.eval()
@@ -259,6 +269,7 @@ def main(argv=None):
         "restricted_to_support": bool(args.restrict_to_support),
         "gate_passed": gate.passed,
         "gate_summary": gate.summary(),
+        "untrained_control": untrained_control,
     }, indent=2))
     print(f"[recall] wrote {args.out}")
 

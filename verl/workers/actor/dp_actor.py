@@ -80,12 +80,16 @@ class DataParallelPPOActor(BasePPOActor):
         )
         self.device_name = get_device_name()
 
-    def _forward_micro_batch(self, micro_batch, temperature, calculate_entropy=False) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def _forward_micro_batch(self, micro_batch, temperature, calculate_entropy=False, calculate_max_prob=True) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Returns:
             entropy: # (bs, response_len)
             log_probs: # (bs, response_len)
-            max_prob_log_probs: # (bs, response_len) - log prob of most probable token
+            max_prob_log_probs: # (bs, response_len) - log prob of most probable token,
+                None when calculate_max_prob=False. It costs a full-vocab max AND
+                logsumexp over [total_nnz, V]; under grad that is another
+                [total_nnz, V] saved for backward on top. update_policy discards it,
+                so it only pays for itself in compute_log_prob's no_grad pass.
         """
         response_length = micro_batch["responses"].size(-1)
         multi_modal_inputs = {}
@@ -103,6 +107,7 @@ class DataParallelPPOActor(BasePPOActor):
             attention_mask = micro_batch["attention_mask"]
             position_ids = micro_batch["position_ids"]
             entropy = None
+            max_prob_log_probs = None
             if position_ids.dim() == 3:  # qwen2vl mrope
                 position_ids = position_ids.transpose(0, 1)  # (bsz, 3, seqlen) -> (3, bsz, seqlen)
 
@@ -182,9 +187,10 @@ class DataParallelPPOActor(BasePPOActor):
                     )
                     
                     # Compute log prob of the most probable token in vocabulary
-                    max_prob_logits = torch.max(logits_rmpad, dim=-1)[0]  # (total_nnz,)
-                    logsumexp_logits = torch.logsumexp(logits_rmpad, dim=-1)  # (total_nnz,)
-                    max_prob_log_probs = max_prob_logits - logsumexp_logits  # (total_nnz,)
+                    if calculate_max_prob:
+                        max_prob_logits = torch.max(logits_rmpad, dim=-1)[0]  # (total_nnz,)
+                        logsumexp_logits = torch.logsumexp(logits_rmpad, dim=-1)  # (total_nnz,)
+                        max_prob_log_probs = max_prob_logits - logsumexp_logits  # (total_nnz,)
 
                     # compute entropy
                     if calculate_entropy:
@@ -203,12 +209,13 @@ class DataParallelPPOActor(BasePPOActor):
                         padding_size=pad_size,
                     )
                     # gather max_prob_log_probs
-                    max_prob_log_probs = gather_outpus_and_unpad(
-                        max_prob_log_probs,
-                        gather_dim=0,
-                        unpad_dim=0,
-                        padding_size=pad_size,
-                    )
+                    if max_prob_log_probs is not None:
+                        max_prob_log_probs = gather_outpus_and_unpad(
+                            max_prob_log_probs,
+                            gather_dim=0,
+                            unpad_dim=0,
+                            padding_size=pad_size,
+                        )
                     if calculate_entropy:
                         entropy_rmpad = gather_outpus_and_unpad(
                             entropy_rmpad,
@@ -233,18 +240,20 @@ class DataParallelPPOActor(BasePPOActor):
                 )
                 
                 # pad max_prob_log_probs
-                full_max_prob_log_probs = pad_input(
-                    hidden_states=max_prob_log_probs.unsqueeze(-1),
-                    indices=indices,
-                    batch=batch_size,
-                    seqlen=seqlen,
-                )
+                if max_prob_log_probs is not None:
+                    full_max_prob_log_probs = pad_input(
+                        hidden_states=max_prob_log_probs.unsqueeze(-1),
+                        indices=indices,
+                        batch=batch_size,
+                        seqlen=seqlen,
+                    )
 
                 # only return response part:
                 if calculate_entropy:
                     entropy = full_entropy.squeeze(-1)[:, -response_length - 1 : -1]  # (bsz, response_length)
                 log_probs = full_log_probs.squeeze(-1)[:, -response_length - 1 : -1]  # (bsz, response_length)
-                max_prob_log_probs = full_max_prob_log_probs.squeeze(-1)[:, -response_length - 1 : -1]  # (bsz, response_length)
+                if max_prob_log_probs is not None:
+                    max_prob_log_probs = full_max_prob_log_probs.squeeze(-1)[:, -response_length - 1 : -1]  # (bsz, response_length)
                 
 
             else:  # not using rmpad and no ulysses sp
@@ -274,9 +283,10 @@ class DataParallelPPOActor(BasePPOActor):
                     log_probs = logprobs_from_logits(logits, micro_batch["responses"])
                     
                     # Compute log prob of the most probable token in vocabulary
-                    max_prob_logits = torch.max(logits, dim=-1)[0]  # (bsz, response_length)
-                    logsumexp_logits = torch.logsumexp(logits, dim=-1)  # (bsz, response_length)
-                    max_prob_log_probs = max_prob_logits - logsumexp_logits  # (bsz, response_length)
+                    if calculate_max_prob:
+                        max_prob_logits = torch.max(logits, dim=-1)[0]  # (bsz, response_length)
+                        logsumexp_logits = torch.logsumexp(logits, dim=-1)  # (bsz, response_length)
+                        max_prob_log_probs = max_prob_logits - logsumexp_logits  # (bsz, response_length)
                     
                     if calculate_entropy:
                         entropy = verl_F.entropy_from_logits(logits)  # (bsz, response_length)
@@ -680,19 +690,19 @@ class DataParallelPPOActor(BasePPOActor):
                         if "entropys" in data:
                             entropy = data["entropys"]
                             # Re-compute log_prob (without computing entropy)
-                            _, log_prob, _ = self._forward_micro_batch(micro_batch=data, temperature=temperature, calculate_entropy=False)
+                            _, log_prob, _ = self._forward_micro_batch(micro_batch=data, temperature=temperature, calculate_entropy=False, calculate_max_prob=False)
                         else:
                             # If entropys is not passed in, re-compute
                             calculate_entropy = False
                             if entropy_coeff != 0:
                                 calculate_entropy = True
-                            entropy, log_prob, _ = self._forward_micro_batch(micro_batch=data, temperature=temperature, calculate_entropy=calculate_entropy)
+                            entropy, log_prob, _ = self._forward_micro_batch(micro_batch=data, temperature=temperature, calculate_entropy=calculate_entropy, calculate_max_prob=False)
                     else:
                         # In vanilla mode, decide whether to compute entropy based on entropy_coeff
                         calculate_entropy = False
                         if entropy_coeff != 0:
                             calculate_entropy = True
-                        entropy, log_prob, _ = self._forward_micro_batch(micro_batch=data, temperature=temperature, calculate_entropy=calculate_entropy)
+                        entropy, log_prob, _ = self._forward_micro_batch(micro_batch=data, temperature=temperature, calculate_entropy=calculate_entropy, calculate_max_prob=False)
                     
                     if loss_mode == "entropy_control" and entropy is not None:
                         token_weight_min = self.config.get("policy_loss", {}).get("token_weight_min", 0.95)

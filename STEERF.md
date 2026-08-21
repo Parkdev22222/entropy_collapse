@@ -130,8 +130,12 @@ vLLM 풀 44.7 + FSDP 가중치 2.9 + AdamW 17.2 + 가중치 동기화 사본 2.9
 
 - `run/run_all_experiments.sh`는 **GPU가 1장이면 `GPU_MEM_UTIL=0.35`를 자동 적용**한다.
   이 값은 추론 엔진의 메모리 노브일 뿐이라 **학습 결과에 영향이 없다.**
-- 전 스크립트에 `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`를 기본 설정했다.
-  롤아웃↔학습이 매 스텝 수십 GiB를 잡았다 놨다 하는 이 워크로드에서 파편화를 크게 줄인다.
+- 전 스크립트에 `PYTORCH_CUDA_ALLOC_CONF=garbage_collection_threshold:0.8`을 기본
+  설정했다. 롤아웃↔학습이 매 스텝 수십 GiB를 잡았다 놨다 하는 이 워크로드에서
+  파편화를 줄인다. **`expandable_segments:True`는 쓸 수 없다** — vLLM의 sleep
+  mode(`rollout.free_cache_engine`, 기본 True)가 cuMem API로 풀을 잡기 때문에
+  엔진 생성 시점에 assert로 막힌다(pytorch#147851). 대신 sleep mode가 매 스텝
+  vLLM 풀 전체를 반납하므로 파편화 압력 자체가 그만큼 작다.
 - 그래도 OOM이면 `OFFLOAD=1`(가중치·AdamW를 CPU로) → 두 단계 모두 크게 여유가 생긴다.
 
 **요약**: 1장 구성에서 오프로드 없이 도는 것은 **1.5B(Table 12)뿐**이다.

@@ -46,48 +46,10 @@ RUN_RL_ALGOS=${RUN_RL_ALGOS:-1}
 RUN_PASSK=${RUN_PASSK:-0}
 AUX_MODEL=${AUX_MODEL:-"Qwen/Qwen2.5-Math-7B"}   # extreme / RLOO / OPO / Pass@k arms
 
-# SCALE=smoke proves the pipeline end-to-end on one GPU in ~an hour. It pins
-# itself to the one model that fits a single 80GB card and drops every arm that
-# would only add hours without testing new code paths.
-export SCALE=${SCALE:-paper}
-export OFFLOAD=${OFFLOAD:-0}
-if [ "${SCALE}" = "smoke" ]; then
-    MATH_MODELS=${MATH_MODELS:-"Qwen/Qwen2.5-Math-1.5B"}
-    SEEDS=${SEEDS:-1}
-    RUN_CODE=${RUN_CODE:-0}; RUN_EXTREME=${RUN_EXTREME:-0}
-    RUN_RL_ALGOS=${RUN_RL_ALGOS:-0}; RUN_PASSK=0
-    STATE_DIR=${STATE_DIR:-${STEER_ROOT}/experiments_state_smoke}
-    LOG_DIR=${LOG_DIR:-${STEER_ROOT}/logs/experiments_smoke}
-    echo "[all] SCALE=smoke — pipeline validation only."
-    echo "[all]   train_batch 16, response 512, 3 steps, val n=2, 1 seed."
-    echo "[all]   Numbers from this run are NOT paper-comparable; state and logs"
-    echo "[all]   live in *_smoke/ so they cannot be confused with a real run."
-fi
-
-# ---- GPU topology: detect, don't assume -------------------------------------
-# shellcheck source=run/_gpu_defaults.sh
-. "${SCRIPT_DIR}/_gpu_defaults.sh"
-echo "[all] GPU topology: N_GPUS=${N_GPUS} TP_SIZE=${TP_SIZE} GPU_MEM_UTIL=${GPU_MEM_UTIL}"
-if [ "${N_GPUS}" -lt 8 ]; then
-    echo "[all] NOTE: the paper used 8xH20. The optimisation is unchanged on fewer"
-    echo "[all]       GPUs (same global batch, more gradient accumulation), but"
-    echo "[all]       wall-clock scales ~inversely and 7B/14B full fine-tuning will"
-    echo "[all]       likely OOM below 8 GPUs. On a small node start with"
-    echo "[all]       MATH_MODELS=Qwen/Qwen2.5-Math-1.5B SEEDS=1 RUN_CODE=0 \\"
-    echo "[all]       RUN_EXTREME=0 RUN_RL_ALGOS=0 to validate the pipeline first."
-fi
-
 STATE_DIR=${STATE_DIR:-${STEER_ROOT}/experiments_state}
 LOG_DIR=${LOG_DIR:-${STEER_ROOT}/logs/experiments}
 mkdir -p "${STATE_DIR}" "${LOG_DIR}" "${STEER_ROOT}/results"
 FAILED=()
-
-# Fail fast on missing deps / wrong GPU count BEFORE queueing anything —
-# every check in preflight.py is a failure mode that has actually happened.
-# Skip with PREFLIGHT=0 (not recommended).
-if [ "${PREFLIGHT:-1}" = "1" ]; then
-    python3 "${STEER_ROOT}/scripts/preflight.py" || exit 1
-fi
 
 # ---------------------------------------------------------------- stage
 # stage <name> <cmd...>   — run once, log to LOG_DIR/<name>.log, resume-safe.
@@ -116,24 +78,16 @@ need () {  # need <stage-name> : true iff dependency finished
 
 phase1_kappa_gamma () {  # <model_tag> -> exports SEL_KAPPA / SEL_GAMMA
     local tag="$1"
-    # Must match run/warmup_and_validate.sh's ${results_out} exactly, SCALE
-    # suffix included -- a name mismatch here does not fail the queue, it
-    # silently trains on the fallback kappa/gamma instead of Phase 1's pick.
-    local results="docs/phase1_results_${tag}${SCALE:+-${SCALE}}.json"
-    read -r SEL_KAPPA SEL_GAMMA < <(python3 - "$results" "$tag" <<'PY'
+    read -r SEL_KAPPA SEL_GAMMA < <(python3 - "$tag" <<'PY'
 import json, sys
-d = json.load(open(sys.argv[1]))
+d = json.load(open(f"docs/phase1_results_{sys.argv[1]}.json"))
 print(d["chosen"]["kappa"], d["chosen"]["gamma_h"])
 if d["chosen"]["rho_mean"] < 0.2:
     print(f"[all] WARNING: gate-G1 rho={d['chosen']['rho_mean']:.3f} < 0.2 for "
-          f"{sys.argv[2]} — lam>0 runs are not justified by the forecast",
+          f"{sys.argv[1]} — lam>0 runs are not justified by the forecast",
           file=sys.stderr)
 PY
     ) || true
-    if [ -z "${SEL_KAPPA:-}" ]; then
-        echo "[all] WARNING: could not read ${results} -- training on the"
-        echo "[all]          fallback kappa=2 gamma_h=0.7, NOT Phase 1's pick."
-    fi
     SEL_KAPPA=${SEL_KAPPA:-2}
     SEL_GAMMA=${SEL_GAMMA:-0.7}
 }

@@ -1,0 +1,25 @@
+Traceback (most recent call last):
+  File "/workspace/entropy_collapse/scripts/prepare_code_data.py", line 208, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/workspace/entropy_collapse/scripts/prepare_code_data.py", line 202, in main
+    build_archer(out)
+  File "/workspace/entropy_collapse/scripts/prepare_code_data.py", line 79, in build_archer
+    ds = load_dataset("Fate-Zero/ArcherCodeR-Dataset", split="train")
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/datasets/load.py", line 1716, in load_dataset
+    builder_instance.download_and_prepare(
+  File "/usr/local/lib/python3.12/dist-packages/datasets/builder.py", line 901, in download_and_prepare
+    self._download_and_prepare(
+  File "/usr/local/lib/python3.12/dist-packages/datasets/builder.py", line 940, in _download_and_prepare
+    split_generators: list[SplitGenerator] = self._split_generators(dl_manager, **split_generators_kwargs)
+                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/datasets/packaged_modules/json/json.py", line 101, in _split_generators
+    pa_table = next(iter(self._generate_tables(**splits[0].gen_kwargs, allow_full_read=False)))[1]
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/datasets/packaged_modules/json/json.py", line 291, in _generate_tables
+    io.BytesIO(batch), read_options=paj.ReadOptions(block_size=block_size)
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "pyarrow/_json.pyx", line 54, in pyarrow._json.ReadOptions.__init__
+  File "pyarrow/_json.pyx", line 79, in pyarrow._json.ReadOptions.block_size.__set__
+OverflowError: value too large to convert to int32_t

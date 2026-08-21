@@ -66,14 +66,14 @@ PY
 python3 ${STEER_ROOT}/scripts/phase1_branch_recall.py \
     --model "${model_path}" --heads "${heads_out}" --calib "${calib_out}" \
     --rollouts "${rollouts}" --phase1-results "${results_out}" \
-    --out ${STEER_ROOT}/docs/phase1_recall_${model_tag}.json
+    --out ${STEER_ROOT}/docs/phase1_recall_${model_tag}${SCALE:+-${SCALE}}.json
 
 python3 ${STEER_ROOT}/scripts/make_dummy_heads.py \
     --model "${model_path}" --out ${ckpt_dir}/mtp_heads_control_${model_tag}.pt
 python3 ${STEER_ROOT}/scripts/phase1_branch_recall.py \
     --model "${model_path}" --heads ${ckpt_dir}/mtp_heads_control_${model_tag}.pt \
-    --rollouts "${rollouts}" \
-    --out ${STEER_ROOT}/docs/phase1_recall_control_${model_tag}.json
+    --rollouts "${rollouts}" --allow-untrained \
+    --out ${STEER_ROOT}/docs/phase1_recall_control_${model_tag}${SCALE:+-${SCALE}}.json
 
-echo "[phase1] compare docs/phase1_recall_${model_tag}.json vs the _control file"
+echo "[phase1] compare docs/phase1_recall_${model_tag}${SCALE:+-${SCALE}}.json vs the _control file"
 echo "         before trusting gate G1's recall criterion."

@@ -33,10 +33,13 @@ export PYTHONHASHSEED=42
 export PYTORCH_SEED=42
 export CUDA_DEVICE_ORDER="PCI_BUS_ID"
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
-# The rollout/train cycle allocates and frees tens of GiB every step; without
-# expandable segments the caching allocator fragments and OOMs on a single GPU
-# long before the totals say it should.
-export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
+# The rollout/train cycle allocates and frees tens of GiB every step, so the
+# caching allocator wants help against fragmentation. It must NOT be
+# expandable_segments:True: vLLM's sleep mode (rollout.free_cache_engine, on by
+# default) allocates its pool through the cuMem APIs and asserts against
+# expandable segments at engine construction -- see pytorch#147851. Sleep mode
+# hands the whole vLLM pool back every step, which is the bigger win anyway.
+export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-garbage_collection_threshold:0.8}
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STEER_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -82,9 +85,29 @@ fi
 # collect) can be proven end-to-end on a single GPU in about an hour; its
 # numbers are NOT comparable to the paper's tables and the run name says so.
 SCALE=${SCALE:-paper}
+# The avg@32 benchmarks are ALREADY replicated 32x inside their parquets
+# (aime24/aime25: 30 problems -> 960 rows; amc23: 40 -> 1280), which is how
+# upstream STEER's run/eval.sh gets avg@32 with val_kwargs.n=1. verl names the
+# metric mean@<samples-per-prompt>, so n>1 both multiplies the cost by n and
+# renames the metric out from under select_best_checkpoint.py /
+# collect_results.py, which look for mean@32.
 case "${SCALE}" in
-  paper) TRAIN_BS=512; MINI_BS=32; RESP_LEN=3072; STEPS=200; VAL_N=32; TEST_FREQ=10; SAVE_FREQ=10 ;;
-  smoke) TRAIN_BS=16;  MINI_BS=8;  RESP_LEN=512;  STEPS=3;   VAL_N=2;  TEST_FREQ=1;  SAVE_FREQ=1  ;;
+  paper) TRAIN_BS=512; MINI_BS=32; RESP_LEN=3072; STEPS=200; VAL_N=1;  TEST_FREQ=10; SAVE_FREQ=10 ;;
+  smoke) TRAIN_BS=16;  MINI_BS=8;  RESP_LEN=512;  STEPS=3;   VAL_N=1;  TEST_FREQ=1;  SAVE_FREQ=1  ;;
+  *) echo "FATAL: SCALE must be 'paper' or 'smoke'"; exit 1 ;;
+esac
+# verl names the val metric mean@<samples-per-prompt>, and the avg@32 parquets
+# already hold 32 replicas of every problem -- so the suffix is replicas x VAL_N,
+# NOT VAL_N. select_best_checkpoint.py and collect_results.py both look for
+# mean@32, which is what VAL_N=1 yields.
+VAL_REPLICAS=32
+ACC_AT=$(( VAL_REPLICAS * VAL_N ))
+# save_after: paper keeps the disk cost down by only checkpointing the back half
+# of the run; smoke has to checkpoint from step 0 or there is nothing for
+# select_best_checkpoint.py to pick and the eval stage can never be exercised.
+case "${SCALE}" in
+  paper) SAVE_AFTER=80 ;;
+  smoke) SAVE_AFTER=0  ;;
   *) echo "FATAL: SCALE must be 'paper' or 'smoke', got '${SCALE}'"; exit 1 ;;
 esac
 
@@ -102,6 +125,17 @@ esac
 #   1.5B -> 23 GiB (fits)   7B -> 114 GiB (does NOT fit)   14B -> 219 GiB (no)
 # OFFLOAD=1 pushes the optimizer state (and params) to CPU, which is what makes
 # 7B possible at all on a single card — at a large speed cost.
+# log-prob micro batch. STEER mode makes compute_log_prob the peak: it holds
+# entropy AND max_prob_log_probs AND log_probs over [micro_bs*seq, V] at once,
+# and at 8 it OOMs on one 80GB card (measured: 8.03 GiB short, seed 1, step ~4).
+# Safe to shrink -- compute_log_prob concatenates per-sequence results and
+# reverts the order, and forecast_h_togo has no batch-level normalisation, so
+# the outputs are identical. This is NOT true of ppo_micro_batch_size_per_gpu,
+# which is the group STEER's min-max runs over; that one stays at 8.
+# Measured on one A100-80GB: 8 OOMs, 2 costs 1357 s of a 2325 s step
+# (old_log_prob alone, 59%) because it starves the GPU, 4 is the
+# compromise -- peak was 67.2 GiB at 2, leaving ~12 GiB of headroom.
+LOGP_MBS=${LOGP_MBS:-4}
 OFFLOAD=${OFFLOAD:-0}
 if [ "${OFFLOAD}" = "1" ]; then PARAM_OFF=True; OPT_OFF=True; else PARAM_OFF=False; OPT_OFF=False; fi
 
@@ -158,7 +192,7 @@ python3 -m verl.trainer.main_ppo \
     ++actor_rollout_ref.actor.entropy_from_logits_with_chunking=True \
     actor_rollout_ref.actor.fsdp_config.param_offload=${PARAM_OFF} \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=${OPT_OFF} \
-    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=8 \
+    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=${LOGP_MBS} \
     actor_rollout_ref.rollout.tensor_model_parallel_size=${TP_SIZE:-4} \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.gpu_memory_utilization=${GPU_MEM_UTIL:-0.6} \
@@ -168,7 +202,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.val_kwargs.do_sample=True \
     actor_rollout_ref.rollout.val_kwargs.temperature=1.0 \
     actor_rollout_ref.rollout.val_kwargs.top_p=0.7 \
-    actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=8 \
+    actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=${LOGP_MBS} \
     actor_rollout_ref.ref.fsdp_config.param_offload=${PARAM_OFF} \
     algorithm.use_kl_in_reward=False \
     trainer.rollout_data_dir=${STEER_ROOT}/rollout_data/$project_name/$run_name \
@@ -185,7 +219,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.resume_mode=disable \
     ++trainer.save_best_only=False \
     ++trainer.delete_old_best_checkpoint=True \
-    ++trainer.save_after=80 \
-    ++trainer.best_metric_key=val-core/aime_2024_dapo_boxed/acc/mean@${VAL_N} \
+    ++trainer.save_after=${SAVE_AFTER} \
+    ++trainer.best_metric_key=val-core/aime_2024_dapo_boxed/acc/mean@${ACC_AT} \
     ${SEED:+"++data.seed=${SEED}"} \
     "$@"

@@ -1,0 +1,20 @@
+{
+  "recall_stats": {
+    "recall": 0.23275862068965517,
+    "baseline": 0.10030959752321982,
+    "lift": 2.3275862068965516,
+    "n_branch": 696,
+    "n_hit": 162,
+    "n_valid": 1615
+  },
+  "selection_rate": 0.10030959752321982,
+  "rho_mean": 0.8602795186813647,
+  "kappa": 4,
+  "gamma_h": 0.85,
+  "baseline": "sibling",
+  "n_groups": 64,
+  "restricted_to_support": true,
+  "gate_passed": true,
+  "gate_summary": "GATE: PASS\n  [x] within-problem rho >= 0.20: rho_mean=0.8603\n  [x] branch recall@10% above chance (p<0.05): recall=0.2328 vs chance=0.1003, p=2.887e-24 (162/696)",
+  "untrained_control": false
+}

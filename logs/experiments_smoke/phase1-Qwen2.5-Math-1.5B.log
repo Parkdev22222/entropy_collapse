@@ -1,0 +1,153 @@
++++ dirname run/warmup_and_validate.sh
+++ cd run
+++ pwd
++ SCRIPT_DIR=/workspace/entropy_collapse/run
+++ cd /workspace/entropy_collapse/run/..
+++ pwd
++ STEER_ROOT=/workspace/entropy_collapse
++ . /workspace/entropy_collapse/run/_gpu_defaults.sh
+++ '[' -z 1 ']'
+++ '[' -z 1 ']'
+++ '[' 1 -eq 1 ']'
+++ '[' -z 0.35 ']'
+++ GPU_MEM_UTIL=0.35
+++ export N_GPUS TP_SIZE GPU_MEM_UTIL
++ export PYTHONPATH=/workspace/entropy_collapse:/workspace/entropy_collapse:
++ PYTHONPATH=/workspace/entropy_collapse:/workspace/entropy_collapse:
++ model_path=Qwen/Qwen2.5-Math-1.5B
+++ basename Qwen/Qwen2.5-Math-1.5B
++ model_tag=Qwen2.5-Math-1.5B
++ SCALE=smoke
++ rollouts=/workspace/entropy_collapse/rollout_data/warmup/Qwen2.5-Math-1.5B-smoke/rollouts.jsonl
++ case "${SCALE}" in
++ N_PROB=3
++ N_TRAJ=4
++ N_CONT=4
++ MAX_PRE=24
++ ckpt_dir=/workspace/entropy_collapse/checkpoints
++ mkdir -p /workspace/entropy_collapse/checkpoints /workspace/entropy_collapse/docs
++ heads_out=/workspace/entropy_collapse/checkpoints/mtp_heads_Qwen2.5-Math-1.5B-smoke.pt
++ calib_out=/workspace/entropy_collapse/checkpoints/mtp_calibration_Qwen2.5-Math-1.5B-smoke.json
++ results_out=/workspace/entropy_collapse/docs/phase1_results_Qwen2.5-Math-1.5B-smoke.json
++ python3 /workspace/entropy_collapse/scripts/phase1_warmup_heads.py --model Qwen/Qwen2.5-Math-1.5B --rollouts /workspace/entropy_collapse/rollout_data/warmup/Qwen2.5-Math-1.5B-smoke/rollouts.jsonl --out /workspace/entropy_collapse/checkpoints/mtp_heads_Qwen2.5-Math-1.5B-smoke.pt --num-heads 8 --head-hidden 1024 --epochs 1 --max-length 1024
+[warmup] loading Qwen/Qwen2.5-Math-1.5B (bfloat16)
+`torch_dtype` is deprecated! Use `dtype` instead!
+[warmup] heads: K=8, 25.2M params
+[warmup] 255 sequences, 63 batches/epoch
+[warmup] epoch 0 step 20/63 loss=12.0241 lr=1.62e-04 (6s) | k0=0.608 k1=10.969 k2=13.125 k3=13.875 k4=14.205 k5=14.343 k6=14.532 k7=14.534
+[warmup] epoch 0 step 40/63 loss=9.2830 lr=1.21e-04 (11s) | k0=0.499 k1=7.282 k2=10.067 k3=10.988 k4=11.306 k5=11.188 k6=11.371 k7=11.562
+[warmup] epoch 0 step 60/63 loss=8.1055 lr=3.41e-06 (16s) | k0=0.681 k1=6.447 k2=8.654 k3=9.353 k4=9.415 k5=9.887 k6=10.203 k7=10.204
+[warmup] wrote /workspace/entropy_collapse/checkpoints/mtp_heads_Qwen2.5-Math-1.5B-smoke.pt
+[warmup] per-head final CE (expect monotone increase with k):
+           +1: 0.4646
+           +2: 7.6665
+           +3: 9.6382
+           +4: 9.8027
+           +5: 10.0701
+           +6: 10.3103
+           +7: 10.1036
+           +8: 10.2485
++ python3 /workspace/entropy_collapse/scripts/phase1_validate.py --model Qwen/Qwen2.5-Math-1.5B --heads /workspace/entropy_collapse/checkpoints/mtp_heads_Qwen2.5-Math-1.5B-smoke.pt --problems /workspace/entropy_collapse/datasets/math500.parquet --n-problems 3 --n-trajectories 4 --n-continuations 4 --max-prefixes 24 --calibrate --out /workspace/entropy_collapse/docs/phase1_results_Qwen2.5-Math-1.5B-smoke.json
+`torch_dtype` is deprecated! Use `dtype` instead!
+[validate] heads K=8 from /workspace/entropy_collapse/checkpoints/mtp_heads_Qwen2.5-Math-1.5B-smoke.pt
+[validate] 3 problems, fractions=[0.2, 0.4, 0.6, 0.8]
+[validate] budget: 24 prefixes, <= 8 per problem
+[validate] problem 1/3: +8 (total 8)
+[validate] problem 2/3: +8 (total 16)
+[validate] problem 3/3: +8 (total 24)
+[validate] calibration scale=['0.947', '0.236', '0.512', '0.278', '0.429', '0.232', '0.114', '0.105']
+[validate]             bias =['-0.005', '0.195', '0.347', '0.181', '-0.010', '0.060', '0.308', '0.168']
+[validate] kappa=1 gamma_H=0.7: rho_within=0.9980 (pooled 0.9571, 24 obs)
+[validate] kappa=2 gamma_H=0.7: rho_within=0.6624 (pooled 0.7226, 24 obs)
+[validate] kappa=3 gamma_H=0.7: rho_within=0.5727 (pooled 0.7026, 24 obs)
+[validate] kappa=4 gamma_H=0.7: rho_within=0.5632 (pooled 0.6835, 24 obs)
+[validate] kappa=5 gamma_H=0.7: rho_within=0.6062 (pooled 0.7130, 24 obs)
+[validate] kappa=6 gamma_H=0.7: rho_within=0.6062 (pooled 0.7235, 24 obs)
+[validate] kappa=7 gamma_H=0.7: rho_within=0.6622 (pooled 0.7304, 24 obs)
+[validate] kappa=8 gamma_H=0.7: rho_within=0.6847 (pooled 0.7478, 24 obs)
+[validate] kappa=1 gamma_H=0.85: rho_within=0.9980 (pooled 0.9571, 24 obs)
+[validate] kappa=2 gamma_H=0.85: rho_within=0.6624 (pooled 0.7087, 24 obs)
+[validate] kappa=3 gamma_H=0.85: rho_within=0.5684 (pooled 0.7043, 24 obs)
+[validate] kappa=4 gamma_H=0.85: rho_within=0.5118 (pooled 0.6426, 24 obs)
+[validate] kappa=5 gamma_H=0.85: rho_within=0.4922 (pooled 0.6609, 24 obs)
+[validate] kappa=6 gamma_H=0.85: rho_within=0.4922 (pooled 0.6626, 24 obs)
+[validate] kappa=7 gamma_H=0.85: rho_within=0.5817 (pooled 0.6617, 24 obs)
+[validate] kappa=8 gamma_H=0.85: rho_within=0.6277 (pooled 0.6878, 24 obs)
+[validate] kappa=1 gamma_H=1.0: rho_within=0.9980 (pooled 0.9571, 24 obs)
+[validate] kappa=2 gamma_H=1.0: rho_within=0.6351 (pooled 0.6991, 24 obs)
+[validate] kappa=3 gamma_H=1.0: rho_within=0.5251 (pooled 0.6548, 24 obs)
+[validate] kappa=4 gamma_H=1.0: rho_within=0.4725 (pooled 0.6200, 24 obs)
+[validate] kappa=5 gamma_H=1.0: rho_within=0.5022 (pooled 0.6113, 24 obs)
+[validate] kappa=6 gamma_H=1.0: rho_within=0.5420 (pooled 0.6365, 24 obs)
+[validate] kappa=7 gamma_H=1.0: rho_within=0.5499 (pooled 0.6557, 24 obs)
+[validate] kappa=8 gamma_H=1.0: rho_within=0.5828 (pooled 0.6817, 24 obs)
+
+[validate] selected kappa=8 gamma_H=0.7 (rho=0.6847, best available 0.6847, giving up 0.0000)
+[validate] rho(H_togo, branch diversity) = 0.6839
+[validate] wrote /workspace/entropy_collapse/docs/phase1_results_Qwen2.5-Math-1.5B-smoke.json
+
+[validate] NOTE: gate G1 also needs branch recall@10%, which is measured on a
+           real rollout group (steer_f.monitors.branch_recall_at_k) rather than on
+           these independently-sampled prefixes. Run it on a Phase-0 rollout dump,
+           then feed both numbers to steer_f.validation.evaluate_gate_g1.
+GATE: FAIL
+  [x] within-problem rho >= 0.20: rho_mean=0.6847
+  [ ] branch recall@10% above chance (p<0.05): recall=nan vs chance=0.1000, p=nan (0/0)
+  ! only 0 true branch points — the recall test has little power; sample more prefixes before treating a FAIL as informative
++ python3 - /workspace/entropy_collapse/docs/phase1_results_Qwen2.5-Math-1.5B-smoke.json /workspace/entropy_collapse/checkpoints/mtp_calibration_Qwen2.5-Math-1.5B-smoke.json
+[phase1] calibration -> /workspace/entropy_collapse/checkpoints/mtp_calibration_Qwen2.5-Math-1.5B-smoke.json
+[phase1] selected kappa=8 gamma_H=0.7 (rho=0.6847)
+[phase1] export these for run_steerf.sh:
+         STEERF_KAPPA=8 STEERF_GAMMA_H=0.7
++ python3 /workspace/entropy_collapse/scripts/phase1_branch_recall.py --model Qwen/Qwen2.5-Math-1.5B --heads /workspace/entropy_collapse/checkpoints/mtp_heads_Qwen2.5-Math-1.5B-smoke.pt --calib /workspace/entropy_collapse/checkpoints/mtp_calibration_Qwen2.5-Math-1.5B-smoke.json --rollouts /workspace/entropy_collapse/rollout_data/warmup/Qwen2.5-Math-1.5B-smoke/rollouts.jsonl --phase1-results /workspace/entropy_collapse/docs/phase1_results_Qwen2.5-Math-1.5B-smoke.json --out /workspace/entropy_collapse/docs/phase1_recall_Qwen2.5-Math-1.5B.json
+`torch_dtype` is deprecated! Use `dtype` instead!
+[recall] calibration loaded from /workspace/entropy_collapse/checkpoints/mtp_calibration_Qwen2.5-Math-1.5B-smoke.json
+[recall] 32 groups, sizes 7..8
+[recall] 8/32 groups
+[recall] 16/32 groups
+[recall] 24/32 groups
+[recall] 32/32 groups
+[recall] sibling support: 652 of 113053 masked positions (0.6%)
+[recall] {
+  "recall": 0.17857142857142858,
+  "baseline": 0.09969325153374232,
+  "lift": 1.7857142857142856,
+  "n_branch": 364,
+  "n_hit": 65,
+  "n_valid": 652
+}
+[recall] rho_mean=0.6847 from /workspace/entropy_collapse/docs/phase1_results_Qwen2.5-Math-1.5B-smoke.json
+GATE: PASS
+  [x] within-problem rho >= 0.20: rho_mean=0.6847
+  [x] branch recall@10% above chance (p<0.05): recall=0.1786 vs chance=0.0997, p=3.046e-06 (65/364)
+[recall] wrote /workspace/entropy_collapse/docs/phase1_recall_Qwen2.5-Math-1.5B.json
++ python3 /workspace/entropy_collapse/scripts/make_dummy_heads.py --model Qwen/Qwen2.5-Math-1.5B --out /workspace/entropy_collapse/checkpoints/mtp_heads_control_Qwen2.5-Math-1.5B.pt
+[dummy-heads] wrote UNTRAINED heads to /workspace/entropy_collapse/checkpoints/mtp_heads_control_Qwen2.5-Math-1.5B.pt (H=1536, V=151936, K=8)
+[dummy-heads] plumbing test only — not a STEER-F result
++ python3 /workspace/entropy_collapse/scripts/phase1_branch_recall.py --model Qwen/Qwen2.5-Math-1.5B --heads /workspace/entropy_collapse/checkpoints/mtp_heads_control_Qwen2.5-Math-1.5B.pt --rollouts /workspace/entropy_collapse/rollout_data/warmup/Qwen2.5-Math-1.5B-smoke/rollouts.jsonl --allow-untrained --out /workspace/entropy_collapse/docs/phase1_recall_control_Qwen2.5-Math-1.5B.json
+`torch_dtype` is deprecated! Use `dtype` instead!
+[recall] CONTROL RUN: untrained heads. These numbers are the chance floor the trained run must beat -- not a STEER-F result.
+[recall] no calibration — distant heads are biased upward (ablation A6)
+[recall] 32 groups, sizes 7..8
+[recall] 8/32 groups
+[recall] 16/32 groups
+[recall] 24/32 groups
+[recall] 32/32 groups
+[recall] sibling support: 652 of 113053 masked positions (0.6%)
+[recall] {
+  "recall": 0.17857142857142858,
+  "baseline": 0.09969325153374232,
+  "lift": 1.7857142857142856,
+  "n_branch": 364,
+  "n_hit": 65,
+  "n_valid": 652
+}
+GATE: FAIL
+  [ ] within-problem rho >= 0.20: rho_mean=nan
+  [x] branch recall@10% above chance (p<0.05): recall=0.1786 vs chance=0.0997, p=3.046e-06 (65/364)
+  ! rho_mean is nan: every problem was constant or below min_per_problem
+[recall] wrote /workspace/entropy_collapse/docs/phase1_recall_control_Qwen2.5-Math-1.5B.json
++ echo '[phase1] compare docs/phase1_recall_Qwen2.5-Math-1.5B.json vs the _control file'
+[phase1] compare docs/phase1_recall_Qwen2.5-Math-1.5B.json vs the _control file
++ echo '         before trusting gate G1'\''s recall criterion.'
+         before trusting gate G1's recall criterion.

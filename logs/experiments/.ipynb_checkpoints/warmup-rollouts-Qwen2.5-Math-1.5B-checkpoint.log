@@ -1,0 +1,60 @@
++++ dirname run/collect_warmup_rollouts.sh
+++ cd run
+++ pwd
++ SCRIPT_DIR=/workspace/entropy_collapse/run
+++ cd /workspace/entropy_collapse/run/..
+++ pwd
++ STEER_ROOT=/workspace/entropy_collapse
++ export PYTHONPATH=/workspace/entropy_collapse:/workspace/entropy_collapse:
++ PYTHONPATH=/workspace/entropy_collapse:/workspace/entropy_collapse:
++ model_path=Qwen/Qwen2.5-Math-1.5B
+++ basename Qwen/Qwen2.5-Math-1.5B
++ model_tag=Qwen2.5-Math-1.5B
++ N_STEPS=8
++ dump_dir=/workspace/entropy_collapse/rollout_data/warmup/Qwen2.5-Math-1.5B
++ python3 -m verl.trainer.main_ppo algorithm.adv_estimator=grpo 'data.train_files=['\''/workspace/entropy_collapse/datasets/DAPO-Math-17k.parquet'\'']' 'data.val_files=['\''/workspace/entropy_collapse/datasets/aime24.parquet'\'']' data.train_batch_size=512 data.max_prompt_length=1024 data.max_response_length=3072 data.filter_overlong_prompts=True data.truncation=left actor_rollout_ref.model.path=Qwen/Qwen2.5-Math-1.5B actor_rollout_ref.actor.optim.lr=1e-6 actor_rollout_ref.model.use_remove_padding=True actor_rollout_ref.actor.ppo_mini_batch_size=32 actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=8 actor_rollout_ref.actor.use_kl_loss=False actor_rollout_ref.actor.entropy_coeff=0 actor_rollout_ref.model.enable_gradient_checkpointing=True actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=8 actor_rollout_ref.rollout.tensor_model_parallel_size=4 actor_rollout_ref.rollout.name=vllm actor_rollout_ref.rollout.gpu_memory_utilization=0.6 actor_rollout_ref.rollout.n=8 actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=8 algorithm.use_kl_in_reward=False trainer.rollout_data_dir=/workspace/entropy_collapse/rollout_data/warmup/Qwen2.5-Math-1.5B trainer.critic_warmup=0 'trainer.logger=['\''console'\'']' trainer.project_name=STEERF-warmup trainer.experiment_name=warmup-Qwen2.5-Math-1.5B trainer.n_gpus_per_node=8 trainer.nnodes=1 trainer.save_freq=-1 trainer.test_freq=-1 trainer.val_before_train=False trainer.total_training_steps=8 trainer.total_epochs=1 trainer.resume_mode=disable
+/workspace/entropy_collapse/verl/__init__.py:18: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/workspace/entropy_collapse/verl/trainer/main_ppo.py", line 279, in <module>
+    main()
+  File "/usr/local/lib/python3.12/dist-packages/hydra/main.py", line 94, in decorated_main
+    _run_hydra(
+  File "/usr/local/lib/python3.12/dist-packages/hydra/_internal/utils.py", line 394, in _run_hydra
+    _run_app(
+  File "/usr/local/lib/python3.12/dist-packages/hydra/_internal/utils.py", line 457, in _run_app
+    run_and_report(
+  File "/usr/local/lib/python3.12/dist-packages/hydra/_internal/utils.py", line 220, in run_and_report
+    return func()
+           ^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/hydra/_internal/utils.py", line 458, in <lambda>
+    lambda: hydra.run(
+            ^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/hydra/_internal/hydra.py", line 119, in run
+    ret = run_job(
+          ^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/hydra/core/utils.py", line 186, in run_job
+    ret.return_value = task_function(task_cfg)
+                       ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/entropy_collapse/verl/trainer/main_ppo.py", line 45, in main
+    run_ppo(config)
+  File "/workspace/entropy_collapse/verl/trainer/main_ppo.py", line 56, in run_ppo
+    ray.init(
+  File "/usr/local/lib/python3.12/dist-packages/ray/_private/client_mode_hook.py", line 134, in wrapper
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/ray/_private/worker.py", line 1917, in init
+    _global_node = ray._private.node.Node(
+                   ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/ray/_private/node.py", line 419, in __init__
+    node_info = ray._private.services.get_node(
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/ray/_private/services.py", line 608, in get_node
+    return global_state.get_node(node_id)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/ray/_private/state.py", line 828, in get_node
+    return accessor.get_node(node_id)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+KeyboardInterrupt
