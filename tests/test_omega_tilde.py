@@ -544,3 +544,137 @@ def test_use_ratio_defaults_off_so_equivalence_is_preserved():
                        compute_token_weights_steerf(**kw, use_ratio=False))
     assert not torch.equal(compute_token_weights_steerf(**kw),
                            compute_token_weights_steerf(**kw, use_ratio=True))
+
+
+# ----------------------------------------------------------------------
+# twg_* : occupancy over the tokens that can actually move the update
+#
+# At the start of a math RL run the policy fails almost every problem, so most
+# GRPO groups score identically, their advantage is 0, and Omega is 0 for every
+# token in them.  Those tokens cannot affect the update (pg_losses *
+# token_weights is 0 wherever A == 0, and agg_loss divides by response_mask),
+# but they dominate the tw_* occupancy metrics and make the reweighting look
+# either dead or maximally attenuating depending on the mapping.
+# ----------------------------------------------------------------------
+def _stats(**kw):
+    base = dict(
+        entropys=torch.rand(kw.pop("_b"), kw.pop("_t")),
+        token_weight_min=0.7, token_weight_max=1.0,
+        linear=False, mode="symmetric", a_h=None, lam=0.0, return_stats=True,
+    )
+    base.update(kw)
+    return compute_token_weights_steerf(**base)
+
+
+def test_all_tied_micro_batch_collapses_to_one_point():
+    """The mechanism twg_* exists to expose, pinned for both mappings.
+
+    Every advantage 0 => every Omega 0 => the whole micro-batch ties.  minmax
+    hits the 0.02 floor on metric_max and maps everything to 1.0; rank gives
+    every tied position average rank 0.5, so metric_max is 0.5 and the
+    exponential mapping sends everything to exactly token_weight_min.
+    """
+    b, t = 8, 30
+    kw = dict(
+        advantages=torch.zeros(b, t), entropys=torch.rand(b, t),
+        old_log_prob=-torch.rand(b, t), log_prob=-torch.rand(b, t),
+        response_mask=torch.ones(b, t), token_weight_min=0.7,
+        token_weight_max=1.0, linear=False, mode="symmetric", a_h=None, lam=0.0,
+    )
+    w_minmax = compute_token_weights_steerf(**kw, mapping="minmax")
+    w_rank = compute_token_weights_steerf(**kw, mapping="rank")
+    assert torch.allclose(w_minmax, torch.ones(b, t)), w_minmax.unique()
+    assert torch.allclose(w_rank, torch.full((b, t), 0.7), atol=1e-6), w_rank.unique()
+
+
+@pytest.mark.parametrize("mapping", ["minmax", "winsor", "rank"])
+def test_twg_is_omitted_when_no_token_carries_gradient(mapping):
+    """NaN would poison the mean verl takes over micro-batches, so omit."""
+    b, t = 4, 12
+    _, stats = _stats(
+        _b=b, _t=t, advantages=torch.zeros(b, t),
+        old_log_prob=-torch.rand(b, t), log_prob=-torch.rand(b, t),
+        response_mask=torch.ones(b, t), mapping=mapping,
+    )
+    assert stats["steerf/adv_zero_frac"] == pytest.approx(1.0)
+    assert not [k for k in stats if k.startswith("steerf/twg_")]
+
+
+def test_twg_matches_the_distribution_over_nonzero_advantage_tokens():
+    from steer_f.monitors import token_weight_distribution
+
+    torch.manual_seed(0)
+    b, t = 8, 40
+    adv = torch.randn(b, t) * 2
+    adv[:5] = 0.0                      # 5 of 8 sequences carry no gradient
+    mask = torch.ones(b, t)
+    kw = dict(
+        advantages=adv, entropys=torch.rand(b, t), old_log_prob=-torch.rand(b, t),
+        log_prob=-torch.rand(b, t), response_mask=mask, token_weight_min=0.7,
+        token_weight_max=1.0, linear=False, mode="symmetric", a_h=None, lam=0.0,
+        mapping="rank",
+    )
+    w, stats = compute_token_weights_steerf(**kw, return_stats=True)
+
+    assert stats["steerf/adv_zero_frac"] == pytest.approx(5 / 8)
+    expected = token_weight_distribution(w, mask * (adv != 0).float(), 0.7, 1.0)
+    for key, val in expected.items():
+        assert stats[key.replace("steerf/tw_", "steerf/twg_")] == pytest.approx(val)
+
+
+def test_twg_and_tw_disagree_across_a_realistic_batch():
+    """The whole point, reproduced the way the live run produces it.
+
+    The floor collapse does NOT come from mixed micro-batches -- there the tied
+    zero-Omega block sits at some interior average rank and maps to an interior
+    weight.  It comes from micro-batches that are tied *in their entirety*,
+    which is the common case when a micro-batch is exactly one GRPO group and
+    that group scored 8/8 the same.  Averaged over micro-batches the way verl
+    averages logged metrics, tw_ then reports a jammed floor while twg_ -- which
+    only sees the micro-batches that carry gradient -- reports a real spread.
+    """
+    from steer_f.monitors import token_weight_distribution
+
+    torch.manual_seed(1)
+    b, t, n_dead, n_live = 8, 60, 6, 2      # 75% dead, as measured on the real run
+    tw_low, twg_low, twg_high = [], [], []
+    for i in range(n_dead + n_live):
+        adv = torch.zeros(b, t) if i < n_dead else torch.randn(b, t) * 2
+        mask = torch.ones(b, t)
+        w, stats = compute_token_weights_steerf(
+            advantages=adv, entropys=torch.rand(b, t),
+            old_log_prob=-torch.rand(b, t), log_prob=-torch.rand(b, t),
+            response_mask=mask, token_weight_min=0.7, token_weight_max=1.0,
+            linear=False, mode="symmetric", a_h=None, lam=0.0,
+            mapping="rank", return_stats=True,
+        )
+        tw_low.append(token_weight_distribution(w, mask, 0.7, 1.0)["steerf/tw_frac_low"])
+        if "steerf/twg_frac_low" in stats:
+            twg_low.append(stats["steerf/twg_frac_low"])
+            twg_high.append(stats["steerf/twg_frac_high"])
+
+    mean = lambda x: sum(x) / len(x)
+    assert len(twg_low) == n_live, "dead micro-batches must not contribute"
+    # tw_ averages in the fully-tied batches, every one of which is pinned at 0.7.
+    assert mean(tw_low) >= n_dead / (n_dead + n_live)
+    # twg_ sees only the live ones, where the band is genuinely occupied.
+    assert mean(twg_low) < 0.6
+    assert mean(twg_high) > 0.1
+
+
+@pytest.mark.parametrize("mapping", ["minmax", "winsor", "rank"])
+def test_twg_does_not_perturb_the_returned_weights(mapping):
+    """Stats are observational: return_stats must not change the tensor."""
+    torch.manual_seed(2)
+    b, t = 4, 25
+    adv = torch.randn(b, t)
+    adv[0] = 0.0
+    kw = dict(
+        advantages=adv, entropys=torch.rand(b, t), old_log_prob=-torch.rand(b, t),
+        log_prob=-torch.rand(b, t), response_mask=torch.ones(b, t),
+        token_weight_min=0.7, token_weight_max=1.0, linear=False,
+        mode="symmetric", a_h=None, lam=0.0, mapping=mapping,
+    )
+    bare = compute_token_weights_steerf(**kw)
+    withstats, _ = compute_token_weights_steerf(**kw, return_stats=True)
+    assert torch.equal(bare, withstats)

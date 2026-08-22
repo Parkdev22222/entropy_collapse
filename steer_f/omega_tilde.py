@@ -852,4 +852,35 @@ def compute_token_weights_steerf(
             )
             stats.update(corr_stats)
 
+        # The tw_* metrics above cover every response token, but at this stage
+        # ~2/3 of them sit in GRPO groups whose 8 rollouts all scored the same,
+        # so their advantage -- and therefore Omega -- is exactly 0.  An
+        # all-tied micro-batch collapses to a single point (1.000 under
+        # "minmax" because metric_max hits the 0.02 floor, 0.700 under "rank"
+        # because every tied position takes average rank 0.5), and that point
+        # dominates the occupancy numbers while contributing nothing to the
+        # update: pg_losses * token_weights is 0 wherever A == 0, and agg_loss
+        # divides by response_mask rather than by the weights.  Reading tw_*
+        # at face value therefore says "the reweighting is dead" for minmax and
+        # "everything is maximally attenuated" for rank, and both are artefacts.
+        # twg_* is the same occupancy restricted to the tokens that can
+        # actually move the update.
+        if return_stats:
+            valid_n = response_mask.float().sum()
+            grad_mask = response_mask.float() * (advantages != 0).float()
+            grad_n = grad_mask.sum()
+            stats["steerf/adv_zero_frac"] = (
+                float(1.0 - grad_n / valid_n) if valid_n > 0 else float("nan")
+            )
+            # Omitted, not NaN, when a micro-batch carries no gradient at all:
+            # ~2/3 of them do not, and a NaN would poison the mean verl takes
+            # over micro-batches.
+            if grad_n > 0:
+                from steer_f.monitors import token_weight_distribution
+
+                for key, val in token_weight_distribution(
+                    token_weights, grad_mask, token_weight_min, token_weight_max
+                ).items():
+                    stats[key.replace("steerf/tw_", "steerf/twg_")] = val
+
         return (token_weights, stats) if return_stats else token_weights
