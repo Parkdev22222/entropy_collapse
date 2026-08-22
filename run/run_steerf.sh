@@ -110,6 +110,11 @@ case "${SCALE}" in
   smoke) SAVE_AFTER=0  ;;
   *) echo "FATAL: SCALE must be 'paper' or 'smoke', got '${SCALE}'"; exit 1 ;;
 esac
+# Set SAVE_AFTER_OVERRIDE=0 to checkpoint from the start. That is what makes a
+# crashed run resumable rather than restartable -- but only together with
+# SAVE_CONTENTS and RESUME_MODE below; a checkpoint without the optimizer is
+# an eval artefact, not a resume point.
+SAVE_AFTER=${SAVE_AFTER_OVERRIDE:-${SAVE_AFTER}}
 
 # ---- memory: chunked entropy (numerically identical, ~27 GiB cheaper) -------
 # The log-prob pass materialises fp32 logits AND fp32 softmax probs over
@@ -144,7 +149,17 @@ export WANDB_TIMEOUT=300
 export WANDB_RETRY_DELAY=60
 export WANDB_MAX_RETRIES=10
 
-save_contents="['hf_model']"
+# verl's checkpoint_contents defaults to ['model','optimizer','extra']; naming
+# save_contents REPLACES that list rather than adding to it. ['hf_model'] alone
+# is therefore enough for select_best_checkpoint.py + eval, but it writes no
+# optimizer or rng state, so trainer.resume_mode has nothing to resume FROM and
+# a crash costs the whole run. To make a long run survivable:
+#   SAVE_CONTENTS="['hf_model','model','optimizer','extra']" RESUME_MODE=auto \
+#   SAVE_AFTER_OVERRIDE=0
+# resume_mode=auto is safe with no checkpoints present -- it prints "Training
+# from scratch" and starts at step 0.
+save_contents=${SAVE_CONTENTS:-"['hf_model']"}
+RESUME_MODE=${RESUME_MODE:-disable}
 current_datetime=$(date +"%Y%m%d_%H%M%S")
 run_name=${RUN_NAME:-"STEERF-${SCALE}-${model_tag}-lam${STEERF_LAM}-k${STEERF_KAPPA}-g${STEERF_GAMMA_H}-${STEERF_APPLY}-${STEERF_MAPPING}_${current_datetime}"}
 
@@ -216,7 +231,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.test_freq=${TEST_FREQ} \
     trainer.total_epochs=10 \
     trainer.total_training_steps=${STEPS} \
-    trainer.resume_mode=disable \
+    trainer.resume_mode=${RESUME_MODE} \
     ++trainer.save_best_only=False \
     ++trainer.delete_old_best_checkpoint=True \
     ++trainer.save_after=${SAVE_AFTER} \
