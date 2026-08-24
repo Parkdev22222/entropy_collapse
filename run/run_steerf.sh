@@ -158,6 +158,11 @@ export WANDB_MAX_RETRIES=10
 #   SAVE_AFTER_OVERRIDE=0
 # resume_mode=auto is safe with no checkpoints present -- it prints "Training
 # from scratch" and starts at step 0.
+# MAX_CKPT_KEEP bounds disk: verl deletes the oldest checkpoint BEFORE
+# writing a new one, so peak usage stays flat. A full checkpoint here is
+# 25 GiB (6.7 model + 12 optim + 6.7 hf), and /workspace is quota'd at
+# ~80 GiB -- without this, saving every 10 steps fills the disk by step 40
+# and the run dies mid-write.
 save_contents=${SAVE_CONTENTS:-"['hf_model']"}
 RESUME_MODE=${RESUME_MODE:-disable}
 current_datetime=$(date +"%Y%m%d_%H%M%S")
@@ -235,6 +240,7 @@ python3 -m verl.trainer.main_ppo \
     ++trainer.save_best_only=False \
     ++trainer.delete_old_best_checkpoint=True \
     ++trainer.save_after=${SAVE_AFTER} \
+    ${MAX_CKPT_KEEP:+++trainer.max_actor_ckpt_to_keep=${MAX_CKPT_KEEP}} \
     ++trainer.best_metric_key=val-core/aime_2024_dapo_boxed/acc/mean@${ACC_AT} \
     ${SEED:+"++data.seed=${SEED}"} \
     "$@"
