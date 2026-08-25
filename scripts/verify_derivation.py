@@ -2,11 +2,15 @@
 """Numerically verify STEER-F's derivation before spending GPU-days on it.
 
 Every proposition in ``docs/STEERF_derivation.md`` that can be checked without
-training is checked here.  Two tiers:
+training is checked here.  Three tiers:
 
   TIER A  pure mathematics -- softmax entropy derivatives, the two-channel
           identity, baseline invariance.  No data, no model, runs in a second.
           A failure here means the derivation is wrong, full stop.
+
+  TIER M  mutation tests on TIER A itself.  A check that a wrong formula also
+          passes is not a check; each expression is broken in several plausible
+          ways and the same finite difference must reject every one.
 
   TIER B  the model's own warmup rollouts (``docs/phase1_results_*.json``).
           Checks the one information-theoretic prediction that involves the
@@ -18,8 +22,9 @@ needs a forward pass over stored rollouts (M1 of ``docs/STEERF_claims.md`` --
 the |Omega| rank at true branch points).  Those are named at the end.
 
 Usage:
-    python3 scripts/verify_derivation.py            # both tiers
+    python3 scripts/verify_derivation.py            # all tiers
     python3 scripts/verify_derivation.py --tier a   # maths only, no data
+    python3 scripts/verify_derivation.py --tier m   # does the suite have power?
 """
 
 from __future__ import annotations
@@ -232,11 +237,31 @@ def tier_b(rep: Report, path: str) -> None:
         d = [r["forecast_per_head"][k] - r["gt_per_offset"][k] for r in R]
         gaps.append((st.mean(d), st.stdev(d) / math.sqrt(n)))
 
+    # P8a is an equivalence claim, not a null-hypothesis one: "we failed to
+    # reject zero" is not evidence FOR zero.  State the bound the data puts on
+    # the effect, and compare it to the k>=2 gaps the claim is contrasted with.
+    # The band is 5% of the k=2 gap -- anything the derivation would call a
+    # real mutual information at k=1 is far outside it.
     m1, se1 = gaps[0]
-    rep.check("P8a", "k=1 에서 격차 = 0 (중간 토큰이 없으므로 상호정보량 0)",
-              abs(m1 / se1) < 3.0,
-              f"격차 {m1:+.4f} +- {se1:.4f} (t={m1/se1:+.1f}), n={n}. "
-              f"|t|<3 이므로 0 과 구별되지 않는다 -- 유도가 예측한 값")
+    lo, hi = m1 - 1.96 * se1, m1 + 1.96 * se1
+    bound = max(abs(lo), abs(hi))
+    ref = gaps[1][0]
+    equivalent = bound < 0.05 * ref
+    rep.check("P8a", "k=1 에서 격차이 0 -- 동등성 검정 (상한 제시)",
+              equivalent,
+              f"격차 {m1:+.4f}, 95% CI [{lo:+.4f}, {hi:+.4f}] -> |격차| < {bound:.4f} nats. "
+              f"k=2 격차({ref:.3f})의 {ref/bound:.0f}분의 1이므로 '0 과 실질적으로 같다'가 성립. "
+              f"(주의: '유의하지 않다'만으로는 근거가 되지 않는다)")
+
+    # The information inequality is one-sided: gap >= 0.  A negative point
+    # estimate is a directional violation even when it is not significant, and
+    # a two-sided |t| criterion would wave it through.  Head approximation
+    # error explains a small one; flag anything larger.
+    one_sided_ok = m1 > -3.0 * se1
+    rep.check("P8a'", "k=1 격차이 단측으로 유의하게 음수는 아닌가 (정보부등식은 격차>=0)",
+              one_sided_ok,
+              f"t = {m1/se1:+.2f}. 점추정은 음수이나 유의하지 않다 -- 헤드 근사오차 범위. "
+              f"t <= -3 이면 정보부등식과 모순이므로 데이터나 헤드 학습을 의심해야 한다")
 
     bad = [k + 1 for k in range(1, n_heads) if gaps[k][0] / gaps[k][1] <= 3.0]
     rep.check("P8b", "k>=2 에서 격차 > 0 (예보는 항상 과대추정)", not bad,
@@ -257,21 +282,159 @@ def tier_b(rep: Report, path: str) -> None:
               "유의하게 감소하는 구간 없음 (일부 구간은 평평하나 t>-2)"
               if not drops else f"유의한 감소: {drops}")
 
-    # P9: the independently-fitted calibration must mirror P8's gaps.
+    # P9.  The stored calibration is NOT an independent confirmation of P8:
+    # phase1_validate.py:358-361 fits it on exactly these records, from exactly
+    # these two arrays.  Refitting reproduces it to the printed precision, which
+    # is the check that this is so.  The claim only becomes a cross-check under
+    # a split: fit on one half, measure the gap on the other.
     scale = blob["calibration"]["scale"]
-    a1_ok = 0.8 <= scale[0] <= 1.25
-    rest_ok = all(s < 0.5 for s in scale[1:])
-    rep.check("P9", "캘리브레이션 계수가 P8의 격차와 독립적으로 일치",
-              a1_ok and rest_ok,
-              f"a_1 = {scale[0]:.3f} (격차~0 이므로 1 근처여야 함), "
-              f"a_(k>=2) = {[round(s, 3) for s in scale[1:]]} (큰 양의 격차를 흡수하려면 << 1). "
-              f"두 값은 서로 다른 절차에서 나왔으므로 이 일치는 비자명하다")
+
+    def slope(recs: list, k: int) -> float:
+        x = [r["forecast_per_head"][k] for r in recs]
+        y = [r["gt_per_offset"][k] for r in recs]
+        mx, my = st.mean(x), st.mean(y)
+        sxx = sum((v - mx) ** 2 for v in x)
+        return sum((a - mx) * (b - my) for a, b in zip(x, y)) / sxx if sxx > 1e-12 else float("nan")
+
+    refit = [slope(R, k) for k in range(n_heads)]
+    same = max(abs(a - b) for a, b in zip(scale, refit))
+    rep.check("P9a", "저장된 캘리브레이션은 P8과 같은 표본에서 적합되었다 (순환성 확인)",
+              same < 1e-3,
+              f"전체 데이터로 재적합한 기울기가 저장값을 재현한다 (최대차 {same:.5f}). "
+              f"따라서 '독립적 절차의 일치'로 인용할 수 없다 -- 같은 표본의 다른 통계량일 뿐")
+
+    rng = random.Random(0)
+    idx = list(range(n))
+    rng.shuffle(idx)
+    half = n // 2
+    A = [R[i] for i in idx[:half]]
+    B = [R[i] for i in idx[half:]]
+    a1 = slope(A, 0)
+    dB = [r["forecast_per_head"][0] - r["gt_per_offset"][0] for r in B]
+    mB, seB = st.mean(dB), st.stdev(dB) / math.sqrt(len(B))
+    restA = [slope(A, k) for k in range(1, n_heads)]
+    held_ok = (0.8 <= a1 <= 1.25) and abs(mB / seB) < 3.0 and all(s < 0.5 for s in restA)
+    rep.check("P9b", "홀드아웃 교차확인: 절반으로 적합 -> 나머지 절반에서 격차 검정",
+              held_ok,
+              f"A(n={len(A)}) 적합 a_1 = {a1:.3f}, a_(k>=2) = {[round(s, 3) for s in restA]}; "
+              f"B(n={len(B)}) 에서 k=1 격차 {mB:+.4f} +- {seB:.4f} (t={mB/seB:+.1f}). "
+              f"표본을 나눠도 패턴이 유지되므로 P8의 결론은 과적합이 아니다")
+
+
+# ---------------------------------------------------------------- TIER M
+def tier_m(rep: Report, seed: int = 7) -> None:
+    """Mutation test: a check that passes a wrong formula proves nothing.
+
+    Each analytic expression is deliberately broken in several plausible ways
+    -- a dropped term, a swapped index, a flipped sign -- and the same finite
+    difference must reject every one of them.
+    """
+    rng = random.Random(seed)
+    print("\nTIER M — 변이 테스트 (검증 자체의 검정력)")
+    print("-" * 74)
+
+    cases1 = [[rng.gauss(0, 2) for _ in range(rng.randint(3, 8))] for _ in range(6)]
+
+    def d(a: int, c: int) -> float:
+        return 1.0 if a == c else 0.0
+
+    mut1 = {
+        "부호 반전": lambda p, h, a: +p[a] * (math.log(p[a]) + h),
+        "H 누락": lambda p, h, a: -p[a] * math.log(p[a]),
+        "p 인자 누락": lambda p, h, a: -(math.log(p[a]) + h),
+        "p(1-p) 오용": lambda p, h, a: -p[a] * (1 - p[a]) * (math.log(p[a]) + h),
+        "H 부호": lambda p, h, a: -p[a] * (math.log(p[a]) - h),
+    }
+    survived = []
+    for name, f in mut1.items():
+        worst = 0.0
+        for z in cases1:
+            p = softmax(z)
+            h = -sum(x * math.log(x) for x in p)
+            for a in range(len(z)):
+                e = 1e-6
+                zp, zm = z[:], z[:]
+                zp[a] += e
+                zm[a] -= e
+                worst = max(worst, abs(f(p, h, a) - (entropy(zp) - entropy(zm)) / (2 * e)))
+        if worst < TOL_D1:
+            survived.append(name)
+    rep.check("M-P1", "P1 검증이 틀린 1차 도함수를 잡아내는가", not survived,
+              f"변이 {len(mut1)}종 전부 검출" if not survived else f"생존한 변이: {survived}")
+
+    cases2 = [[rng.gauss(0, 1.5) for _ in range(rng.randint(3, 6))] for _ in range(6)]
+    mut2 = {
+        "(+1) 누락": lambda p, u, a, c: -p[a] * (d(a, c) - p[c]) * u[a] + p[a] * p[c] * u[c],
+        "둘째항 누락": lambda p, u, a, c: -p[a] * (d(a, c) - p[c]) * (u[a] + 1),
+        "u 첨자 교환": lambda p, u, a, c: -p[a] * (d(a, c) - p[c]) * (u[a] + 1) + p[a] * p[c] * u[a],
+        "둘째항 부호": lambda p, u, a, c: -p[a] * (d(a, c) - p[c]) * (u[a] + 1) - p[a] * p[c] * u[c],
+        "u_a <-> u_c": lambda p, u, a, c: -p[a] * (d(a, c) - p[c]) * (u[c] + 1) + p[a] * p[c] * u[c],
+    }
+    survived = []
+    for name, f in mut2.items():
+        worst = 0.0
+        for z in cases2:
+            p = softmax(z)
+            h = -sum(x * math.log(x) for x in p)
+            u = [math.log(x) + h for x in p]
+            for a in range(len(z)):
+                for c in range(len(z)):
+                    e = 1e-4
+
+                    def shift(da: float, dc: float) -> float:
+                        zz = z[:]
+                        zz[a] += da
+                        zz[c] += dc
+                        return entropy(zz)
+
+                    num = (shift(e, e) - shift(e, -e) - shift(-e, e) + shift(-e, -e)) / (4 * e * e)
+                    worst = max(worst, abs(f(p, u, a, c) - num))
+        if worst < TOL_D2:
+            survived.append(name)
+    rep.check("M-P2", "P2 검증이 틀린 헤시안을 잡아내는가", not survived,
+              f"변이 {len(mut2)}종 전부 검출" if not survived else f"생존한 변이: {survived}")
+
+    k = 4
+    z = [0.3, -0.8, 1.1, 0.0]
+    Hb = [math.log(100), math.log(2), math.log(20), math.log(5)]
+
+    def h_traj(zz: list[float]) -> float:
+        p = softmax(zz)
+        return -sum(x * math.log(x) for x in p) + sum(pi * hb for pi, hb in zip(p, Hb))
+
+    p = softmax(z)
+    h_root = -sum(x * math.log(x) for x in p)
+    hbar = sum(pi * hb for pi, hb in zip(p, Hb))
+    loc = lambda a: -p[a] * (math.log(p[a]) + h_root)  # noqa: E731
+    vis = lambda a: sum(p[b] * (d(a, b) - p[a]) * (Hb[b] - hbar) for b in range(k))  # noqa: E731
+    mut5 = {
+        "로컬만 (stock STEER)": lambda a: loc(a),
+        "방문만": lambda a: vis(a),
+        "방문 부호 반전": lambda a: loc(a) - vis(a),
+        "dp/dz 를 p_b 로 교체": lambda a: loc(a) + sum(p[b] * (Hb[b] - hbar) for b in range(k)),
+    }
+    survived = []
+    for name, f in mut5.items():
+        worst = 0.0
+        for a in range(k):
+            e = 1e-6
+            zp, zm = z[:], z[:]
+            zp[a] += e
+            zm[a] -= e
+            worst = max(worst, abs(f(a) - (h_traj(zp) - h_traj(zm)) / (2 * e)))
+        if worst < TOL_D1:
+            survived.append(name)
+    rep.check("M-P5", "P5 검증이 틀린 분해를 잡아내는가", not survived,
+              f"변이 {len(mut5)}종 전부 검출. "
+              f"단 'A_H 대신 H_togo 원값'은 의도적으로 제외했다 -- 그것이 통과하는 것이 P6 자체이며, "
+              f"따라서 P5 와 P6 는 독립된 검증이 아니다"
+              if not survived else f"생존한 변이: {survived}")
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--tier", choices=["a", "b", "both"], default="both")
+    ap.add_argument("--tier", choices=["a", "b", "m", "all"], default="all")
     ap.add_argument("--phase1", default=DEFAULT_PHASE1,
                     help="Phase 1 결과 JSON (TIER B)")
     ap.add_argument("--seed", type=int, default=0)
@@ -282,9 +445,11 @@ def main() -> int:
     print("=" * 74)
 
     rep = Report()
-    if args.tier in ("a", "both"):
+    if args.tier in ("a", "all"):
         tier_a(rep, seed=args.seed)
-    if args.tier in ("b", "both"):
+    if args.tier in ("m", "all"):
+        tier_m(rep)
+    if args.tier in ("b", "all"):
         tier_b(rep, args.phase1)
 
     code = rep.summary()
