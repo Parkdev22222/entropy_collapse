@@ -1,8 +1,8 @@
 diff --git a/verl/workers/rollout/vllm_rollout/vllm_rollout_spmd.py b/verl/workers/rollout/vllm_rollout/vllm_rollout_spmd.py
-index 5f851ea..7055a26 100755
+index 5f851ea..d3ff454 100755
 --- a/verl/workers/rollout/vllm_rollout/vllm_rollout_spmd.py
 +++ b/verl/workers/rollout/vllm_rollout/vllm_rollout_spmd.py
-@@ -79,7 +79,137 @@ def _repeat_interleave(value: Union[torch.Tensor, np.ndarray], repeats: int) ->
+@@ -79,7 +79,142 @@ def _repeat_interleave(value: Union[torch.Tensor, np.ndarray], repeats: int) ->
          return np.repeat(value, repeats, axis=0)
  
  
@@ -123,12 +123,17 @@ index 5f851ea..7055a26 100755
 +            max_token_id=self.tokenizer_max_token_id,
 +        )
 +        st = result.stats
-+        logger.info(
-+            "[steerf-tree] support_frac=%.4f mean_siblings=%.2f refill_frac=%.4f "
-+            "oov_dropped=%d engine_calls=%d by_decile=%s",
-+            st["support_frac"], st["mean_siblings"], st["refill_frac"],
-+            st["num_oov_dropped"], st["num_engine_calls"],
-+            [round(x, 3) for x in st["support_frac_by_decile"]],
++        # print for the same reason as in __init__: WARN is this logger's
++        # default level, and this line is the only place the support fraction
++        # -- the number the whole tree exists to move -- is observable.
++        print(
++            f"[steerf-tree] support_frac={st['support_frac']:.4f} "
++            f"mean_siblings={st['mean_siblings']:.2f} "
++            f"refill_frac={st['refill_frac']:.4f} "
++            f"oov_dropped={st['num_oov_dropped']} "
++            f"engine_calls={st['num_engine_calls']} "
++            f"by_decile={[round(x, 3) for x in st['support_frac_by_decile']]}",
++            flush=True,
 +        )
 +        # Flattened prompt-major, which is exactly the order _repeat_interleave
 +        # gives the prompts/attention_mask/position_ids it duplicates below.
@@ -141,14 +146,18 @@ index 5f851ea..7055a26 100755
      def __init__(self, model_path: str, config: DictConfig, tokenizer, model_hf_config, **kwargs):
          """A vLLM rollout. It requires the module is supported by the vllm.
  
-@@ -185,6 +315,16 @@ class vLLMRollout(BaseRollout):
+@@ -185,6 +320,20 @@ class vLLMRollout(BaseRollout):
          self.sampling_params = SamplingParams(**kwargs)
  
          self.pad_token_id = tokenizer.pad_token_id
 +        self.tree_config = _build_tree_config(config)
 +        self.tokenizer_max_token_id = _tokenizer_max_token_id(tokenizer)
 +        if self.tree_config is not None and self.tree_config.enabled:
-+            logger.info("[steerf-tree] %s", self.tree_config.describe())
++            # print, not logger.info: this module's logger is created at
++            # VERL_LOGGING_LEVEL, which defaults to WARN, so an info line here
++            # would be silently discarded -- and a diagnostic nobody can read
++            # is worse than none, because it is trusted.
++            print(f"[steerf-tree] {self.tree_config.describe()}", flush=True)
 +            if not config.get("enable_prefix_caching", True):
 +                logger.warning(
 +                    "[steerf-tree] enable_prefix_caching is off. The tree re-prefills every "
@@ -158,7 +167,7 @@ index 5f851ea..7055a26 100755
  
      @contextmanager
      def update_sampling_params(self, **kwargs):
-@@ -264,29 +404,37 @@ class vLLMRollout(BaseRollout):
+@@ -264,29 +413,37 @@ class vLLMRollout(BaseRollout):
                  lora_int_id = lora_int_ids[0]
                  lora_requests = [LoRARequest(lora_name=f"{lora_int_id}", lora_int_id=lora_int_id, lora_path="/simon-stub-path")] * batch_size
  

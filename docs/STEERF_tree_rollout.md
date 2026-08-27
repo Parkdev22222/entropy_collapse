@@ -139,6 +139,14 @@ Rules of thumb:
 
 ### What to watch
 
+The `[steerf-tree]` lines are `print`ed, not logged: this module's logger is
+created at `VERL_LOGGING_LEVEL`, which defaults to `WARN`, so an `info` line
+would be silently dropped. They land on stdout and therefore in the run log.
+One line at engine construction describing the shape, then one per training
+step -- the counts are per step, not cumulative. Validation runs the flat path,
+so nothing is printed during it, including the step-0 validation before
+training starts.
+
 | metric | where | expected |
 |---|---|---|
 | `steerf/branch_corr_frac` | training log | 0.003 -> order 0.5 |
