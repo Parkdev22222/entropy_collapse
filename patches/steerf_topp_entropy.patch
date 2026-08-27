@@ -1,0 +1,511 @@
+diff --git a/docs/STEERF_renyi2.md b/docs/STEERF_renyi2.md
+index 828046d..e59b20c 100644
+--- a/docs/STEERF_renyi2.md
++++ b/docs/STEERF_renyi2.md
+@@ -83,3 +83,71 @@ run name에 `-renyi2` 태그가 자동으로 붙는다 (shannon일 땐 기존 
+   가설 확인, F 항이 처음으로 실질 신호를 받음
+ - 그대로면 → 꼬리가 원인이 아님: 형제 미래가 실제로 고르다는 쪽
+   (`phase1_sibling_spread.py` Part A와 교차 확인)
++
++---
++
++# `entropy_top_p` — 뉴클리어스 엔트로피 (별도 스위치)
++
++## 왜 별도인가
++
++`entropy_kind`(Rényi-2)는 꼬리를 **덜 세는** 방식이고, `entropy_top_p`는 꼬리를
++**아예 빼고 재는** 방식이다. 직교하며 조합 가능하다 (`shannon` + `top_p=0.95` 등).
++
++측정된 판별력 (머리 동일·꼬리만 다른 쌍 = 잡음 / 실질 선택지가 다른 쌍 = 신호):
++
++| 측정 | 잡음 차이 | 신호 차이 | S/N |
++|---|---|---|---|
++| Shannon (전체) | 0.577 | 0.724 | 1.3 |
++| Rényi-2 (전체) | 0.093 | 0.855 | 9.2 |
++| **Shannon (top-p 0.95)** | **0.000** | **0.739** | **~1e7** |
++
++Rényi-2 는 잡음을 줄이되 신호도 압축(0.724→0.855 는 스케일 변화)하는 반면,
++뉴클리어스는 **꼬리를 완전히 제거하면서 Shannon 의 머리 읽기를 그대로 보존**한다.
++
++불연속성 위험은 실측상 무시할 수준이다. 머리가 0.1% 이내로 다른 형제쌍 3,000 개에서
++절단 개수 불일치는 top-p 0.95/0.99 에서 0 건, 0.9 에서 1 건이었고, 그때 생긴 가짜
++차이의 최대값이 0.0002 로 실제 신호(0.73~0.86)의 1/3000 이다.
++
++## 중요: 샘플러 불일치를 고치는 게 아니다
++
++학습 롤아웃의 `rollout.top_p` 는 **1.0**(verl 기본값, run_steerf.sh 가 덮어쓰지
++않음)이다. `val_kwargs.top_p=0.7` 은 검증 전용이다. 따라서 현재 Shannon 은 이미
++"실제로 샘플링된 분포의 엔트로피"가 맞고, 뉴클리어스 절단은 불일치 교정이 아니라
++**순수한 측정 방식 선택**이다 — Rényi-2 와 같은 범주. `validate()` 가 이 사실을
++경고로 출력한다.
++
++## 사용
++
++    STEERF_ENTROPY_TOP_P=0.95            # 기본 1.0 = 전체 분포, 기존과 비트 동일
++    STEERF_ENTROPY_KIND=shannon          # renyi2 와 조합 가능
++
++캘리브레이션은 `(entropy_kind, entropy_top_p)` **쌍**에 종속이다. 두 값 모두
++calibration dict 에 스탬프되고 dp_actor / phase1_branch_recall 이 불일치를 하드
++에러로 거부한다. 재적합:
++
++    python scripts/phase1_validate.py ... --entropy-top-p 0.95 --calibrate
++
++`steerf_forecast=oracle` 은 verl 의 전체분포 Shannon `entropys` 를 읽으므로
++`top_p<1.0` 과의 조합도 하드 에러다 (kind 와 동일한 이유).
++
++run name 태그: `-p0.95` 가 붙는다 (1.0 이면 기존 이름 그대로).
++
++## 구현 주의
++
++- 뉴클리어스를 로짓 공간에서 `-inf` 마스킹하면 Shannon 의 `(probs*logits).sum()`
++  이 `0 * -inf = NaN` 이 된다. 확률 공간에서 직접 계산하는 `_entropy_from_probs`
++  가 이 경로를 우회한다.
++- 전체 정렬은 `[chunk, 151936]` 에서 float 사본 + int64 인덱스로 수 GB 이므로
++  `topk(k_cap)` 로 제한한다. 뉴클리어스가 cap 에 닿으면 조용히 잘리는 대신 예외를
++  던진다 (`steerf_entropy_top_k_cap`, 기본 4096).
++- `top_p=1.0` 은 평범한 softmax 로 단락한다. `(cum-probs) < 1.0` 판정은 cumsum 이
++  float 에서 1.0 으로 포화한 뒤 마지막 몇 개를 떨구기 때문(500-way 에서 6개,
++  첫 제외 확률 2.5e-08). 수치엔 영향이 없지만 계약이 흐려진다.
++
++## 실행 순서 (권장)
++
++Rényi-2 arm 은 이미 음성이었다 (scale a₂ 0.130→0.136, ρ 0.860→0.833,
++branch_diversity_rho 0.597→0.536). 꼬리를 지우는 방향 자체가 이 모델에서 효과가
++없다는 신호이므로, **`phase1_sibling_spread.py` Part A 를 먼저 돌려** C5 따름정리
++1 의 전제(형제 미래가 실제로 불균등한가)를 확인한 뒤에 이 arm 을 쓸지 정할 것.
++형제가 실제로 고르면 어떤 엔트로피 변형을 써도 `A_H` 는 0 이 정답이다.
+diff --git a/run/run_steerf.sh b/run/run_steerf.sh
+index 049bbd4..b524082 100644
+--- a/run/run_steerf.sh
++++ b/run/run_steerf.sh
+@@ -70,6 +70,7 @@ STEERF_MAPPING=${STEERF_MAPPING:-minmax}      # minmax | winsor | rank
+ STEERF_WINSOR_Q=${STEERF_WINSOR_Q:-0.01}
+ STEERF_FORECAST=${STEERF_FORECAST:-mtp}       # mtp | oracle (free control arm)
+ STEERF_ENTROPY_KIND=${STEERF_ENTROPY_KIND:-shannon}  # shannon | renyi2 (calib must match; oracle is shannon-only)
++STEERF_ENTROPY_TOP_P=${STEERF_ENTROPY_TOP_P:-1.0}    # <1 reads entropy off the nucleus (calib must match; oracle needs 1.0)
+ STEERF_HEADS=${STEERF_HEADS:-${STEER_ROOT}/checkpoints/mtp_heads_${model_tag}${SCALE:+-${SCALE}}.pt}
+ STEERF_CALIB=${STEERF_CALIB:-${STEER_ROOT}/checkpoints/mtp_calibration_${model_tag}${SCALE:+-${SCALE}}.json}
+ 
+@@ -169,6 +170,7 @@ RESUME_MODE=${RESUME_MODE:-disable}
+ current_datetime=$(date +"%Y%m%d_%H%M%S")
+ KIND_TAG=""
+ [ "${STEERF_ENTROPY_KIND}" != "shannon" ] && KIND_TAG="-${STEERF_ENTROPY_KIND}"
++[ "${STEERF_ENTROPY_TOP_P}" != "1.0" ] && KIND_TAG="${KIND_TAG}-p${STEERF_ENTROPY_TOP_P}"
+ run_name=${RUN_NAME:-"STEERF-${SCALE}-${model_tag}-lam${STEERF_LAM}-k${STEERF_KAPPA}-g${STEERF_GAMMA_H}-${STEERF_APPLY}-${STEERF_MAPPING}${KIND_TAG}_${current_datetime}"}
+ 
+ train_files="['$train_path']"
+@@ -210,6 +212,7 @@ python3 -m verl.trainer.main_ppo \
+     ++actor_rollout_ref.actor.policy_loss.steerf_winsor_q=${STEERF_WINSOR_Q} \
+     ++actor_rollout_ref.actor.policy_loss.steerf_forecast=${STEERF_FORECAST} \
+     ++actor_rollout_ref.actor.policy_loss.steerf_entropy_kind=${STEERF_ENTROPY_KIND} \
++    ++actor_rollout_ref.actor.policy_loss.steerf_entropy_top_p=${STEERF_ENTROPY_TOP_P} \
+     ++actor_rollout_ref.actor.policy_loss.steerf_heads_path=${STEERF_HEADS} \
+     ++actor_rollout_ref.actor.policy_loss.steerf_calib_path=${STEERF_CALIB} \
+     actor_rollout_ref.model.enable_gradient_checkpointing=True \
+diff --git a/scripts/phase1_branch_recall.py b/scripts/phase1_branch_recall.py
+index a51d225..c04cc3c 100644
+--- a/scripts/phase1_branch_recall.py
++++ b/scripts/phase1_branch_recall.py
+@@ -76,6 +76,8 @@ def build_argparser():
+     p.add_argument("--gamma-h", type=float, default=0.85)
+     p.add_argument("--entropy-kind", default="shannon", choices=["shannon", "renyi2"],
+                    help="must match the kind the calibration was fitted on")
++    p.add_argument("--entropy-top-p", type=float, default=1.0,
++                   help="must match the top_p the calibration was fitted on")
+     p.add_argument("--baseline", default="sibling", choices=["sibling", "group"])
+     p.add_argument("--top-frac", type=float, default=0.1)
+     p.add_argument("--no-restrict-to-support", dest="restrict_to_support",
+@@ -146,10 +148,13 @@ def main(argv=None):
+     if args.calib and Path(args.calib).exists():
+         d = json.loads(Path(args.calib).read_text())
+         calib_kind = str(d.get("entropy_kind", "shannon"))
+-        if calib_kind != args.entropy_kind:
+-            sys.exit(f"[recall] --entropy-kind {args.entropy_kind} but {args.calib} was "
+-                     f"fitted on {calib_kind!r} entropies — refit with phase1_validate.py "
+-                     f"--entropy-kind {args.entropy_kind} --calibrate.")
++        calib_tp = float(d.get("entropy_top_p", 1.0))
++        if calib_kind != args.entropy_kind or abs(calib_tp - args.entropy_top_p) > 1e-9:
++            sys.exit(f"[recall] --entropy-kind {args.entropy_kind} --entropy-top-p "
++                     f"{args.entropy_top_p} but {args.calib} was fitted on "
++                     f"{calib_kind!r} top_p={calib_tp} — refit with phase1_validate.py "
++                     f"--entropy-kind {args.entropy_kind} --entropy-top-p "
++                     f"{args.entropy_top_p} --calibrate.")
+         calib = HeadCalibration(
+             scale=torch.tensor(d["scale"]),
+             bias=torch.tensor(d["bias"]),
+@@ -160,7 +165,7 @@ def main(argv=None):
+         print("[recall] no calibration — distant heads are biased upward (ablation A6)")
+ 
+     cfg = SteerFConfig(kappa=args.kappa, gamma_h=args.gamma_h, baseline=args.baseline,
+-                       entropy_kind=args.entropy_kind)
++                       entropy_kind=args.entropy_kind, entropy_top_p=args.entropy_top_p)
+ 
+     groups = load_groups(args.rollouts, args.min_group_size, args.max_groups)
+     if not groups:
+diff --git a/scripts/phase1_validate.py b/scripts/phase1_validate.py
+index 201af4f..9e3ba53 100755
+--- a/scripts/phase1_validate.py
++++ b/scripts/phase1_validate.py
+@@ -50,7 +50,7 @@ import torch
+ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+ 
+ from steer_f.entropy_forecast import HeadCalibration, fit_head_calibration, h_togo  # noqa: E402
+-from steer_f.mtp_heads import ENTROPY_FNS, MTPHeads  # noqa: E402
++from steer_f.mtp_heads import MTPHeads, entropy_of_logits  # noqa: E402
+ from steer_f.validation import (  # noqa: E402
+     evaluate_gate_g1,
+     select_kappa_gamma,
+@@ -141,7 +141,7 @@ def sample_continuations(model, tokenizer, prefix_ids, n, max_new_tokens,
+ 
+ @torch.no_grad()
+ def measured_future_entropy(model, prefix_ids, continuations, kappa_max, device,
+-                            entropy_fn):
++                            entropy_kind="shannon", top_p=1.0, k_cap=4096):
+     """Per-offset entropy of the policy along each continuation.
+ 
+     Returns `[n_cont, kappa_max]` where entry `[c, k]` is the entropy of the
+@@ -155,7 +155,8 @@ def measured_future_entropy(model, prefix_ids, continuations, kappa_max, device,
+         logits = model(input_ids=ids, use_cache=False).logits[0]
+         start = prefix_ids.shape[0] - 1  # distribution that produced the first new token
+         take = min(kappa_max, logits.shape[0] - start)
+-        ent = entropy_fn(logits[start:start + take].float())
++        ent = entropy_of_logits(logits[start:start + take].float(),
++                                entropy_kind, top_p, k_cap)
+         if take < kappa_max:  # continuation hit EOS early
+             ent = torch.cat([ent, torch.full((kappa_max - take,), float("nan"), device=device)])
+         rows.append(ent.cpu())
+@@ -164,14 +165,14 @@ def measured_future_entropy(model, prefix_ids, continuations, kappa_max, device,
+ 
+ @torch.no_grad()
+ def forecast_head_entropies(model, heads, prefix_ids, device, temperature,
+-                            entropy_kind="shannon"):
++                            entropy_kind="shannon", top_p=1.0, k_cap=4096):
+     """Per-head forecast entropy at the prefix's final position.  `[K]`."""
+     ids = prefix_ids.unsqueeze(0).to(device)
+     out = model(input_ids=ids, output_hidden_states=True, use_cache=False)
+     last_hidden = out.hidden_states[-1][:, -1:, :]  # [1, 1, H] — after the last prefix token
+     ent = heads.forecast_entropy(
+         last_hidden, model.get_output_embeddings(), temperature=temperature,
+-        entropy_kind=entropy_kind,
++        entropy_kind=entropy_kind, entropy_top_p=top_p, entropy_top_k_cap=k_cap,
+     )
+     return ent[:, 0, 0].cpu()
+ 
+@@ -253,6 +254,13 @@ def build_argparser():
+                         "run fits is only valid for training with the same "
+                         "steerf_entropy_kind — the value is stamped into the "
+                         "calibration dict and checked at load time")
++    p.add_argument("--entropy-top-p", type=float, default=1.0,
++                   help="read the entropy off the renormalised top-p nucleus rather "
++                        "than the full distribution. 1.0 (default) = full. Applied to "
++                        "BOTH the measured ground truth and the forecast, and stamped "
++                        "into the calibration alongside --entropy-kind")
++    p.add_argument("--entropy-top-k-cap", type=int, default=4096,
++                   help="bound on the nucleus sort; raises if the nucleus reaches it")
+     p.add_argument("--embed-model", default=None,
+                    help="e.g. sentence-transformers/all-MiniLM-L6-v2; omitted -> token fallback")
+     p.add_argument("--calibrate", action="store_true",
+@@ -331,13 +339,14 @@ def main(argv=None):
+                 )
+                 measured = measured_future_entropy(
+                     model, prefix_ids, conts, kappa_max, args.device,
+-                    ENTROPY_FNS[args.entropy_kind],
++                    args.entropy_kind, args.entropy_top_p, args.entropy_top_k_cap,
+                 )  # [n_cont, kappa_max]
+                 gt_per_offset = torch.nanmean(measured, dim=0)  # [kappa_max]
+ 
+                 forecast = forecast_head_entropies(
+                     model, heads, prefix_ids, args.device, args.forecast_temperature,
+-                    entropy_kind=args.entropy_kind,
++                    entropy_kind=args.entropy_kind, top_p=args.entropy_top_p,
++                    k_cap=args.entropy_top_k_cap,
+                 )  # [kappa_max]
+ 
+                 texts = [tokenizer.decode(c, skip_special_tokens=True) for c in conts] \
+@@ -429,7 +438,8 @@ def main(argv=None):
+         # warmup_and_validate.sh extracts exactly d["calibration"] into
+         # checkpoints/mtp_calibration_*.json, and the training-time check in
+         # dp_actor reads the stamp from that file.
+-        "calibration": ({**calib.to_dict(), "entropy_kind": args.entropy_kind}
++        "calibration": ({**calib.to_dict(), "entropy_kind": args.entropy_kind,
++                         "entropy_top_p": args.entropy_top_p}
+                         if calib else None),
+         "records": records,
+     }
+diff --git a/steer_f/mtp_heads.py b/steer_f/mtp_heads.py
+index f0ac771..4804307 100644
+--- a/steer_f/mtp_heads.py
++++ b/steer_f/mtp_heads.py
+@@ -32,7 +32,8 @@ from typing import Callable, Optional, Sequence, Union
+ import torch
+ import torch.nn as nn
+ 
+-__all__ = ["MTPHeads", "mtp_ce_loss", "entropy_from_logits", "renyi2_from_logits", "ENTROPY_FNS"]
++__all__ = ["MTPHeads", "mtp_ce_loss", "entropy_from_logits", "renyi2_from_logits",
++           "ENTROPY_FNS", "nucleus_probs", "entropy_of_logits"]
+ 
+ 
+ def entropy_from_logits(logits: torch.Tensor) -> torch.Tensor:
+@@ -75,6 +76,80 @@ def renyi2_from_logits(logits: torch.Tensor) -> torch.Tensor:
+ # why the calibration JSON is stamped and checked.
+ ENTROPY_FNS = {"shannon": entropy_from_logits, "renyi2": renyi2_from_logits}
+ 
++_TINY = 1e-30
++
++
++def _entropy_from_probs(probs: torch.Tensor, entropy_kind: str) -> torch.Tensor:
++    """Same functionals as ``ENTROPY_FNS`` but reading a probability vector.
++
++    Needed by the nucleus path: masking dropped tokens to ``-inf`` in logit
++    space makes Shannon's ``(probs * logits).sum()`` evaluate ``0 * -inf``,
++    which is NaN rather than the 0 the limit gives.  Reading probabilities
++    directly sidesteps that -- a dropped token contributes exactly 0 to both
++    functionals, and ``clamp_min`` only guards ``log(0)`` for entries whose
++    coefficient is already 0.
++    """
++    if entropy_kind == "renyi2":
++        return -torch.log((probs * probs).sum(dim=-1).clamp_min(_TINY))
++    return -(probs * torch.log(probs.clamp_min(_TINY))).sum(dim=-1)
++
++
++def entropy_of_logits(logits: torch.Tensor, entropy_kind: str = "shannon",
++                      top_p: float = 1.0, k_cap: int = 4096) -> torch.Tensor:
++    """One entry point for every (kind, top_p) combination.
++
++    Phase 1's measured ground truth and the forecast read-out must apply the
++    identical transform, or the calibration fits one quantity onto another.
++    """
++    if entropy_kind not in ENTROPY_FNS:
++        raise ValueError(f"entropy_kind must be one of {sorted(ENTROPY_FNS)}, got {entropy_kind!r}")
++    if top_p >= 1.0:
++        return ENTROPY_FNS[entropy_kind](logits)
++    return _entropy_from_probs(nucleus_probs(logits, top_p, k_cap), entropy_kind)
++
++
++def nucleus_probs(logits: torch.Tensor, top_p: float,
++                  k_cap: int = 4096) -> torch.Tensor:
++    """Renormalised top-p nucleus of ``logits``, as probabilities.
++
++    The smallest set of tokens whose cumulative probability reaches ``top_p``,
++    rescaled to sum to 1.  Order is not restored: every consumer here is a
++    permutation-invariant sum, so the un-sort is skipped.
++
++    ``k_cap`` bounds the sort to the top ``k_cap`` logits instead of all
++    ``V`` (a full sort of ``[chunk, 151936]`` costs a float copy plus an
++    int64 index tensor -- several GB at the default chunk size, on top of the
++    logits already resident).  For a trained LM the nucleus at ``top_p <=
++    0.99`` is orders of magnitude smaller than 4096; if it ever saturates the
++    cap the result would be silently truncated, so that raises instead.
++    """
++    if not (0.0 < top_p <= 1.0):
++        raise ValueError(f"top_p must be in (0, 1], got {top_p}")
++    if top_p >= 1.0:
++        # Not merely an optimisation. The `(cum - probs) < top_p` test drops
++        # tokens once the cumulative sum saturates at 1.0 in float, which for a
++        # 500-way distribution already excludes the last handful (measured:
++        # 6/500, first at p=2.5e-08, below float32 eps). They contribute 0 to
++        # either functional so no number moves, but "top_p=1.0" would silently
++        # stop meaning "the whole distribution". Return the plain softmax.
++        return torch.softmax(logits, dim=-1)
++    k = min(int(k_cap), logits.shape[-1])
++    top_logits, _ = torch.topk(logits, k, dim=-1)
++    probs = torch.softmax(top_logits, dim=-1)
++    cum = probs.cumsum(dim=-1)
++    # Keep every token whose predecessors had not yet reached top_p, so the
++    # token that crosses the threshold is included -- the standard nucleus.
++    keep = (cum - probs) < top_p
++    keep[..., 0] = True  # never return an empty nucleus
++    if k < logits.shape[-1] and bool(keep[..., -1].any()):
++        raise ValueError(
++            f"nucleus hit the k_cap={k} bound at top_p={top_p}; the result would "
++            "be silently truncated. Raise steerf_entropy_top_k_cap (memory cost "
++            "is linear in it) or use a smaller top_p."
++        )
++    probs = probs * keep
++    return probs / probs.sum(dim=-1, keepdim=True).clamp_min(_TINY)
++
+ 
+ class MTPHeads(nn.Module):
+     """Predict the token distribution at offsets ``+1 .. +K`` in parallel.
+@@ -211,6 +286,8 @@ class MTPHeads(nn.Module):
+         temperature: Union[float, Sequence[float]] = 1.0,
+         out_dtype: torch.dtype = torch.float32,
+         entropy_kind: str = "shannon",
++        entropy_top_p: float = 1.0,
++        entropy_top_k_cap: int = 4096,
+     ) -> torch.Tensor:
+         """Per-head predictive entropy without materialising the logit stack.
+ 
+@@ -236,6 +313,13 @@ class MTPHeads(nn.Module):
+                 heads themselves are kind-agnostic (they are trained by cross
+                 entropy against sampled tokens); only this read-out changes.
+                 Temperature composes identically: ``p = softmax(l / T)`` first.
++            entropy_top_p: read the entropy off the renormalised top-p nucleus
++                instead of the full distribution.  ``1.0`` (default) is the
++                full distribution and is bit-identical to the unpatched path.
++                Composes with ``entropy_kind``: the nucleus is taken first,
++                then the chosen functional is applied to it.
++            entropy_top_k_cap: bound on the sort used by the nucleus; see
++                :func:`nucleus_probs`.  Ignored when ``entropy_top_p == 1.0``.
+ 
+         Returns:
+             ``[K', B, T]`` (or ``[K', N]`` for packed input) entropies in nats,
+@@ -246,6 +330,9 @@ class MTPHeads(nn.Module):
+                 f"entropy_kind must be one of {sorted(ENTROPY_FNS)}, got {entropy_kind!r}"
+             )
+         entropy_fn = ENTROPY_FNS[entropy_kind]
++        if not (0.0 < entropy_top_p <= 1.0):
++            raise ValueError(f"entropy_top_p must be in (0, 1], got {entropy_top_p}")
++        truncate = entropy_top_p < 1.0
+         n_heads = self.num_heads if kappa is None else int(kappa)
+         if not (1 <= n_heads <= self.num_heads):
+             raise ValueError(f"kappa must be in [1, {self.num_heads}], got {kappa}")
+@@ -277,7 +364,13 @@ class MTPHeads(nn.Module):
+                 logits = head(proj).float()
+                 if temps[k] != 1.0:
+                     logits = logits / temps[k]
+-                out[k, start:stop] = entropy_fn(logits).to(out_dtype)
++                if truncate:
++                    out[k, start:stop] = _entropy_from_probs(
++                        nucleus_probs(logits, entropy_top_p, entropy_top_k_cap),
++                        entropy_kind,
++                    ).to(out_dtype)
++                else:
++                    out[k, start:stop] = entropy_fn(logits).to(out_dtype)
+                 del logits, proj
+ 
+         if packed:
+diff --git a/steer_f/omega_tilde.py b/steer_f/omega_tilde.py
+index 73bed9e..413de2f 100644
+--- a/steer_f/omega_tilde.py
++++ b/steer_f/omega_tilde.py
+@@ -94,6 +94,13 @@ class SteerFConfig:
+         baseline: ``"sibling"`` or ``"group"`` — see
+             :func:`steer_f.entropy_forecast.entropy_advantage`.
+         kappa / gamma_h: forecast horizon and discount.
++        entropy_top_p: read the entropy off the renormalised top-p nucleus
++            instead of the full distribution.  ``1.0`` (default) is the full
++            distribution.  Orthogonal to ``entropy_kind`` -- the nucleus is
++            taken first, the functional second.  Like ``entropy_kind`` it is
++            part of the calibration's identity and is stamped/checked.
++        entropy_top_k_cap: bound on the sort the nucleus uses; raises rather
++            than silently truncating if the nucleus reaches it.
+         entropy_kind: which entropy the forecast reads from the head
+             distributions — ``"shannon"`` (stock) or ``"renyi2"`` (collision
+             entropy, tail-immune).  Consumed by ``forecast_h_togo``; the
+@@ -115,6 +122,8 @@ class SteerFConfig:
+     kappa: int = 4
+     gamma_h: float = 0.85
+     entropy_kind: str = "shannon"
++    entropy_top_p: float = 1.0
++    entropy_top_k_cap: int = 4096
+     beta_mtp: float = 0.05
+     kl_drift_threshold: float = 0.5
+     lam_decay: float = 0.5
+@@ -141,8 +150,23 @@ class SteerFConfig:
+         if self.entropy_kind not in ("shannon", "renyi2"):
+             raise ValueError(
+                 f'entropy_kind must be "shannon" or "renyi2", got {self.entropy_kind!r}')
++        if not (0.0 < self.entropy_top_p <= 1.0):
++            raise ValueError(
++                f"entropy_top_p must be in (0, 1], got {self.entropy_top_p}")
++        if self.entropy_top_k_cap < 1:
++            raise ValueError(
++                f"entropy_top_k_cap must be >= 1, got {self.entropy_top_k_cap}")
+ 
+         warnings: list[str] = []
++        if self.entropy_top_p < 1.0:
++            warnings.append(
++                f"entropy_top_p={self.entropy_top_p} measures the entropy of the "
++                "nucleus, not of the distribution the rollouts were sampled from "
++                "(training rollout top_p is 1.0 by default, so there is no sampler "
++                "mismatch this corrects). It is a tail-robust measurement choice in "
++                "the same family as entropy_kind, and the calibration must be refit "
++                "for it (phase1_validate.py --entropy-top-p)."
++            )
+         if self.entropy_kind == "renyi2":
+             warnings.append(
+                 'entropy_kind="renyi2" changes the quantity H_togo estimates. The chain '
+diff --git a/steer_f/verl_integration.py b/steer_f/verl_integration.py
+index b7d2902..2b9110c 100644
+--- a/steer_f/verl_integration.py
++++ b/steer_f/verl_integration.py
+@@ -85,7 +85,8 @@ def forecast_h_togo(
+         lm_head: the policy's unembedding (shared with the heads).
+         heads: a :class:`steer_f.mtp_heads.MTPHeads`.
+         response_length: ``T``.
+-        cfg: supplies ``kappa``, ``gamma_h`` and ``entropy_kind``.
++        cfg: supplies ``kappa``, ``gamma_h``, ``entropy_kind`` and the
++            nucleus settings ``entropy_top_p`` / ``entropy_top_k_cap``.
+         calib: per-head calibration from Phase 1.  ``None`` means uncalibrated,
+             which biases distant heads upward — fine for a smoke test, not for
+             a reported run (ablation A6 measures exactly this).
+@@ -111,6 +112,8 @@ def forecast_h_togo(
+     head_entropies = heads.forecast_entropy(
+         h, lm_head, kappa=cfg.kappa, chunk_size=chunk_size, temperature=temps,
+         entropy_kind=cfg.entropy_kind,
++        entropy_top_p=cfg.entropy_top_p,
++        entropy_top_k_cap=cfg.entropy_top_k_cap,
+     )
+ 
+     return h_togo(head_entropies, kappa=cfg.kappa, gamma_h=cfg.gamma_h, calib=calib)
+diff --git a/verl/trainer/ppo/ray_trainer.py b/verl/trainer/ppo/ray_trainer.py
+index f86a329..df7ca71 100755
+--- a/verl/trainer/ppo/ray_trainer.py
++++ b/verl/trainer/ppo/ray_trainer.py
+@@ -1229,11 +1229,15 @@ class RayPPOTrainer:
+                         # gone at this point, so it cannot be recomputed here
+                         # -- reject instead of guessing.
+                         _sf_kind = str(steerf_cfg_src.get("steerf_entropy_kind", "shannon"))
+-                        if _sf_oracle and _sf_kind != "shannon":
++                        _sf_tp = float(steerf_cfg_src.get("steerf_entropy_top_p", 1.0))
++                        if _sf_oracle and (_sf_kind != "shannon" or _sf_tp < 1.0):
+                             raise ValueError(
+-                                "steerf_forecast=oracle is Shannon-only (it reads verl's "
+-                                f"`entropys`); got steerf_entropy_kind={_sf_kind!r}. "
+-                                "Use the mtp forecast with renyi2, or shannon for the oracle arm."
++                                "steerf_forecast=oracle reads verl's `entropys`, which is "
++                                "full-distribution Shannon; got steerf_entropy_kind="
++                                f"{_sf_kind!r} steerf_entropy_top_p={_sf_tp}. The policy "
++                                "logits are gone by this point so neither can be recomputed "
++                                "here -- use the mtp forecast, or leave the oracle arm at "
++                                "shannon / top_p=1.0."
+                             )
+                         if "h_togo" in old_log_prob.batch.keys() or _sf_oracle:
+                             from steer_f.monitors import branch_recall_at_k
+diff --git a/verl/workers/actor/dp_actor.py b/verl/workers/actor/dp_actor.py
+index e5bd1f1..3922e9b 100755
+--- a/verl/workers/actor/dp_actor.py
++++ b/verl/workers/actor/dp_actor.py
+@@ -355,11 +355,18 @@ class DataParallelPPOActor(BasePPOActor):
+             # mismatch is a hard error rather than a silently wrong run.
+             calib_kind = str(calib_dict.get("entropy_kind", "shannon"))
+             want_kind = str(cfg.get("steerf_entropy_kind", "shannon"))
+-            if calib_kind != want_kind:
++            # top_p is part of the fitted quantity's identity too: scale/bias
++            # regressed on full-distribution entropies do not transfer to
++            # nucleus entropies, and vice versa.
++            calib_tp = float(calib_dict.get("entropy_top_p", 1.0))
++            want_tp = float(cfg.get("steerf_entropy_top_p", 1.0))
++            if calib_kind != want_kind or abs(calib_tp - want_tp) > 1e-9:
+                 raise ValueError(
+-                    f"steerf_entropy_kind={want_kind!r} but {calib_path} was fitted on "
+-                    f"{calib_kind!r} entropies. Refit it with scripts/phase1_validate.py "
+-                    f"--entropy-kind {want_kind} --calibrate (see docs/STEERF_renyi2.md)."
++                    f"steerf_entropy_kind={want_kind!r} top_p={want_tp} but {calib_path} "
++                    f"was fitted on {calib_kind!r} top_p={calib_tp}. Refit with "
++                    f"scripts/phase1_validate.py --entropy-kind {want_kind} "
++                    f"--entropy-top-p {want_tp} --calibrate "
++                    f"(see docs/STEERF_renyi2.md)."
+                 )
+             calib = HeadCalibration.from_dict(calib_dict)
+         else:
+@@ -425,6 +432,8 @@ class DataParallelPPOActor(BasePPOActor):
+             kappa=int(cfg.get("steerf_kappa", 4)),
+             gamma_h=float(cfg.get("steerf_gamma_h", 0.85)),
+             entropy_kind=str(cfg.get("steerf_entropy_kind", "shannon")),
++            entropy_top_p=float(cfg.get("steerf_entropy_top_p", 1.0)),
++            entropy_top_k_cap=int(cfg.get("steerf_entropy_top_k_cap", 4096)),
+         )
+ 
+         response_length = micro_batch["responses"].size(1)
