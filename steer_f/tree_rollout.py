@@ -128,12 +128,16 @@ GenerateFn = Callable[[list[list[int]], int, int], list[list[TreeSample]]]
 def parse_int_list(spec: str | Sequence[int] | None) -> tuple[int, ...]:
     """``"128,384,640"`` -> ``(128, 384, 640)``.  Empty / None -> ``()``.
 
-    Shell launchers pass these as strings and hydra passes them as lists; this
-    accepts both so the config has one meaning in both places.
+    Every spelling this value can arrive in has to mean the same thing:
+    ``rollout.steerf_tree_depths=[128,384,640]`` reaches the config as an
+    OmegaConf list, the same override written ``='128,384,640'`` reaches it as
+    a string, and a shell launcher may hand over either.  Brackets are stripped
+    rather than rejected so a string that kept them round-trips too.
     """
     if spec is None:
         return ()
     if isinstance(spec, str):
+        spec = spec.strip().strip("[]()")
         spec = [p for p in spec.replace(" ", "").split(",") if p]
     return tuple(int(x) for x in spec)
 

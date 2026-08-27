@@ -139,7 +139,12 @@ ok = TreeRolloutConfig(n=8, response_length=1024, depths="128,384,640", factors=
 check("valid config accepted", ok.enabled and ok.num_stages == 4, ok.describe())
 check("stage budgets sum to response_length", sum(ok.stage_budgets()) == 1024, ok.stage_budgets())
 check("designed sibling counts", [ok.expected_siblings_at(t) for t in (0, 128, 384, 640)] == [8, 4, 2, 1])
-check("parse_int_list accepts str and seq", parse_int_list("1, 2,3") == (1, 2, 3) == parse_int_list([1, 2, 3]))
+check("parse_int_list: every spelling means the same thing",
+      parse_int_list("1, 2,3") == (1, 2, 3) == parse_int_list([1, 2, 3])
+      == parse_int_list("[1,2,3]") == parse_int_list(" [1, 2, 3] "),
+      "hydra sends =[1,2,3] as a list and ='1,2,3' as a string")
+check("parse_int_list: empty spellings are all 'off'",
+      parse_int_list(None) == parse_int_list("") == parse_int_list("  ") == parse_int_list([]) == ())
 
 for label, kw in [
     ("roots*prod(factors) != n rejected", dict(n=8, response_length=64, depths="16", factors="3")),
