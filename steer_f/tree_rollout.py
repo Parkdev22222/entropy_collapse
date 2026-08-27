@@ -312,6 +312,7 @@ def generate_tree(
     prompt_token_ids: Sequence[Sequence[int]],
     config: TreeRolloutConfig,
     collect_logprobs: bool = False,
+    max_token_id: Optional[int] = None,
 ) -> TreeRolloutResult:
     """Sample ``config.n`` tree-structured rollouts for every prompt.
 
@@ -326,6 +327,16 @@ def generate_tree(
         config: validated tree shape.
         collect_logprobs: keep per-token sampling logprobs.  Requires the
             engine to populate ``TreeSample.logprobs``.
+        max_token_id: largest token id the engine will accept back as input.
+            A model whose ``vocab_size`` exceeds its tokenizer -- Qwen2.5-Math
+            has 151936 output rows against a tokenizer that stops well below
+            that -- can sample one of the unused rows.  Flat sampling does not
+            care: the id lands in the response tensor, decodes to nothing and
+            scores as wrong.  The tree feeds prefixes back in as prompts, where
+            the same id is a hard ``Token id N is out of vocabulary`` from the
+            engine.  Given this bound, such a trunk is dropped and its slots go
+            through the ordinary refill path, since the rollout was garbage
+            either way; left ``None`` no check is made.
 
     Returns:
         :class:`TreeRolloutResult` with exactly ``config.n`` responses per
@@ -343,6 +354,13 @@ def generate_tree(
 
     budgets = config.stage_budgets()
     factors = (config.roots,) + config.factors
+
+    n_oov = 0
+
+    def _in_vocab(token_ids) -> bool:
+        return max_token_id is None or not token_ids or max(token_ids) <= max_token_id
+
+    last_stage = len(factors) - 1
 
     for stage, (fan, budget) in enumerate(zip(factors, budgets)):
         if stage == 0:
@@ -365,6 +383,21 @@ def generate_tree(
 
         for group, p, parent in zip(out, owners, parents):
             for j, s in enumerate(group):
+                # Only what will be fed back in as a prompt is checked:
+                # sequences from the last stage go straight to the output, and
+                # an unusable id there is exactly as harmless as it is under
+                # flat sampling.  Checking them anyway would discard whole
+                # rollouts -- most of the generated tokens live past the last
+                # cut -- to fix a problem nothing downstream has.
+                #
+                # New tokens only: the parent's were checked when it was
+                # created and the task prompt came from the dataset.  Dropping
+                # the node rather than the offending token keeps the response
+                # and the prefix it was sampled under identical, which
+                # truncating or patching would not.
+                if stage < last_stage and not _in_vocab(s.token_ids):
+                    n_oov += 1
+                    continue
                 base_tokens = parent.tokens if parent else []
                 base_lp = parent.logprobs if parent else []
                 child = _Node(
@@ -424,6 +457,7 @@ def generate_tree(
         "num_engine_calls": calls,
         "num_refilled": n_refill,
         "refill_frac": n_refill / (n_prompts * config.n),
+        "num_oov_dropped": n_oov,
         "config": config.describe(),
     }
     stats.update(sibling_support_stats(responses))

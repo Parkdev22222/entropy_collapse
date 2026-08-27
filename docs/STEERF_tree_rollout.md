@@ -144,8 +144,35 @@ Rules of thumb:
 | `steerf/branch_corr_frac` | training log | 0.003 -> order 0.5 |
 | `support_frac` | `[steerf-tree]` rollout log line | matches `expected_mean_siblings` design |
 | `refill_frac` | same line | < 0.1 |
+| `oov_dropped` | same line | small; see below |
 | `steerf/adv_zero_frac` | training log | **watch for an increase** (see below) |
 | `response_length/mean` | training log | unchanged; the tree does not shorten responses |
+
+### Tokens the tokenizer cannot represent
+
+Qwen2.5-Math-1.5B has `vocab_size = 151936` against a tokenizer whose largest
+id is well below that, and at temperature 1.0 the unused lm_head rows do get
+sampled. Flat rollouts never notice: the id lands in the response tensor,
+decodes to nothing, and the rollout scores as wrong. The tree feeds prefixes
+back in as prompts, where the same id is a hard
+
+```
+ValueError: Token id 151878 is out of vocabulary
+```
+
+from vLLM's input validation. A trunk carrying such a token is therefore
+dropped and its slots go through the ordinary refill path -- the rollout was
+garbage either way, and dropping the node rather than patching the token keeps
+the response identical to the prefix it was actually sampled under.
+
+Only sequences that will be fed back in are checked. The last stage generates
+most of the tokens and goes straight to the output, so policing it would
+discard whole rollouts to fix a problem nothing downstream has.
+
+The bound is `max(tokenizer.get_vocab().values())`, which is how
+`vllm.transformers_utils.tokenizer.get_cached_tokenizer` computes the
+`max_token_id` the v1 processor validates against. If it cannot be read the
+rollout logs a warning and the check is skipped.
 
 ## Caveats, stated plainly
 

@@ -246,7 +246,58 @@ check("support survives the deaths", res3.stats["support_frac"] > 0.4,
       f"{res3.stats['support_frac']:.4f}")
 
 # ----------------------------------------------------------------------
-print("\n[6] token budget is not inflated")
+print("\n[6] tokens the tokenizer cannot represent are dropped, not fed back")
+class OOVEngine(MarkovEngine):
+    """A model whose lm_head is wider than its tokenizer.
+
+    Qwen2.5-Math-1.5B has vocab_size=151936 against a tokenizer that stops
+    below it, and at temperature 1.0 the unused rows do get sampled.  Flat
+    sampling never notices; the tree feeds the prefix back in and vLLM answers
+    `Token id N is out of vocabulary`.
+    """
+
+    def __init__(self, oov_id, oov_prob, **kw):
+        super().__init__(**kw)
+        self.oov_id, self.oov_prob = oov_id, oov_prob
+
+    def __call__(self, prompts, n, max_tokens):
+        groups = super().__call__(prompts, n, max_tokens)
+        for group in groups:
+            for s in group:
+                if s.token_ids and self.rng.random() < self.oov_prob:
+                    s.token_ids[self.rng.randrange(len(s.token_ids))] = self.oov_id
+        return groups
+
+MAXID = 15
+eng_oov = OOVEngine(oov_id=MAXID + 7, oov_prob=0.15, seed=5)
+res_oov = generate_tree(eng_oov, [[5] for _ in range(P)], cfg, max_token_id=MAXID)
+check("out-of-vocab trunks were dropped", res_oov.stats["num_oov_dropped"] > 0,
+      f"{res_oov.stats['num_oov_dropped']} dropped, refill_frac={res_oov.stats['refill_frac']:.3f}")
+check("still exactly n per prompt after dropping", all(len(r) == N for r in res_oov.responses))
+# Only what is fed back in as a prompt has to be clean: the trunk of a tree
+# rollout, i.e. its first depths[-1] tokens. The tail past the last cut goes
+# straight to the output, and refills (path (-1,)) are sampled from the prompt
+# and never conditioned on, so both may carry an unusable id exactly as they
+# would under flat sampling.
+bad_prefix = [
+    (p, j) for p, grp in enumerate(res_oov.responses) for j, r in enumerate(grp)
+    if res_oov.paths[p][j] != (-1,) and r[: cfg.depths[-1]] and max(r[: cfg.depths[-1]]) > MAXID
+]
+check("no tree rollout carries an out-of-vocab token in its conditioning prefix",
+      not bad_prefix, bad_prefix[:3])
+check("the last stage is not policed", any(
+    res_oov.paths[p][j] != (-1,) and len(r) > cfg.depths[-1] and max(r[cfg.depths[-1]:]) > MAXID
+    for p, grp in enumerate(res_oov.responses) for j, r in enumerate(grp)),
+      "tokens past the last cut are never re-fed, so dropping them would cost "
+      "whole rollouts to fix a problem nothing downstream has")
+check("support survives the drops", res_oov.stats["support_frac"] > 0.3,
+      f"{res_oov.stats['support_frac']:.4f}")
+no_check = generate_tree(OOVEngine(oov_id=MAXID + 7, oov_prob=0.15, seed=5),
+                         [[5] for _ in range(P)], cfg)
+check("max_token_id=None disables the check", no_check.stats["num_oov_dropped"] == 0)
+
+# ----------------------------------------------------------------------
+print("\n[7] token budget is not inflated")
 eng4 = MarkovEngine(seed=1)
 generate_tree(eng4, [[5] for _ in range(P)], TreeRolloutConfig(n=N, response_length=T))
 flat_tokens = eng4.generated_tokens
@@ -259,7 +310,7 @@ check("tree generates no more tokens than flat", tree_tokens <= flat_tokens,
       "the prefill of those trunks is re-paid unless the engine caches prefixes")
 
 # ----------------------------------------------------------------------
-print("\n[7] a lying engine is caught, not absorbed")
+print("\n[8] a lying engine is caught, not absorbed")
 def short_group(prompts, n, max_tokens):
     return [[TreeSample([1], False)] * (n - 1) for _ in prompts]
 
@@ -280,13 +331,13 @@ except ValueError:
     check("mismatched logprobs rejected", True)
 
 # ----------------------------------------------------------------------
-print("\n[8] cross-check against the trainer's own sibling_support")
+print("\n[9] cross-check against the trainer's own sibling_support")
 try:
     import torch  # noqa: F401
     from steer_f.entropy_forecast import sibling_support
 except Exception as exc:  # pragma: no cover - depends on which tree this runs in
     print(f"  SKIP  steer_f.entropy_forecast.sibling_support unavailable ({type(exc).__name__}: {exc})")
-    print("        Run this script from the TRAINING tree to exercise section [8]: it is the")
+    print("        Run this script from the TRAINING tree to exercise section [9]: it is the")
     print("        only check that compares the diagnostic to the function the trainer calls,")
     print("        rather than to a reference reimplemented in this file.")
 else:
