@@ -92,6 +92,23 @@ run_arm () {   # <arm-id> <lam> <tree 0|1>
         return 1
     fi
 
+    # A run name that already has checkpoints is the trap that cost a
+    # baseline: default_local_dir is checkpoints/<project>/<experiment_name>,
+    # so reusing a name plus RESUME_MODE=auto makes verl RESUME that run --
+    # the new arm silently continues the old one's weights and optimizer, and
+    # max_actor_ckpt_to_keep then evicts the old checkpoints as it writes.
+    # Nothing warns; the log just says "Resuming from ...".
+    local ckpt_dir="${STEER_ROOT}/checkpoints/STEER-F/${run_name}"
+    if [ -d "${ckpt_dir}" ] && [ "${RESUME:-0}" != "1" ]; then
+        echo "[2x2] REFUSE ${arm}: ${ckpt_dir} already exists."
+        echo "[2x2]        RESUME_MODE=${RESUME_MODE} would CONTINUE whatever is in there"
+        echo "[2x2]        instead of starting this arm, and overwrite its checkpoints."
+        echo "[2x2]        Move it aside, pick a different TAG, or set RESUME=1 if you"
+        echo "[2x2]        really are continuing this exact arm after a crash."
+        FAILED+=("${arm}")
+        return 1
+    fi
+
     local extra=()
     if [ "${tree}" = "1" ]; then
         extra+=("++actor_rollout_ref.rollout.steerf_tree_depths=[${TREE_DEPTHS}]")
