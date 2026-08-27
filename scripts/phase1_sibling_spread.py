@@ -688,6 +688,37 @@ def summarise(records, args):
     # this says how the *sibling* signal compares on the same scale.
     ratio = med_within_std / across_std if across_std > 0 else float("nan")
 
+    # The median alone cannot separate the two worlds that matter here:
+    #
+    #   world 1  every branch point has near-equal siblings
+    #            -> corollary 1 fires everywhere, the visitation term is
+    #               correctly inert, and no forecast work changes that;
+    #   world 2  most branch points are equal but a small tail is wildly
+    #            unequal -> the method lives in that tail, and "3% of branch
+    #            points carry the correction" is a sharper claim than the
+    #            original one, not a weaker one.
+    #
+    # Both report ratio ~ 0 on the median. The upper quantiles and the
+    # exceedance fractions below are what tell them apart, so they are
+    # first-class outputs rather than diagnostics.
+    stds = sorted(s["std"] for s in within)
+    rels = sorted(s["rel_std"] for s in within)
+
+    def q(vals, frac):
+        if not vals:
+            return float("nan")
+        i = min(len(vals) - 1, max(0, int(round(frac * (len(vals) - 1)))))
+        return vals[i]
+
+    # Exceedance is measured against the position-level scale, so "large"
+    # means large compared with the signal C1 already established rather
+    # than against an arbitrary constant.
+    def frac_above(mult):
+        if not (across_std > 0):
+            return float("nan")
+        thr = mult * across_std
+        return sum(1 for v in stds if v > thr) / len(stds)
+
     part_a = {
         "n_cut_points": len(within),
         "median_within_cutpoint_std": med_within_std,
@@ -697,6 +728,17 @@ def summarise(records, args):
         "mean_branches_per_cutpoint": statistics.fmean(
             [r["n_branches"] for r in records]
         ),
+        "within_cutpoint_std_quantiles": {
+            "p10": q(stds, 0.10), "p25": q(stds, 0.25), "p50": q(stds, 0.50),
+            "p75": q(stds, 0.75), "p90": q(stds, 0.90), "p99": q(stds, 0.99),
+            "max": stds[-1] if stds else float("nan"),
+        },
+        "within_cutpoint_rel_std_quantiles": {
+            "p50": q(rels, 0.50), "p90": q(rels, 0.90), "p99": q(rels, 0.99),
+        },
+        "tail_frac_std_above_0.5x_position": frac_above(0.5),
+        "tail_frac_std_above_1x_position": frac_above(1.0),
+        "tail_frac_std_above_2x_position": frac_above(2.0),
     }
 
     # ---- Part B: does either estimator track the true sibling deviation? ----
@@ -805,11 +847,37 @@ def render_report(s):
     add(f"  across-cutpoint std of means       {a['across_cutpoint_std_of_means']:.4f}")
     add(f"  >> sibling / position ratio        {a['sibling_to_position_ratio']:.4f}")
     add("")
+    qs = a["within_cutpoint_std_quantiles"]
+    add("  within-cutpoint std(div) distribution")
+    add("    p10      p25      p50      p75      p90      p99      max")
+    add("  " + " ".join(f"{qs[k]:8.4f}" for k in
+                        ("p10", "p25", "p50", "p75", "p90", "p99", "max")))
+    add("")
+    add(f"  >> frac of cut points with std > 0.5x position scale "
+        f"{a['tail_frac_std_above_0.5x_position']:.4f}")
+    add(f"  >> frac with std > 1x position scale               "
+        f"{a['tail_frac_std_above_1x_position']:.4f}")
+    add(f"  >> frac with std > 2x position scale               "
+        f"{a['tail_frac_std_above_2x_position']:.4f}")
+    add("")
     add("  Reading: the ratio puts the sibling signal on the same scale as the")
-    add("  position signal C1 already established. Near 0 means corollary 1")
-    add("  fires -- A_H is ~0 because the futures really are equally diverse,")
-    add("  and the visitation term is correctly inert. Order 1 means the signal")
-    add("  is there to be estimated and Part B decides who can see it.")
+    add("  position signal C1 already established. But the median cannot tell")
+    add("  'uniform everywhere' from 'uniform except a consequential tail', and")
+    add("  those are different papers -- read the quantiles and the exceedance")
+    add("  fractions together with it:")
+    add("")
+    add("    ratio ~ 0 AND p90/p99 also ~ 0   -> corollary 1 fires everywhere.")
+    add("        A_H is 0 because the futures really are equally diverse and the")
+    add("        visitation term is CORRECTLY inert. No forecast, horizon or")
+    add("        support work recovers it: with equal sibling futures the chain")
+    add("        rule's second term is constant in pi, so Omega is complete.")
+    add("        That is a publishable measurement about the branch structure of")
+    add("        math RLVR, and it closes the remedy rather than the diagnosis.")
+    add("    ratio ~ 0 BUT p99/max large       -> the method lives in the tail.")
+    add("        Report what fraction of branch points carry it; a correction")
+    add("        needed at 3% of positions is a sharper claim, not a weaker one.")
+    add("    ratio order 1                     -> signal is broadly there;")
+    add("        Part B decides which estimator can see it.")
     add("")
     add("=" * 74)
     add("PART B -- does either estimator track it?")
