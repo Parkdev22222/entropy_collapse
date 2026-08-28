@@ -64,15 +64,58 @@ mkdir -p "${HF_TARGET}"
 [ -d "${HF_TARGET}/hub" ] && ok "모델 캐시 있음 — 재다운로드 불필요" \
                           || warn "모델 캐시 없음 — Qwen2.5-Math-1.5B 를 다시 받습니다 (~3GB, 첫 실행 시 자동)"
 
-# ---------------------------------------------------------------- 2. 이미지 제공
-say "2. 파드 이미지가 제공해야 하는 것 (설치하지 않음)"
+# ---------------------------------------------------------------- 2. GPU 스택
+# torch / vLLM / ray / flash-attn 은 서로 ABI 로 묶여 있습니다. vLLM 은 자기
+# torch 핀을 강제하고, flash-attn 은 설치 시점의 torch 에 대해 컴파일됩니다.
+# 그래서 순서가 있고, 아무 버전이나 깔면 멀쩡하던 파드가 깨집니다:
+#     vllm  ->  ray  ->  transformers 재핀  ->  flash-attn
+#
+# vllm==0.8.4 인 근거: requirements.txt 의 `# vllm==0.8.4` 주석과, 이전 학습
+# 로그의 `NCCL version 2.21.5+cuda12.4` 가 그 버전이 요구하는 torch 2.6.0+cu124
+# 와 일치한다는 것. 최신 vLLM 은 torch 2.7+ 로 올려 verl 0.4.1.x 와 어긋납니다.
+VLLM_PIN=${VLLM_PIN:-0.8.4}
+say "2. GPU 스택"
+GPU_MISSING=()
 for m in torch vllm ray flash_attn; do
     v=$(pyver "$m")
-    if [ -n "$v" ]; then ok "$m $v"; else bad "$m 없음 — 이미지가 잘못됐습니다"; fi
+    if [ -n "$v" ]; then ok "$m $v"; else warn "$m 없음"; GPU_MISSING+=("$m"); fi
 done
-python3 -c "import torch; assert torch.cuda.is_available()" 2>/dev/null \
-    && ok "torch.cuda 사용 가능 (built for CUDA $(python3 -c 'import torch;print(torch.version.cuda)'))" \
-    || bad "torch 가 GPU 를 못 봅니다"
+if python3 -c "import torch; assert torch.cuda.is_available()" 2>/dev/null; then
+    ok "torch.cuda 사용 가능 (built for CUDA $(python3 -c 'import torch;print(torch.version.cuda)'))"
+elif [ -n "$(pyver torch)" ]; then
+    bad "torch 가 GPU 를 못 봅니다 — CPU 빌드가 깔렸을 수 있습니다"
+fi
+
+if [ ${#GPU_MISSING[@]} -gt 0 ]; then
+    cat <<EOT
+
+  없는 것: ${GPU_MISSING[*]}
+  아래 순서로 설치하세요. 순서를 바꾸면 깨집니다.
+
+    pip install vllm==${VLLM_PIN}          # torch 를 자기 핀에 맞춰 함께 설치
+    pip install "ray[default]"
+    pip install "transformers<5"           # vllm 이 올렸을 수 있으니 재핀
+    pip install flash-attn --no-build-isolation
+
+  또는:  INSTALL_GPU_STACK=1 bash run/setup_env.sh
+
+  flash-attn 이 소스 빌드로 넘어가 오래 걸리면 건너뛰어도 학습은 됩니다
+  (transformers 가 sdpa 로 폴백). 다만 속도가 떨어지고 수치가 미세하게 달라지니
+  비교하려는 네 팔은 반드시 같은 상태로 맞추세요.
+EOT
+    if [ "${INSTALL_GPU_STACK:-0}" = "1" ] && [ "${CHECK_ONLY}" != "1" ]; then
+        say "2b. GPU 스택 설치"
+        pip install "vllm==${VLLM_PIN}"        || bad "vllm 설치 실패"
+        pip install "ray[default]"             || bad "ray 설치 실패"
+        pip install "transformers<5"           || bad "transformers 재핀 실패"
+        pip install flash-attn --no-build-isolation || warn "flash-attn 실패 — sdpa 폴백으로 진행 가능"
+        python3 -c "import torch; assert torch.cuda.is_available()" 2>/dev/null \
+            && ok "설치 후 torch.cuda 정상 ($(pyver torch))" \
+            || bad "설치 후 torch 가 GPU 를 못 봅니다"
+    else
+        FAIL=1
+    fi
+fi
 
 # ---------------------------------------------------------------- 3. 핀
 say "3. 버전이 고정돼야 하는 것"
