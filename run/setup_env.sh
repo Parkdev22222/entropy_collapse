@@ -131,24 +131,18 @@ else
     ok "transformers ${TV} (<5)"
 fi
 
-TD=$(pyver tensordict)
-[ -n "$TD" ] && ok "tensordict ${TD}" || { warn "tensordict 없음"; NEED+=('pip install "tensordict<=0.6.2"'); }
 
 # ---------------------------------------------------------------- 4. 순수 파이썬
-say "4. 순수 파이썬 의존성"
-declare -A PKG=(
-  [hydra]="hydra-core"      [omegaconf]="omegaconf"     [datasets]="datasets"
-  [pyarrow]="'pyarrow>=19.0.0'" [pandas]="pandas"       [numpy]="numpy"
-  [accelerate]="accelerate" [peft]="peft"               [codetiming]="codetiming"
-  [dill]="dill"             [pylatexenc]="pylatexenc"   [torchdata]="torchdata"
-  [wandb]="wandb"           [math_verify]="math_verify"
-  [latex2sympy2_extended]="latex2sympy2_extended"
-)
-MISSING=()
-for m in "${!PKG[@]}"; do
-    if python3 -c "import $m" >/dev/null 2>&1; then ok "$m"; else warn "$m 없음"; MISSING+=("${PKG[$m]}"); fi
-done
-[ ${#MISSING[@]} -gt 0 ] && NEED+=("pip install ${MISSING[*]}")
+# 성공적인 `import X` 는 X 가 설치돼 있다는 뜻이 아닙니다. __init__.py 가 없는
+# 디렉터리는 네임스페이스 패키지가 되어 import 가 통과합니다. 이 레포에는
+# datasets/ 폴더가 있고 PYTHONPATH 에 레포 루트가 들어가므로, HF datasets 가
+# 없으면 그 폴더가 `datasets` 모듈이 되어
+#     AttributeError: module 'datasets' has no attribute 'load_dataset'
+# 로 학습 도중에 죽습니다. 그러니 심볼까지 확인합니다.
+say "4. 순수 파이썬 의존성 (심볼까지 확인)"
+cd "${STEER_ROOT}" || exit 1   # 그림자를 재현하려면 레포 루트에서 확인해야 함
+MISSING=$(python3 "${SCRIPT_DIR}/_check_deps.py")
+[ -n "${MISSING}" ] && NEED+=("pip install ${MISSING}")
 
 # sentence-transformers 는 Part A 측정(--embed-model)에만 쓰이고 학습에는 불필요.
 # 최신판이 transformers>=5 를 요구하므로 반드시 <5 로 맞춰야 합니다.
