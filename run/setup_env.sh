@@ -78,7 +78,21 @@ say "2. GPU 스택"
 GPU_MISSING=()
 for m in torch vllm ray flash_attn; do
     v=$(pyver "$m")
-    if [ -n "$v" ]; then ok "$m $v"; else warn "$m 없음"; GPU_MISSING+=("$m"); fi
+    if [ -n "$v" ]; then ok "$m $v"; continue; fi
+    # "없음" 과 "있는데 못 불러옴" 은 처방이 다릅니다. flash-attn 은 설치 시점의
+    # torch 에 대해 컴파일된 .so 를 싣기 때문에, torch 가 그 뒤에 바뀌면
+    #   undefined symbol: _ZN3c105ErrorC2E...   (= c10::Error, libtorch 심볼)
+    # 로 죽습니다. 파일은 멀쩡히 있으니 "없음" 이라고 하면 오진입니다.
+    err=$(python3 -c "import $m" 2>&1 | tail -1)
+    case "$err" in
+        *"undefined symbol"*|*"cannot open shared object"*|*"ABI"*)
+            bad "$m ABI 불일치 — 지금 torch 와 다른 버전으로 빌드됐습니다"
+            printf '        %s\n' "$err"
+            printf '        고치기: pip uninstall -y %s && pip install --no-cache-dir %s\n' "$m" "$m"
+            printf '        (--no-cache-dir 없으면 예전 torch 로 빌드된 캐시 wheel 을 다시 씁니다)\n'
+            ;;
+        *) warn "$m 없음"; GPU_MISSING+=("$m") ;;
+    esac
 done
 if python3 -c "import torch; assert torch.cuda.is_available()" 2>/dev/null; then
     ok "torch.cuda 사용 가능 (built for CUDA $(python3 -c 'import torch;print(torch.version.cuda)'))"
