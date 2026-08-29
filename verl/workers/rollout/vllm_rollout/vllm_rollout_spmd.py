@@ -79,7 +79,142 @@ def _repeat_interleave(value: Union[torch.Tensor, np.ndarray], repeats: int) -> 
         return np.repeat(value, repeats, axis=0)
 
 
-class vLLMRollout(BaseRollout):
+def _tokenizer_max_token_id(tokenizer):
+    """Largest id the engine will accept as *input*, computed the way vLLM does.
+
+    ``vllm.transformers_utils.tokenizer.get_cached_tokenizer`` stamps
+    ``max_token_id = max(tokenizer.get_vocab().values())`` onto the tokenizer,
+    and the v1 processor rejects any prompt token above it with
+    ``Token id N is out of vocabulary``.
+
+    A model whose lm_head is wider than its tokenizer can sample the ids in
+    between: Qwen2.5-Math-1.5B has ``vocab_size = 151936`` against a tokenizer
+    that stops well below that, and at temperature 1.0 those unused rows do get
+    drawn.  Under flat sampling it never matters -- the id lands in the response
+    tensor, decodes to nothing and scores as wrong.  It matters only once a
+    prefix is fed back in as a prompt, which is what the tree does.
+    """
+    try:
+        return max(tokenizer.get_vocab().values())
+    except Exception as exc:  # a tokenizer without get_vocab: skip the check
+        logger.warning("[steerf-tree] could not read the tokenizer vocabulary (%s); "
+                       "out-of-vocabulary sampled tokens will not be filtered", exc)
+        return None
+
+
+def _tree_samples_from_vllm(outputs, want_logprobs):
+    """vLLM ``RequestOutput``s -> ``TreeSample``s, one group per prompt.
+
+    ``finish_reason == "length"`` is the only reason a sequence may be branched
+    further: anything else means the policy chose to stop, and continuing past
+    its own EOS would be generating text the policy never would have.
+    """
+    from steer_f.tree_rollout import TreeSample
+
+    groups = []
+    for output in outputs:
+        group = []
+        for comp in output.outputs:
+            ids = list(comp.token_ids)
+            lps = None
+            if want_logprobs:
+                lps = [comp.logprobs[i][tid].logprob for i, tid in enumerate(ids)]
+            group.append(TreeSample(token_ids=ids, finished=comp.finish_reason != "length", logprobs=lps))
+        groups.append(group)
+    return groups
+
+
+def _build_tree_config(config):
+    """Read the tree shape off the rollout config, or ``None`` if unset.
+
+    Absent ``steerf_tree_depths`` the rollout is exactly the stock one, so the
+    import of ``steer_f`` is deferred to here and verl keeps running for anyone
+    who does not have it.
+    """
+    depths = config.get("steerf_tree_depths", None)
+    if depths is None or (isinstance(depths, str) and not depths.strip()) or len(depths) == 0:
+        return None
+    from steer_f.tree_rollout import TreeRolloutConfig
+
+    return TreeRolloutConfig(
+        n=config.n,
+        response_length=config.response_length,
+        depths=depths,
+        factors=config.get("steerf_tree_factors", ()),
+        roots=int(config.get("steerf_tree_roots", 1)),
+    )
+
+
+class vLLMRollout_TreeMixin:
+    """Tree-structured rollout, split out so the stock path stays readable.
+
+    Motivation is in ``steer_f/tree_rollout.py``: STEER-F's ``A_H`` is defined
+    as a deviation from the mean over rollouts that still share the prefix, and
+    i.i.d. sampling leaves that set empty at 99.7% of positions, so the whole
+    forecast term is multiplied by zero.  Sampling the group as a tree puts the
+    siblings there by construction.
+    """
+
+    @torch.no_grad()
+    def _generate_tree(self, vllm_inputs):
+        from steer_f.tree_rollout import generate_tree
+
+        if any("multi_modal_data" in inp for inp in vllm_inputs):
+            raise NotImplementedError(
+                "steerf tree rollout does not support multi_modal_data: a branch has to "
+                "re-condition on `prompt + trunk` token ids, and the image payload would "
+                "have to be threaded through every stage. Unset steerf_tree_depths."
+            )
+        if self.lora_kwargs:
+            raise NotImplementedError(
+                "steerf tree rollout does not support LoRA: verl builds one LoRARequest per "
+                "row of the ORIGINAL batch, and the tree's stages have different batch sizes. "
+                "Unset steerf_tree_depths."
+            )
+
+        want_logprobs = bool(self.config.calculate_log_probs)
+
+        def engine(prompt_token_ids, n, max_tokens):
+            # Nested inside generate_sequences' own update_sampling_params;
+            # that contextmanager saves and restores per key, so the outer
+            # settings survive.
+            with self.update_sampling_params(n=n, max_tokens=max_tokens):
+                outputs = self.inference_engine.generate(
+                    prompts=[{"prompt_token_ids": list(ids)} for ids in prompt_token_ids],
+                    sampling_params=self.sampling_params,
+                    lora_request=None,
+                    use_tqdm=False,
+                )
+            return _tree_samples_from_vllm(outputs, want_logprobs)
+
+        result = generate_tree(
+            engine,
+            [inp["prompt_token_ids"] for inp in vllm_inputs],
+            self.tree_config,
+            collect_logprobs=want_logprobs,
+            max_token_id=self.tokenizer_max_token_id,
+        )
+        st = result.stats
+        # print for the same reason as in __init__: WARN is this logger's
+        # default level, and this line is the only place the support fraction
+        # -- the number the whole tree exists to move -- is observable.
+        print(
+            f"[steerf-tree] support_frac={st['support_frac']:.4f} "
+            f"mean_siblings={st['mean_siblings']:.2f} "
+            f"refill_frac={st['refill_frac']:.4f} "
+            f"oov_dropped={st['num_oov_dropped']} "
+            f"engine_calls={st['num_engine_calls']} "
+            f"by_decile={[round(x, 3) for x in st['support_frac_by_decile']]}",
+            flush=True,
+        )
+        # Flattened prompt-major, which is exactly the order _repeat_interleave
+        # gives the prompts/attention_mask/position_ids it duplicates below.
+        response = [r for group in result.responses for r in group]
+        rollout_log_probs = [lp for group in result.logprobs for lp in group] if want_logprobs else []
+        return response, rollout_log_probs
+
+
+class vLLMRollout(vLLMRollout_TreeMixin, BaseRollout):
     def __init__(self, model_path: str, config: DictConfig, tokenizer, model_hf_config, **kwargs):
         """A vLLM rollout. It requires the module is supported by the vllm.
 
@@ -185,6 +320,20 @@ class vLLMRollout(BaseRollout):
         self.sampling_params = SamplingParams(**kwargs)
 
         self.pad_token_id = tokenizer.pad_token_id
+        self.tree_config = _build_tree_config(config)
+        self.tokenizer_max_token_id = _tokenizer_max_token_id(tokenizer)
+        if self.tree_config is not None and self.tree_config.enabled:
+            # print, not logger.info: this module's logger is created at
+            # VERL_LOGGING_LEVEL, which defaults to WARN, so an info line here
+            # would be silently discarded -- and a diagnostic nobody can read
+            # is worse than none, because it is trusted.
+            print(f"[steerf-tree] {self.tree_config.describe()}", flush=True)
+            if not config.get("enable_prefix_caching", True):
+                logger.warning(
+                    "[steerf-tree] enable_prefix_caching is off. The tree re-prefills every "
+                    "shared trunk once per branch stage; without prefix caching that prefill "
+                    "is paid in full and the rollout gets slower, not faster."
+                )
 
     @contextmanager
     def update_sampling_params(self, **kwargs):
@@ -264,29 +413,37 @@ class vLLMRollout(BaseRollout):
                 lora_int_id = lora_int_ids[0]
                 lora_requests = [LoRARequest(lora_name=f"{lora_int_id}", lora_int_id=lora_int_id, lora_path="/simon-stub-path")] * batch_size
 
+        # The tree is a training-time device: it exists to give A_H's sibling
+        # baseline a support, and validation neither computes A_H nor may have
+        # its sampling distribution altered, so it keeps the flat path.
+        use_tree = self.tree_config is not None and self.tree_config.enabled and do_sample and not is_validate
+
         # users can customize different sampling_params at different run
         with self.update_sampling_params(**kwargs):
-            outputs = self.inference_engine.generate(
-                prompts=vllm_inputs,  # because we have already convert it to prompt token id
-                sampling_params=self.sampling_params,
-                lora_request=lora_requests,
-                use_tqdm=False,
-            )
+            if use_tree:
+                response, rollout_log_probs = self._generate_tree(vllm_inputs)
+            else:
+                outputs = self.inference_engine.generate(
+                    prompts=vllm_inputs,  # because we have already convert it to prompt token id
+                    sampling_params=self.sampling_params,
+                    lora_request=lora_requests,
+                    use_tqdm=False,
+                )
 
-            # TODO(sgm): disable logprob when recompute_log_prob is enable
-            # if n = 1: (bs, response_length) ; if n > 1: (bs * n, response_length)
+                # TODO(sgm): disable logprob when recompute_log_prob is enable
+                # if n = 1: (bs, response_length) ; if n > 1: (bs * n, response_length)
 
-            response = []
-            rollout_log_probs = []
-            for output in outputs:
-                for sample_id in range(len(output.outputs)):
-                    response_ids = output.outputs[sample_id].token_ids
-                    response.append(response_ids)
-                    if self.config.calculate_log_probs:
-                        curr_log_prob = []
-                        for i, logprob in enumerate(output.outputs[sample_id].logprobs):
-                            curr_log_prob.append(logprob[response_ids[i]].logprob)
-                        rollout_log_probs.append(curr_log_prob)
+                response = []
+                rollout_log_probs = []
+                for output in outputs:
+                    for sample_id in range(len(output.outputs)):
+                        response_ids = output.outputs[sample_id].token_ids
+                        response.append(response_ids)
+                        if self.config.calculate_log_probs:
+                            curr_log_prob = []
+                            for i, logprob in enumerate(output.outputs[sample_id].logprobs):
+                                curr_log_prob.append(logprob[response_ids[i]].logprob)
+                            rollout_log_probs.append(curr_log_prob)
 
             response = pad_2d_list_to_length(response, self.pad_token_id, max_length=self.config.response_length).to(idx.device)
             if self.config.calculate_log_probs:

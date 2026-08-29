@@ -1,0 +1,216 @@
++++ dirname run/warmup_and_validate.sh
+++ cd run
+++ pwd
++ SCRIPT_DIR=/workspace/entropy_collapse/run
+++ cd /workspace/entropy_collapse/run/..
+++ pwd
++ STEER_ROOT=/workspace/entropy_collapse
++ . /workspace/entropy_collapse/run/_gpu_defaults.sh
+++ '[' -z 1 ']'
+++ '[' -z 1 ']'
+++ '[' 1 -eq 1 ']'
+++ '[' -z 0.35 ']'
+++ GPU_MEM_UTIL=0.35
+++ export N_GPUS TP_SIZE GPU_MEM_UTIL
++ export PYTHONPATH=/workspace/entropy_collapse:
++ PYTHONPATH=/workspace/entropy_collapse:
++ model_path=Qwen/Qwen2.5-Math-1.5B
+++ basename Qwen/Qwen2.5-Math-1.5B
++ model_tag=Qwen2.5-Math-1.5B
++ SCALE=paper
++ rollouts=/workspace/entropy_collapse/rollout_data/warmup/Qwen2.5-Math-1.5B-paper/rollouts.jsonl
++ case "${SCALE}" in
++ N_PROB=25
++ N_TRAJ=32
++ N_CONT=16
++ MAX_PRE=600
++ ckpt_dir=/workspace/entropy_collapse/checkpoints
++ mkdir -p /workspace/entropy_collapse/checkpoints /workspace/entropy_collapse/docs
++ heads_out=/workspace/entropy_collapse/checkpoints/mtp_heads_Qwen2.5-Math-1.5B-paper.pt
++ calib_out=/workspace/entropy_collapse/checkpoints/mtp_calibration_Qwen2.5-Math-1.5B-paper.json
++ results_out=/workspace/entropy_collapse/docs/phase1_results_Qwen2.5-Math-1.5B-paper.json
++ python3 /workspace/entropy_collapse/scripts/phase1_warmup_heads.py --model Qwen/Qwen2.5-Math-1.5B --rollouts /workspace/entropy_collapse/rollout_data/warmup/Qwen2.5-Math-1.5B-paper/rollouts.jsonl --out /workspace/entropy_collapse/checkpoints/mtp_heads_Qwen2.5-Math-1.5B-paper.pt --num-heads 8 --head-hidden 1024 --epochs 1 --max-length 1024
+[warmup] loading Qwen/Qwen2.5-Math-1.5B (bfloat16)
+Sliding Window Attention is enabled but not implemented for `sdpa`; unexpected results may be encountered.
+[warmup] heads: K=8, 25.2M params
+[warmup] 2945 sequences, 736 batches/epoch
+[warmup] epoch 0 step 20/736 loss=9.8425 lr=2.10e-04 (7s) | k0=0.569 k1=9.531 k2=11.030 k3=11.114 k4=11.394 k5=11.634 k6=11.585 k7=11.884
+[warmup] epoch 0 step 40/736 loss=9.4123 lr=4.07e-04 (13s) | k0=0.951 k1=8.478 k2=10.094 k3=10.750 k4=11.207 k5=11.203 k6=11.292 k7=11.324
+[warmup] epoch 0 step 60/736 loss=6.2769 lr=6.00e-04 (19s) | k0=0.664 k1=4.615 k2=6.414 k3=7.183 k4=7.595 k5=7.812 k6=7.964 k7=7.969
+[warmup] epoch 0 step 80/736 loss=5.7740 lr=7.87e-04 (25s) | k0=1.291 k1=4.278 k2=5.823 k3=6.488 k4=6.771 k5=7.027 k6=7.227 k7=7.286
+[warmup] epoch 0 step 100/736 loss=5.0947 lr=9.55e-04 (31s) | k0=0.526 k1=3.203 k2=4.942 k3=5.819 k4=6.316 k5=6.620 k6=6.617 k7=6.716
+[warmup] epoch 0 step 120/736 loss=5.4435 lr=9.36e-04 (38s) | k0=1.130 k1=4.180 k2=5.517 k3=6.117 k4=6.340 k5=6.717 k6=6.701 k7=6.846
+[warmup] epoch 0 step 140/736 loss=5.3567 lr=9.13e-04 (44s) | k0=0.337 k1=3.676 k2=5.325 k3=6.068 k4=6.563 k5=6.826 k6=6.911 k7=7.148
+[warmup] epoch 0 step 160/736 loss=4.8937 lr=8.88e-04 (50s) | k0=0.744 k1=3.323 k2=4.798 k3=5.607 k4=5.874 k5=6.226 k6=6.185 k7=6.392
+[warmup] epoch 0 step 180/736 loss=4.7197 lr=8.60e-04 (56s) | k0=0.447 k1=2.865 k2=4.549 k3=5.338 k4=5.805 k5=6.172 k6=6.196 k7=6.385
+[warmup] epoch 0 step 200/736 loss=4.8158 lr=8.29e-04 (62s) | k0=0.433 k1=2.855 k2=4.681 k3=5.437 k4=5.956 k5=6.257 k6=6.398 k7=6.511
+[warmup] epoch 0 step 220/736 loss=4.6517 lr=7.95e-04 (68s) | k0=0.358 k1=4.393 k2=3.462 k3=6.258 k4=4.399 k5=7.013 k6=4.696 k7=6.635
+[warmup] epoch 0 step 240/736 loss=4.4453 lr=7.60e-04 (74s) | k0=0.674 k1=3.035 k2=4.176 k3=5.109 k4=5.381 k5=5.621 k6=5.748 k7=5.817
+[warmup] epoch 0 step 260/736 loss=3.8169 lr=7.22e-04 (80s) | k0=0.571 k1=2.332 k2=5.137 k3=3.986 k4=4.184 k5=4.396 k6=5.414 k7=4.514
+[warmup] epoch 0 step 280/736 loss=4.4105 lr=6.83e-04 (87s) | k0=0.902 k1=2.693 k2=4.088 k3=4.856 k4=5.391 k5=5.605 k6=5.827 k7=5.922
+[warmup] epoch 0 step 300/736 loss=4.6051 lr=6.43e-04 (93s) | k0=0.580 k1=3.153 k2=4.563 k3=5.260 k4=5.584 k5=5.918 k6=5.852 k7=5.930
+[warmup] epoch 0 step 320/736 loss=4.3752 lr=6.02e-04 (99s) | k0=0.410 k1=2.446 k2=4.143 k3=4.969 k4=5.378 k5=5.736 k6=5.868 k7=6.050
+[warmup] epoch 0 step 340/736 loss=4.4555 lr=5.60e-04 (105s) | k0=0.696 k1=2.686 k2=4.239 k3=5.015 k4=5.437 k5=5.675 k6=5.875 k7=6.020
+[warmup] epoch 0 step 360/736 loss=4.2301 lr=5.17e-04 (111s) | k0=0.673 k1=2.640 k2=3.998 k3=4.811 k4=5.188 k5=5.424 k6=5.502 k7=5.604
+[warmup] epoch 0 step 380/736 loss=4.9308 lr=4.74e-04 (118s) | k0=0.915 k1=3.386 k2=4.743 k3=5.524 k4=5.884 k5=6.158 k6=6.390 k7=6.447
+[warmup] epoch 0 step 400/736 loss=3.8968 lr=4.32e-04 (124s) | k0=0.479 k1=2.174 k2=3.494 k3=4.304 k4=4.864 k5=5.154 k6=5.260 k7=5.445
+[warmup] epoch 0 step 420/736 loss=3.5665 lr=3.90e-04 (130s) | k0=0.290 k1=1.747 k2=3.065 k3=3.893 k4=4.460 k5=4.833 k6=4.994 k7=5.250
+[warmup] epoch 0 step 440/736 loss=3.9341 lr=3.49e-04 (136s) | k0=0.627 k1=2.316 k2=3.730 k3=4.469 k4=4.868 k5=5.030 k6=5.181 k7=5.251
+[warmup] epoch 0 step 460/736 loss=4.8783 lr=3.09e-04 (142s) | k0=2.274 k1=3.704 k2=4.687 k3=5.173 k4=5.572 k5=5.774 k6=5.866 k7=5.976
+[warmup] epoch 0 step 480/736 loss=3.9689 lr=2.70e-04 (149s) | k0=0.509 k1=2.044 k2=3.562 k3=4.458 k4=4.889 k5=5.236 k6=5.464 k7=5.588
+[warmup] epoch 0 step 500/736 loss=3.4461 lr=2.33e-04 (155s) | k0=0.277 k1=1.666 k2=2.960 k3=3.841 k4=4.330 k5=4.661 k6=4.851 k7=4.981
+[warmup] epoch 0 step 520/736 loss=3.4846 lr=1.98e-04 (161s) | k0=0.347 k1=1.793 k2=3.047 k3=3.873 k4=4.329 k5=4.635 k6=4.882 k7=4.972
+[warmup] epoch 0 step 540/736 loss=3.6040 lr=1.65e-04 (167s) | k0=1.346 k1=2.657 k2=3.356 k3=3.866 k4=4.122 k5=4.386 k6=4.475 k7=4.624
+[warmup] epoch 0 step 560/736 loss=3.7097 lr=1.35e-04 (173s) | k0=0.498 k1=2.163 k2=3.413 k3=4.161 k4=4.506 k5=4.841 k6=4.970 k7=5.127
+[warmup] epoch 0 step 580/736 loss=4.3813 lr=1.07e-04 (180s) | k0=0.822 k1=2.749 k2=4.081 k3=4.889 k4=5.332 k5=5.604 k6=5.724 k7=5.849
+[warmup] epoch 0 step 600/736 loss=4.1017 lr=8.19e-05 (185s) | k0=0.889 k1=2.483 k2=3.674 k3=4.503 k4=5.009 k5=5.280 k6=5.414 k7=5.560
+[warmup] epoch 0 step 620/736 loss=3.8803 lr=6.00e-05 (191s) | k0=0.643 k1=2.467 k2=3.669 k3=4.296 k4=4.706 k5=4.930 k6=5.090 k7=5.242
+[warmup] epoch 0 step 640/736 loss=3.6018 lr=4.14e-05 (197s) | k0=0.705 k1=2.174 k2=3.208 k3=3.971 k4=4.360 k5=4.654 k6=4.806 k7=4.936
+[warmup] epoch 0 step 660/736 loss=3.3153 lr=2.61e-05 (203s) | k0=0.455 k1=1.660 k2=2.771 k3=3.575 k4=4.062 k5=4.462 k6=4.697 k7=4.840
+[warmup] epoch 0 step 680/736 loss=4.9724 lr=1.42e-05 (210s) | k0=1.363 k1=3.547 k2=4.850 k3=5.472 k4=5.824 k5=6.109 k6=6.259 k7=6.355
+[warmup] epoch 0 step 700/736 loss=3.7312 lr=5.89e-06 (216s) | k0=0.592 k1=1.950 k2=3.289 k3=4.101 k4=4.584 k5=4.973 k6=5.142 k7=5.219
+[warmup] epoch 0 step 720/736 loss=4.5313 lr=1.17e-06 (222s) | k0=1.041 k1=3.114 k2=4.386 k3=4.971 k4=5.381 k5=5.633 k6=5.794 k7=5.930
+[warmup] wrote /workspace/entropy_collapse/checkpoints/mtp_heads_Qwen2.5-Math-1.5B-paper.pt
+[warmup] per-head final CE (expect monotone increase with k):
+           +1: 0.5086
+           +2: 1.8426
+           +3: 2.9402
+           +4: 3.7390
+           +5: 4.1139
+           +6: 4.4239
+           +7: 4.5977
+           +8: 4.7168
++ python3 /workspace/entropy_collapse/scripts/phase1_validate.py --model Qwen/Qwen2.5-Math-1.5B --heads /workspace/entropy_collapse/checkpoints/mtp_heads_Qwen2.5-Math-1.5B-paper.pt --problems /workspace/entropy_collapse/datasets/math500.parquet --n-problems 25 --n-trajectories 32 --n-continuations 16 --max-prefixes 600 --calibrate --out /workspace/entropy_collapse/docs/phase1_results_Qwen2.5-Math-1.5B-paper.json
+Sliding Window Attention is enabled but not implemented for `sdpa`; unexpected results may be encountered.
+[validate] heads K=8 from /workspace/entropy_collapse/checkpoints/mtp_heads_Qwen2.5-Math-1.5B-paper.pt
+[validate] 25 problems, fractions=[0.2, 0.4, 0.6, 0.8]
+[validate] budget: 600 prefixes, <= 24 per problem
+[validate] problem 1/25: +24 (total 24)
+[validate] problem 2/25: +24 (total 48)
+[validate] problem 3/25: +24 (total 72)
+[validate] problem 4/25: +24 (total 96)
+[validate] problem 5/25: +24 (total 120)
+[validate] problem 6/25: +24 (total 144)
+[validate] problem 7/25: +24 (total 168)
+[validate] problem 8/25: +24 (total 192)
+[validate] problem 9/25: +24 (total 216)
+[validate] problem 10/25: +24 (total 240)
+[validate] problem 11/25: +24 (total 264)
+[validate] problem 12/25: +24 (total 288)
+[validate] problem 13/25: +24 (total 312)
+[validate] problem 14/25: +24 (total 336)
+[validate] problem 15/25: +24 (total 360)
+[validate] problem 16/25: +24 (total 384)
+[validate] problem 17/25: +24 (total 408)
+[validate] problem 18/25: +24 (total 432)
+[validate] problem 19/25: +24 (total 456)
+[validate] problem 20/25: +24 (total 480)
+[validate] problem 21/25: +24 (total 504)
+[validate] problem 22/25: +24 (total 528)
+[validate] problem 23/25: +24 (total 552)
+[validate] problem 24/25: +24 (total 576)
+[validate] problem 25/25: +24 (total 600)
+[validate] calibration scale=['0.961', '0.136', '0.174', '0.101', '0.142', '0.078', '0.116', '0.087']
+[validate]             bias =['0.008', '0.148', '-0.109', '0.021', '-0.149', '0.025', '-0.109', '-0.017']
+[validate] kappa=1 gamma_H=0.7: rho_within=0.9947 (pooled 0.9975, 600 obs)
+[validate] kappa=2 gamma_H=0.7: rho_within=0.8122 (pooled 0.8203, 600 obs)
+[validate] kappa=3 gamma_H=0.7: rho_within=0.7747 (pooled 0.7701, 600 obs)
+[validate] kappa=4 gamma_H=0.7: rho_within=0.7496 (pooled 0.7485, 600 obs)
+[validate] kappa=5 gamma_H=0.7: rho_within=0.7506 (pooled 0.7443, 600 obs)
+[validate] kappa=6 gamma_H=0.7: rho_within=0.7424 (pooled 0.7428, 600 obs)
+[validate] kappa=7 gamma_H=0.7: rho_within=0.7400 (pooled 0.7410, 599 obs)
+[validate] kappa=8 gamma_H=0.7: rho_within=0.7327 (pooled 0.7390, 599 obs)
+[validate] kappa=1 gamma_H=0.85: rho_within=0.9947 (pooled 0.9975, 600 obs)
+[validate] kappa=2 gamma_H=0.85: rho_within=0.8010 (pooled 0.8075, 600 obs)
+[validate] kappa=3 gamma_H=0.85: rho_within=0.7498 (pooled 0.7481, 600 obs)
+[validate] kappa=4 gamma_H=0.85: rho_within=0.7231 (pooled 0.7206, 600 obs)
+[validate] kappa=5 gamma_H=0.85: rho_within=0.7081 (pooled 0.7125, 600 obs)
+[validate] kappa=6 gamma_H=0.85: rho_within=0.6942 (pooled 0.7058, 600 obs)
+[validate] kappa=7 gamma_H=0.85: rho_within=0.6891 (pooled 0.7024, 599 obs)
+[validate] kappa=8 gamma_H=0.85: rho_within=0.6818 (pooled 0.6948, 599 obs)
+[validate] kappa=1 gamma_H=1.0: rho_within=0.9947 (pooled 0.9975, 600 obs)
+[validate] kappa=2 gamma_H=1.0: rho_within=0.7882 (pooled 0.7969, 600 obs)
+[validate] kappa=3 gamma_H=1.0: rho_within=0.7285 (pooled 0.7283, 600 obs)
+[validate] kappa=4 gamma_H=1.0: rho_within=0.6908 (pooled 0.6934, 600 obs)
+[validate] kappa=5 gamma_H=1.0: rho_within=0.6768 (pooled 0.6814, 600 obs)
+[validate] kappa=6 gamma_H=1.0: rho_within=0.6549 (pooled 0.6680, 600 obs)
+[validate] kappa=7 gamma_H=1.0: rho_within=0.6550 (pooled 0.6624, 599 obs)
+[validate] kappa=8 gamma_H=1.0: rho_within=0.6416 (pooled 0.6483, 599 obs)
+
+[validate] selected kappa=2 gamma_H=0.7 (rho=0.8122, best available 0.8122, giving up 0.0000)
+[validate] rho(H_togo, branch diversity) = 0.5684
+[validate] wrote /workspace/entropy_collapse/docs/phase1_results_Qwen2.5-Math-1.5B-paper.json
+
+[validate] NOTE: gate G1 also needs branch recall@10%, which is measured on a
+           real rollout group (steer_f.monitors.branch_recall_at_k) rather than on
+           these independently-sampled prefixes. Run it on a Phase-0 rollout dump,
+           then feed both numbers to steer_f.validation.evaluate_gate_g1.
+GATE: FAIL
+  [x] within-problem rho >= 0.20: rho_mean=0.8122
+  [ ] branch recall@10% above chance (p<0.05): recall=nan vs chance=0.1000, p=nan (0/0)
+  ! only 0 true branch points — the recall test has little power; sample more prefixes before treating a FAIL as informative
++ python3 - /workspace/entropy_collapse/docs/phase1_results_Qwen2.5-Math-1.5B-paper.json /workspace/entropy_collapse/checkpoints/mtp_calibration_Qwen2.5-Math-1.5B-paper.json
+[phase1] calibration -> /workspace/entropy_collapse/checkpoints/mtp_calibration_Qwen2.5-Math-1.5B-paper.json
+[phase1] selected kappa=2 gamma_H=0.7 (rho=0.8122)
+[phase1] export these for run_steerf.sh:
+         STEERF_KAPPA=2 STEERF_GAMMA_H=0.7
++ python3 /workspace/entropy_collapse/scripts/phase1_branch_recall.py --model Qwen/Qwen2.5-Math-1.5B --heads /workspace/entropy_collapse/checkpoints/mtp_heads_Qwen2.5-Math-1.5B-paper.pt --calib /workspace/entropy_collapse/checkpoints/mtp_calibration_Qwen2.5-Math-1.5B-paper.json --rollouts /workspace/entropy_collapse/rollout_data/warmup/Qwen2.5-Math-1.5B-paper/rollouts.jsonl --phase1-results /workspace/entropy_collapse/docs/phase1_results_Qwen2.5-Math-1.5B-paper.json --out /workspace/entropy_collapse/docs/phase1_recall_Qwen2.5-Math-1.5B-paper.json
+Sliding Window Attention is enabled but not implemented for `sdpa`; unexpected results may be encountered.
+[recall] calibration loaded from /workspace/entropy_collapse/checkpoints/mtp_calibration_Qwen2.5-Math-1.5B-paper.json
+[recall] 64 groups, sizes 8..8
+[recall] 8/64 groups
+[recall] 16/64 groups
+[recall] 24/64 groups
+[recall] 32/64 groups
+[recall] 40/64 groups
+[recall] 48/64 groups
+[recall] 56/64 groups
+[recall] 64/64 groups
+[recall] sibling support: 1615 of 380236 masked positions (0.4%)
+[recall] {
+  "recall": 0.23275862068965517,
+  "baseline": 0.10030959752321982,
+  "lift": 2.3275862068965516,
+  "n_branch": 696,
+  "n_hit": 162,
+  "n_valid": 1615
+}
+[recall] rho_mean=0.8122 from /workspace/entropy_collapse/docs/phase1_results_Qwen2.5-Math-1.5B-paper.json
+GATE: PASS
+  [x] within-problem rho >= 0.20: rho_mean=0.8122
+  [x] branch recall@10% above chance (p<0.05): recall=0.2328 vs chance=0.1003, p=2.887e-24 (162/696)
+[recall] wrote /workspace/entropy_collapse/docs/phase1_recall_Qwen2.5-Math-1.5B-paper.json
++ python3 /workspace/entropy_collapse/scripts/make_dummy_heads.py --model Qwen/Qwen2.5-Math-1.5B --out /workspace/entropy_collapse/checkpoints/mtp_heads_control_Qwen2.5-Math-1.5B.pt
+[dummy-heads] wrote UNTRAINED heads to /workspace/entropy_collapse/checkpoints/mtp_heads_control_Qwen2.5-Math-1.5B.pt (H=1536, V=151936, K=8)
+[dummy-heads] plumbing test only — not a STEER-F result
++ python3 /workspace/entropy_collapse/scripts/phase1_branch_recall.py --model Qwen/Qwen2.5-Math-1.5B --heads /workspace/entropy_collapse/checkpoints/mtp_heads_control_Qwen2.5-Math-1.5B.pt --rollouts /workspace/entropy_collapse/rollout_data/warmup/Qwen2.5-Math-1.5B-paper/rollouts.jsonl --allow-untrained --out /workspace/entropy_collapse/docs/phase1_recall_control_Qwen2.5-Math-1.5B-paper.json
+Sliding Window Attention is enabled but not implemented for `sdpa`; unexpected results may be encountered.
+[recall] CONTROL RUN: untrained heads. These numbers are the chance floor the trained run must beat -- not a STEER-F result.
+[recall] no calibration — distant heads are biased upward (ablation A6)
+[recall] 64 groups, sizes 8..8
+[recall] 8/64 groups
+[recall] 16/64 groups
+[recall] 24/64 groups
+[recall] 32/64 groups
+[recall] 40/64 groups
+[recall] 48/64 groups
+[recall] 56/64 groups
+[recall] 64/64 groups
+[recall] sibling support: 1615 of 380236 masked positions (0.4%)
+[recall] {
+  "recall": 0.23275862068965517,
+  "baseline": 0.10030959752321982,
+  "lift": 2.3275862068965516,
+  "n_branch": 696,
+  "n_hit": 162,
+  "n_valid": 1615
+}
+GATE: FAIL
+  [ ] within-problem rho >= 0.20: rho_mean=nan
+  [x] branch recall@10% above chance (p<0.05): recall=0.2328 vs chance=0.1003, p=2.887e-24 (162/696)
+  ! rho_mean is nan: every problem was constant or below min_per_problem
+[recall] wrote /workspace/entropy_collapse/docs/phase1_recall_control_Qwen2.5-Math-1.5B-paper.json
++ echo '[phase1] compare docs/phase1_recall_Qwen2.5-Math-1.5B-paper.json vs the _control file'
+[phase1] compare docs/phase1_recall_Qwen2.5-Math-1.5B-paper.json vs the _control file
++ echo '         before trusting gate G1'\''s recall criterion.'
+         before trusting gate G1's recall criterion.
