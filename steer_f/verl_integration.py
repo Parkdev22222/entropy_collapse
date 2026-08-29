@@ -144,7 +144,11 @@ def attach_entropy_advantage(
         "steerf/h_togo_mean": float(h[valid].mean()),
         "steerf/h_togo_std": float(h[valid].std()) if valid.sum() > 1 else 0.0,
         "steerf/a_h_std": float(a_h[valid].std()) if valid.sum() > 1 else 0.0,
-        "steerf/a_h_zero_frac": float((a_h[valid].abs() < 1e-8).float().mean()),
+        # 1e-8은 float32 반올림을 신호로 오인한다: 형제 평균 Σ_j g[j]/n 은 g[i]와
+        # 비트 단위로 같지 않아, 토큰이 동일해 A_H가 해석상 정확히 0인 위치에서도
+        # |a_h| ~ 6e-8이 남는다. 이상적인 트리(n=8, cuts=[64,192,384], T=1000)에서
+        # 항목의 약 3%가 그렇게 살아있는 것으로 잘못 집계된다 (scripts/measure_ah_support.py).
+        "steerf/a_h_zero_frac": float((a_h[valid].abs() < 1e-6).float().mean()),
     }
 
 

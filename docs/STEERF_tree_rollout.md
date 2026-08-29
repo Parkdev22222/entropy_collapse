@@ -33,6 +33,96 @@ the problem: it branches `K_mc` continuations off one shared prefix and gets
 **28%** support. Same model, same definition of sibling, two orders of
 magnitude apart — because it branches and training does not.
 
+> **Correction.** That last comparison puts 28% *prefix support* next to 0.003
+> *`A_H != 0`*, which are not the same quantity, and it is what produced the
+> unreachable 0.5 target further down. Branching does raise support — the tree
+> delivers the designed `support_frac` — but `A_H` is nonzero only at branch
+> points, and there are at most `n - 1` of those. See
+> [The ceiling](#the-ceiling-on-branch_corr_frac).
+
+## The ceiling on `branch_corr_frac`
+
+The 0.5 this document originally set as the target for `branch_corr_frac` is
+unreachable, by roughly a factor of 36, and no sampler can reach it. The
+number came from conflating two quantities that the tree affects very
+differently:
+
+| quantity | condition at position `t` | moved by the cuts? |
+|---|---|---|
+| `support_frac` | some other rollout shares `y_<t` | **yes** -- it is `d_L / T` by construction |
+| `branch_corr_frac` | `A_H != 0` | **no** -- see below |
+
+`H_togo` is a deterministic function of the causal prefix, so two rollouts that
+share `y_<=t` have *identical* forecasts. `A_H[i,t]` is `i`'s forecast minus the
+mean over rollouts sharing `y_<t`, hence
+
+```
+A_H[i, t] != 0   <=>   siblings share y_<t but diverge at y_t
+                 <=>   t is a branch point of the group
+```
+
+Inside a tree, sharing a prefix means sharing every token up to the next cut.
+So across the whole support region `A_H` is identically zero except at the cuts
+themselves -- which is what the support region is made of.
+
+`n` sequences form a trie with at most `n - 1` internal branching nodes, and
+`_shift_forward` widens each into two columns, so **for any sampler whatsoever**
+
+```
+branch_corr_frac <= 2 (n - 1) / T
+```
+
+Measured against that bound on `train-math-Qwen2.5-Math-1.5B-s1`
+(`n = 8`, `response_length/mean ~= 1000`, cuts `64,192,384`):
+
+| | `branch_corr_frac` |
+|---|---|
+| flat i.i.d. sampler | 0.003 |
+| **tree** | **0.010** |
+| ideal tree, counted directly (`2L/T`, `L = 3`) | 0.006 |
+| **ceiling `2(n-1)/T`** | **0.014** |
+
+The tree did its job: it took the term from 21% to 71% of the theoretical
+maximum. The maximum is just small. Raising it needs `n`, and only
+logarithmically in the number of cuts -- `L <= log_2(n)`, so even `n = 1024`
+buys `branch_corr_frac ~ 0.02`.
+
+### What this does *not* mean
+
+It does not mean the visitation signal is weak. `a_h_std` is computed over all
+valid positions, 99.4% of which are exactly zero, so it understates the live
+spread by `sqrt(p)`. At `a_h_std = 0.009` and `p = 0.006` the conditional
+spread at branch points is
+
+```
+sigma_live = 0.009 / sqrt(0.006) ~= 0.116     against h_togo_mean = 0.351  (33%)
+```
+
+Sibling futures at branch points differ a great deal. C5 corollary 1's first
+branch -- "sibling futures really are near-equally diverse, so the term is
+correctly ~0" -- is therefore **rejected**; the term is sparse, not small.
+
+One consequence worth stating, because it changes what the method *is*:
+`omega_tilde.normalize` rescales the visitation term to unit variance over the
+whole mask, which on a `p`-sparse vector amplifies the live entries by
+`1/sqrt(p) ~= 13`. At `lam = 0.25` the future term is therefore worth about
+3.2 z-units at branch points and a small constant everywhere else -- so what
+runs today is STEER plus a large, targeted perturbation at `L` positions per
+rollout, not the dense reweighting the design describes.
+
+### Options
+
+1. `baseline="group"` (Ablation A5, already implemented) lifts coverage to
+   0.937 on the ideal tree, at the cost of comparing against rollouts that do
+   not share the prefix -- it stops controlling for "same state, different
+   action", which is the reason the sibling baseline exists.
+2. Accept the sparsity and treat the visitation correction as a branch-point
+   local quantity. This is the sharper claim and it is the one the measurements
+   support.
+3. Not available: a sampler that makes the term dense.
+
+Reproduce the direct count with `scripts/measure_ah_support.py`.
+
 ## The design
 
 Sample the `n` rollouts of a prompt as a tree. With `roots` independent trunks,
@@ -134,8 +224,11 @@ Rules of thumb:
 * keep `refill_frac < 0.1` -- above that the tree is quietly degrading into the
   flat sampler for a large minority of the batch;
 * the support profile is a **step function** of the cuts, so `A_H` is still
-  exactly zero beyond `d_L`. More, shallower cuts buy coverage; more, deeper
-  ones buy sibling *count* where the coverage already exists.
+  exactly zero beyond `d_L`. More, shallower cuts buy prefix *support*; more,
+  deeper ones buy sibling *count* where the support already exists.
+* neither buys `A_H` coverage. `support_frac` and `branch_corr_frac` are
+  different quantities and the cuts move only the first -- see
+  [The ceiling](#the-ceiling-on-branch_corr_frac).
 
 ### What to watch
 
@@ -149,7 +242,7 @@ training starts.
 
 | metric | where | expected |
 |---|---|---|
-| `steerf/branch_corr_frac` | training log | 0.003 -> order 0.5 |
+| `steerf/branch_corr_frac` | training log | 0.003 -> `2(n-1)/T`, **not** 0.5 -- see [The ceiling](#the-ceiling-on-branch_corr_frac) |
 | `support_frac` | `[steerf-tree]` rollout log line | matches `expected_mean_siblings` design |
 | `refill_frac` | same line | < 0.1 |
 | `oov_dropped` | same line | small; see below |
