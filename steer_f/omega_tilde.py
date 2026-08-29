@@ -72,6 +72,9 @@ __all__ = [
 ]
 
 _EPS = 1e-8
+# Relative floor separating a real branch score from the float32 round-off
+# left by the sibling mean; diagnostic only (see branch_weight_correction).
+_VISIT_REL_EPS = 1e-4
 
 
 @dataclass
@@ -647,8 +650,25 @@ def branch_weight_correction(
         raise ValueError(f'mode must be "signed" or "uniform", got {mode!r}')
     valid = response_mask.bool()
     support = valid & (visit != 0)
+    # `!= 0` also admits float32 round-off.  `A_H` is a deviation from a mean
+    # over prefix-matched siblings, and inside a tree those siblings are
+    # *token-identical* up to the next cut, so `A_H` is interpretively zero
+    # there -- but `sum(g_j)/k` does not reproduce `g_i` bit for bit, leaving
+    # |A_H| ~ 6e-8.  The scale of the artefact is ~1e-6 relative to a real
+    # branch score, so any relative threshold in [1e-5, 1e-2] separates them;
+    # `branch_corr_frac_strict` is the honest count.  See
+    # docs/STEERF_tree_rollout.md, "The ceiling on branch_corr_frac".
+    #
+    # `support` itself is deliberately left on `!= 0`: it also selects where
+    # `delta` lands and, through `rms`, sets the size of every correction, so
+    # tightening it changes training rather than logging.  Do not change it
+    # mid-experiment.
+    peak = float(visit.abs().max()) if visit.numel() else 0.0
+    strict = support & (visit.abs() > _VISIT_REL_EPS * peak) if peak > 0 else support
+    n_valid = max(1, int(valid.sum()))
     stats = {
-        "steerf/branch_corr_frac": float(support.float().sum() / max(1, int(valid.sum()))),
+        "steerf/branch_corr_frac": float(support.float().sum() / n_valid),
+        "steerf/branch_corr_frac_strict": float(strict.float().sum() / n_valid),
     }
     if lam == 0.0 or not support.any():
         stats["steerf/branch_corr_mean_abs"] = 0.0

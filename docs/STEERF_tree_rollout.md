@@ -33,6 +33,162 @@ the problem: it branches `K_mc` continuations off one shared prefix and gets
 **28%** support. Same model, same definition of sibling, two orders of
 magnitude apart — because it branches and training does not.
 
+> **Correction.** That last comparison puts 28% *prefix support* next to 0.003
+> *`A_H != 0`*, which are not the same quantity, and it is what produced the
+> unreachable 0.5 target further down. Branching does raise support — the tree
+> delivers the designed `support_frac` — but `A_H` is nonzero only at branch
+> points, and a group of `n` rollouts has at most `n - 1` of those. See
+> [The ceiling](#the-ceiling-on-branch_corr_frac).
+
+## The ceiling on `branch_corr_frac`
+
+The "order 0.5" target below is unreachable by a factor of ~100, and no sampler
+reaches it. It came from conflating two quantities the cuts affect very
+differently:
+
+| quantity | condition at position `t` | moved by the cuts? |
+|---|---|---|
+| `support_frac` | some other rollout shares `y_<t` | **yes** — `d_L / T` by construction |
+| `branch_corr_frac` | `visit != 0`, i.e. `A_H != 0` | **no** — see below |
+
+`H_togo` is a deterministic function of the causal prefix, so two rollouts that
+share `y_<=t` carry *identical* forecasts. `sibling_prefix_baseline` averages
+over rollouts sharing `y_<t`, hence
+
+```
+A_H[i, t] != 0   <=>   siblings share y_<t but diverge at y_t
+                 <=>   t is a branch point of the group
+```
+
+Inside a tree, sharing a prefix means sharing every token up to the next cut,
+so across the whole support region `A_H` is identically zero except at the cuts
+— which is what the support region is made of.
+
+### The bound
+
+Count the nonzero `(rollout, position)` entries. At a branch node, every
+rollout passing through it gets a nonzero `A_H`, so the total is the sum of
+subtree sizes over the internal nodes of the group's trie. For `n = 8` that is
+maximised by a fully unbalanced trie, `8+7+6+5+4+3+2 = 35`, and the balanced
+tree this module builds gives `3 cuts x 8 = 24`. Against `n * T` valid tokens
+at `T = response_length/mean ~= 1005`:
+
+| | `branch_corr_frac` |
+|---|---|
+| flat i.i.d. sampler, measured | 0.003 |
+| balanced tree, `cuts = 64,192,384` (counted) | 0.0030 |
+| **ceiling, any sampler at `n = 8`** | **0.0044** |
+| **tree, measured** | **0.011** |
+
+The measured value is **2.5x the ceiling**, which is not possible for a real
+count. `support` is tested with an exact `visit != 0`, and the sibling mean
+`sum(g_j)/k` does not reproduce `g_i` bit for bit, so token-identical siblings
+leave `|A_H| ~ 6e-8`. **At least 60% of the reported support is float32
+round-off.** `branch_corr_frac_strict` applies a relative floor and is the
+number to read.
+
+### Why that is not only a logging problem
+
+`support` selects where `delta` lands *and* is the set `rms` is taken over:
+
+```python
+rms = visit[support].pow(2).mean().sqrt()
+delta[support] = lam * band * tanh(visit[support] / rms)
+```
+
+Round-off entries contribute ~0 to the sum of squares but do count in the
+denominator, so `rms` is deflated by `sqrt(0.0044 / 0.011) ~= 0.63` and every
+tanh argument is inflated by ~1.6x. In the unsaturated regime that is the same
+as running `lam ~= 0.40` while the config says 0.25. Consistent with this,
+`steerf/branch_corr_max_abs` sits at exactly `lam * band = 0.075` at **every**
+step of the 1.5B run — the correction is pinned at its bound throughout.
+
+Tightening `support` therefore changes training, not logging. It is left on
+`!= 0` deliberately; change it between experiments, never inside one.
+
+### What the sparsity does *not* mean
+
+`a_h_std` is taken over all valid positions, ~99.7% of them exactly zero, so it
+understates the live spread by `sqrt(p)`. At `a_h_std = 0.009` and `p = 0.003`
+the conditional spread at branch points is `0.009 / sqrt(0.003) ~= 0.16`
+against `h_togo_mean = 0.211` — about 78%. Sibling futures differ a great deal
+where the term is defined. C5 corollary 1's "sibling futures are near-equally
+diverse, so the term is correctly ~0" branch is **rejected**: the visitation
+term is sparse, not small.
+
+And sparse does not mean inert. `steerf/tw_std = 0.007` against
+`steerf/twg_std = 0.014`: the correction touches ~1% of tokens and still
+**doubles** the token-weight spread, because a single `delta` of 0.075 is ten
+times STEER's own spread over the `[0.7, 1.0]` band.
+
+### Two metrics this invalidates
+
+**`steerf/branch_recall` is degenerate and cannot be repaired as posed.**
+`_top_k_selection` ranks the *signed* `a_h`, and `A_H` is a deviation from a
+sibling mean, so it is zero-centred at branch points by construction. The
+positive half of the branch points sorts above the mass of exact zeros and the
+negative half sorts below it, which pins recall at ~0.5 and lift at ~5.0
+whatever the forecast says. Simulated at the run's sparsity (`p = 0.0075`,
+`top_frac = 0.1`):
+
+| score at branch points | recall | lift |
+|---|---|---|
+| informative `a_h` | 0.4993 | 4.99 |
+| **pure noise, zero-centred** | **0.4900** | **4.90** |
+| `a_h` scaled 100x | 0.5093 | 5.09 |
+
+The 1.5B run reports 0.497 -> 0.498 (lift 4.98), flat across 79 steps — exactly
+the forced value. Ranking `|a_h|` instead does not fix it: inside the support
+`a_h != 0` **iff** the position is a branch point, so `|a_h|` identifies them
+perfectly by definition and recall becomes 1.0. The question "do high-`A_H`
+positions coincide with real branch points" is answered by the definition of
+`A_H`, not by the heads. Reading either number as evidence about the forecast
+— in *either* direction — is a mistake; the 0.4711-untrained / 0.4693-trained
+control in `sibling_support`'s docstring is the same artefact, and restricting
+the statistic to the support does not remove it because the cause is the sign,
+not the support. Testing the forecast needs a different question: within branch
+points, does `A_H` rank siblings by their *realised* future entropy? That is
+Part B of `scripts/phase1_sibling_spread.py`.
+
+**`steerf/branch_entropy_gap` carries the same defect plus dilution.** It takes
+the signed top decile over *all* valid positions, so its "branch" set is the
+positive half of the nonzero `a_h` (~0.15% of tokens) padded out with ~9.85%
+arbitrary ties among exact zeros — about 98% of the selected set carries no
+branch information. Its 0.137 -> 0.021 decay tracks the policy's overall
+entropy collapse, not anything about branches.
+
+### What is and is not established
+
+| claim | status |
+|---|---|
+| the correction materially changes training | **established** — `tw_std` 0.007 vs `twg_std` 0.014, i.e. ~0.3% of tokens double the weight spread |
+| it is defined on very few positions | **established** — ceiling 0.0044, and >=60% of the reported 0.011 is round-off |
+| `A_H` is large where it is defined | **established** — conditional spread ~0.16 against `h_togo_mean` 0.211 |
+| C5 corollary 1's "sibling futures are near-equally diverse" | **rejected** |
+| **the forecast is what produces the effect** | **unmeasured** — no logged metric bears on it |
+
+The last row is what `mode="uniform"` exists to settle: it uses the support and
+never `A_H`'s value, so a `uniform` run against a `signed` run at the same seed
+separates "the forecast ranks siblings usefully" from "branch points are worth
+attenuating at all". Until that is run, neither the method's claim nor a null
+result about it is supported by these logs.
+
+### Options
+
+1. `baseline="group"` (`group_mean_baseline`) lifts coverage to ~0.94, at the
+   cost of comparing against rollouts that do not share the prefix — it stops
+   controlling for "same state, different action", which is why the sibling
+   baseline exists.
+2. `mode="uniform"` is the decisive control and is already implemented: it uses
+   only the *support*, never `A_H`'s value. If it matches `signed`, the
+   forecast is not carrying the effect.
+3. Accept the sparsity and treat the visitation correction as a branch-point
+   local quantity. This is the sharper claim and the one the measurements
+   support.
+4. Not available: a sampler that makes the term dense.
+
+Reproduce the count with `scripts/measure_ah_support.py`.
+
 ## The design
 
 Sample the `n` rollouts of a prompt as a tree. With `roots` independent trunks,
@@ -134,8 +290,11 @@ Rules of thumb:
 * keep `refill_frac < 0.1` -- above that the tree is quietly degrading into the
   flat sampler for a large minority of the batch;
 * the support profile is a **step function** of the cuts, so `A_H` is still
-  exactly zero beyond `d_L`. More, shallower cuts buy coverage; more, deeper
-  ones buy sibling *count* where the coverage already exists.
+  exactly zero beyond `d_L`. More, shallower cuts buy prefix *support*; more,
+  deeper ones buy sibling *count* where the support already exists.
+* neither buys `A_H` coverage. `support_frac` and `branch_corr_frac` are
+  different quantities and the cuts move only the first -- see
+  [The ceiling](#the-ceiling-on-branch_corr_frac).
 
 ### What to watch
 
@@ -149,7 +308,7 @@ training starts.
 
 | metric | where | expected |
 |---|---|---|
-| `steerf/branch_corr_frac` | training log | 0.003 -> order 0.5 |
+| `steerf/branch_corr_frac` | training log | 0.003 -> a few thousandths, **not** 0.5; read `branch_corr_frac_strict` -- see [The ceiling](#the-ceiling-on-branch_corr_frac) |
 | `support_frac` | `[steerf-tree]` rollout log line | matches `expected_mean_siblings` design |
 | `refill_frac` | same line | < 0.1 |
 | `oov_dropped` | same line | small; see below |
