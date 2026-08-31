@@ -43,6 +43,7 @@ __all__ = [
     "oracle_h_togo",
     "sibling_support",
     "sibling_prefix_baseline",
+    "permute_a_h_within_siblings",
     "group_mean_baseline",
     "fit_head_calibration",
     "first_divergence",
@@ -345,6 +346,106 @@ def sibling_prefix_baseline(
         weights = sibling.to(vals.dtype)
         denom = weights.sum(dim=1).clamp_min(1.0)
         out[idx] = (weights * vals).sum(dim=1) / denom
+
+    return out * mask.to(out.dtype)
+
+
+def permute_a_h_within_siblings(
+    a_h: torch.Tensor,
+    responses: torch.Tensor,
+    mask: torch.Tensor,
+    group_index: Sequence,
+    generator: Optional[torch.Generator] = None,
+) -> torch.Tensor:
+    """Shuffle ``A_H`` among prefix-matched siblings.  The control arm.
+
+    ``branch_weight_correction(mode="signed")`` grades each rollout at a branch
+    point by its own ``A_H``.  Whether that helps because the *forecast values*
+    rank siblings usefully, or merely because *something* happens where
+    siblings exist, is not decided by any logged metric.  This function is the
+    control that decides it: it leaves every branch point, every magnitude and
+    the zero-centring intact, and destroys only the pairing between a rollout
+    and the forecast that was made for it.
+
+    Why ``A_H`` and not ``visit``.  ``visit = dlogpi_hat * clip(A_H)`` and
+    ``dlogpi_hat`` carries the rollout's own advantage and ``pi``.  Permuting
+    ``visit`` would preserve the multiset of corrections exactly, but it would
+    also scramble the advantage-to-rollout pairing, which is not part of the
+    claim under test.  Permuting ``A_H`` destroys the forecast pairing alone;
+    the cost is that ``delta`` matches signed's in distribution rather than
+    element for element, because ``dlogpi_hat`` differs across siblings.  That
+    residual is small next to what it replaces -- the ``mode="uniform"`` arm
+    mismatches signed's mean ``|delta|`` by a factor of ~15 (0.061 vs 0.004,
+    docs/STEERF_tree_rollout.md).
+
+    Why permuting at every ``t`` is the same as permuting at branch points.
+    "Shares ``y_<t``" is an equivalence relation on the rollouts of a group
+    that are alive at ``t`` (``response_mask`` is a prefix mask, so agreement
+    before ``t`` is transitive), and :func:`sibling_prefix_baseline` averages
+    over exactly one such class, so every member of a class subtracts the same
+    baseline.  Off a branch point the class members share ``y_t`` too, hence
+    share ``H_togo``, hence all have ``A_H == 0`` -- and permuting zeros among
+    themselves is the identity.  No branch-point detection is needed.
+
+    Two invariants follow and are what make this a control rather than a
+    different treatment:
+
+    * the class sum of ``A_H`` is exactly 0 by construction, so a permutation
+      cannot shift the branch tokens' mean weight -- the same property
+      ``mode="signed"`` has and ``mode="uniform"`` does not;
+    * within a class every member is nonzero or all are (near-)zero together,
+      so ``support`` -- which selects where ``delta`` lands *and* sets ``rms``
+      -- comes out identical.
+
+    Args:
+        a_h: ``[B, T]`` from :func:`entropy_advantage`.
+        responses: ``[B, T]`` token ids.
+        mask: ``[B, T]`` response mask.
+        group_index: length-``B`` prompt-group keys.
+        generator: seed the permutation explicitly.  Reading the global RNG
+            would make the arm depend on how much randomness everything else
+            consumed first, which is not reproducible across code changes.
+
+    Returns:
+        ``[B, T]``, zero outside ``mask``.
+    """
+    _check_bt(a_h, responses, mask, group_index)
+    t = a_h.shape[1]
+    out = a_h.clone()
+    device = a_h.device
+
+    for rows in _group_rows(group_index):
+        if len(rows) == 1:
+            continue  # no sibling to swap with
+        g = len(rows)
+        idx = torch.as_tensor(rows, dtype=torch.long, device=device)
+        m = mask[idx].bool()                                        # [g, T]
+        div = first_divergence(responses[idx], m)                   # [g, g]
+        positions = torch.arange(t, device=device).view(1, 1, t)
+        # Symmetric on purpose: sibling_prefix_baseline masks by the *other*
+        # rollout's aliveness alone, which is right for a weighted mean but
+        # would not be an equivalence relation, and a permutation needs one.
+        sib = div.unsqueeze(-1) > (positions - 1)                   # [g, g, T]
+        sib = sib & m.unsqueeze(0) & m.unsqueeze(1)
+        n = torch.arange(g, device=device)
+        sib[n, n, :] = m                                            # self, if alive
+
+        # torch.rand refuses a generator that lives on another device, and the
+        # batch may be on either, so draw where the generator is and move.
+        gen_device = generator.device if generator is not None else torch.device("cpu")
+        key = torch.rand((g, t), generator=generator, device=gen_device).to(device)
+        lower = key.unsqueeze(0) < key.unsqueeze(1)                 # [i, j, T]: key[j] < key[i]
+        # Equal keys have measure zero but are not impossible, and a tie would
+        # give two rows the same rank -- two rows would take one value and one
+        # would take none, which is not a permutation.  Break by index.
+        tied = (key.unsqueeze(0) == key.unsqueeze(1)) & (n.view(1, g, 1) < n.view(g, 1, 1))
+        before_rand = (sib & (lower | tied)).sum(dim=1)              # [g, T]
+        before_idx = (sib & (n.view(1, g, 1) < n.view(g, 1, 1))).sum(dim=1)
+
+        # row i takes the value of the class member whose random rank equals
+        # i's index rank; within a class both ranks run 0..k-1 exactly once.
+        match = sib & (before_rand.unsqueeze(0) == before_idx.unsqueeze(1))
+        out[idx] = (match.to(a_h.dtype) * a_h[idx].unsqueeze(0)).sum(dim=1)
 
     return out * mask.to(out.dtype)
 

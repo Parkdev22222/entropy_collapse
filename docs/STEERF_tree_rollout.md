@@ -167,11 +167,13 @@ entropy collapse, not anything about branches.
 | C5 corollary 1's "sibling futures are near-equally diverse" | **rejected** |
 | **the forecast is what produces the effect** | **unmeasured** — no logged metric bears on it |
 
-The last row is what `mode="uniform"` exists to settle: it uses the support and
-never `A_H`'s value, so a `uniform` run against a `signed` run at the same seed
-separates "the forecast ranks siblings usefully" from "branch points are worth
-attenuating at all". Until that is run, neither the method's claim nor a null
-result about it is supported by these logs.
+`mode="uniform"` was built to settle the last row and does not: it was run and
+turned out to differ from `signed` in *two* ways, not one — ~15x in mean
+`|delta|` and a mean-shift `signed` cannot produce (see "The three arms"). The
+arm that holds both fixed is `permuted` (`ARM=permuted`), which runs signed's
+own formula on an `A_H` shuffled among prefix-matched siblings. Until that is
+run, neither the method's claim nor a null result about it is supported by
+these logs.
 
 ### Options
 
@@ -179,15 +181,113 @@ result about it is supported by these logs.
    cost of comparing against rollouts that do not share the prefix — it stops
    controlling for "same state, different action", which is why the sibling
    baseline exists.
-2. `mode="uniform"` is the decisive control and is already implemented: it uses
-   only the *support*, never `A_H`'s value. If it matches `signed`, the
-   forecast is not carrying the effect.
+2. `permuted` (`ARM=permuted`) is the decisive control: same support, same
+   magnitude distribution, same zero-centring, and only the forecast-to-rollout
+   pairing destroyed. `uniform` answers a broader and blunter question — "is
+   attenuating branch points at all worth anything" — and cannot attribute the
+   effect, because it changes the intervention's size and sign structure too.
 3. Accept the sparsity and treat the visitation correction as a branch-point
    local quantity. This is the sharper claim and the one the measurements
    support.
 4. Not available: a sampler that makes the term dense.
 
 Reproduce the count with `scripts/measure_ah_support.py`.
+
+## The three arms
+
+`STEER-F` claims the MTP forecast's *values* rank siblings usefully. Nothing
+logged bears on that claim, so it is settled by control arms that run the same
+code path on a degraded `A_H`. All three compute the forecast, so `support`
+and the wall-clock are identical; only what happens to `delta` differs.
+
+| arm | `ARM=` | `delta` on the support |
+|---|---|---|
+| signed (treatment) | `signed` | `lam*band*tanh(visit/rms)` |
+| uniform | `uniform` | `-lam*band`, constant |
+| permuted | `permuted` | signed's formula on an `A_H` shuffled among prefix-matched siblings |
+
+### `uniform` is not magnitude-matched, and that was not visible in `max_abs`
+
+Measured over steps 10-40 of the paired tree runs:
+
+| step | 10 | 20 | 30 | 40 |
+|---|---|---|---|---|
+| signed `branch_corr_mean_abs` | 0.004 | 0.005 | 0.005 | 0.004 |
+| uniform `branch_corr_mean_abs` | 0.054 | 0.059 | 0.060 | 0.061 |
+
+A factor of ~15. `branch_corr_max_abs` reads `0.075 = lam*band` in *both* arms
+and hides it: that is a maximum over millions of tokens, and a single
+saturating `tanh` sets it. Reading it as "the correction is saturated" is
+wrong — signed's typical push is 1.7% of the band, not 25%.
+
+A second variable moves at the same time. `A_H` is a deviation from a mean over
+prefix-matched siblings, so it sums to zero within a sibling set *by
+construction*; signed therefore cannot shift the branch tokens' mean weight,
+only spread them. `uniform`'s constant `-lam*band` shifts that mean every time.
+
+With magnitude and mean-shift both differing, no `uniform` result attributes
+the effect: signed winning is equally consistent with "the values are
+informative" and with "a 15x heavier, mean-shifting intervention was harmful".
+
+`branch_corr_rms` was added so the mismatch is visible directly — it is the
+quantity that sets the variance the correction adds, and the one two arms must
+match on. `mean_abs` is the wrong target: signed's `delta` is heavy-tailed, so
+its rms is ~3.7x its mean.
+
+### `permuted` fixes both, for free
+
+`permute_a_h_within_siblings` shuffles `A_H` among the rollouts that share
+`y_<t`. "Shares `y_<t`" is an equivalence relation on the rollouts alive at `t`
+(`response_mask` is a prefix mask, so agreement before `t` is transitive), and
+`sibling_prefix_baseline` averages over exactly one such class, so:
+
+* the class sum of `A_H` is exactly 0, and a permutation preserves it —
+  **zero-centring kept**;
+* every class member is nonzero, or all are (near-)zero together, so
+  **`support` is kept exactly** — which matters because `support` also sets
+  `rms` and selects where `delta` lands;
+* the multiset of values within the class is kept, so **the magnitude
+  distribution is kept** without choosing a `lam` after the fact.
+
+Off a branch point the class members share `y_t`, hence share `H_togo`, hence
+all have `A_H == 0` — permuting zeros is the identity. So permuting at every
+`t` acts only at branch points; no branch detection is needed.
+
+Simulated on a realistic batch (`n=8`, `T=1005`, cuts `64/192/384`, `w` and
+`pi` varying per rollout):
+
+| arm | `frac` | `mean_abs` | `rms` | `max_abs` |
+|---|---|---|---|---|
+| signed | 0.0348 | 0.0044 | 0.0165 | 0.0750 |
+| **permuted** | **0.0348** | **0.0044** | **0.0165** | **0.0750** |
+| uniform | 0.0348 | 0.0750 | 0.0750 | 0.0750 |
+
+The one thing `permuted` destroys is which sibling owns which forecast.
+
+`A_H` is shuffled rather than `visit`: `visit = dlogpi_hat * clip(A_H)` and
+`dlogpi_hat` carries the rollout's own advantage and `pi`. Permuting `visit`
+would match `delta` element for element, but it would also scramble the
+advantage-to-rollout pairing, which is not part of the claim under test. The
+price is that `permuted` matches signed's magnitudes in distribution rather
+than exactly; the table above shows the residual is below the reported
+precision.
+
+### Reading it
+
+| result | conclusion |
+|---|---|
+| signed > permuted | the forecast's values rank siblings usefully. MTP heads, calibration and Phase 1 are justified. |
+| signed ≈ permuted | the values contribute nothing; the effect is the support alone. The method reduces to "attenuate branch points" — cheaper, and a different paper. |
+| permuted > signed | `A_H` points the wrong way. Hunt the sign. |
+
+Both comparisons are n=1 vs n=1. The `uniform` arm puts the noise floor of this
+setup at roughly ±0.015 on the validation metrics; do not call a difference
+smaller than that without more seeds.
+
+Verify the arm from its first steps — `steerf/permute_ah` must be 1.0,
+`steerf/apply_uniform` 0.0, and `branch_corr_mean_abs` must land on signed's
+0.004-0.006 rather than uniform's 0.061. If it reads 0.061 the arm is
+mis-wired and the run is worthless; stop it.
 
 ## The design
 
@@ -277,6 +377,23 @@ double quotes are for the shell, so the brackets survive globbing.
 `roots * prod(factors)` must equal `actor_rollout_ref.rollout.n`; it is checked
 at startup rather than discovered as a shape error mid-run.
 
+For the three arms, use `run/run_uniform_ablation.sh` instead of assembling the
+overrides by hand — it pins every other knob to the in-flight signed run, so
+the arms differ in `STEERF_APPLY`/`STEERF_PERMUTE_AH` and nothing else, and it
+refuses to start while another trainer holds the GPUs. The file name predates
+the `permuted` arm; the path is kept because the uniform run was launched
+through it.
+
+```bash
+DRY_RUN=1 ARM=permuted STEPS=110 bash run/run_uniform_ablation.sh   # print only
+ARM=permuted STEPS=110 bash run/run_uniform_ablation.sh             # ~47 h
+```
+
+`STEPS` must match the arm being compared against; the runner does not infer
+it. A permuted run gets its own `RUN_NAME` and checkpoint directory, and
+`run_steerf.sh` appends `-permAH` to any run name it builds itself, so a
+control can never overwrite the treatment's checkpoints.
+
 ### Choosing the depths
 
 The deepest cut has to sit inside the bulk of the response-length distribution,
@@ -314,6 +431,14 @@ training starts.
 | `oov_dropped` | same line | small; see below |
 | `steerf/adv_zero_frac` | training log | **watch for an increase** (see below) |
 | `response_length/mean` | training log | unchanged; the tree does not shorten responses |
+| `steerf/permute_ah` | training log | 1.0 only in the `permuted` arm; confirms which arm the log is |
+| `steerf/branch_corr_rms` | training log | must match between `signed` and `permuted`; `uniform` is ~4x higher |
+| `steerf/branch_corr_mean_abs` | training log | ~0.004-0.006 for `signed` and `permuted`, ~0.061 for `uniform` |
+
+Do **not** read `branch_corr_max_abs` as the size of the correction. It is
+`lam*band` in every arm — a maximum over millions of tokens, set by one
+saturating `tanh` — and reading it as saturation is what hid the `uniform`
+arm's 15x magnitude mismatch. Use `branch_corr_rms`.
 
 ### Tokens the tokenizer cannot represent
 

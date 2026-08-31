@@ -57,7 +57,7 @@ import torch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from steer_f.entropy_forecast import entropy_advantage  # noqa: E402
+from steer_f.entropy_forecast import entropy_advantage, permute_a_h_within_siblings  # noqa: E402
 from steer_f.monitors import _top_k_selection  # noqa: E402
 
 # Reported by the tree run this script explains: train-steer-f-Qwen2.5-Math-1.5B
@@ -155,6 +155,31 @@ def main() -> int:
 
     p = max(frac, 1e-12)
     sigma_live = args.a_h_std / p ** 0.5
+    print("\n" + "=" * 74)
+    print("permuted-A_H keeps everything the magnitude depends on")
+    print("=" * 74)
+    perm = permute_a_h_within_siblings(
+        a_h, responses, mask, group_index,
+        generator=torch.Generator().manual_seed(0),
+    )
+    same_support = bool(((a_h != 0) == (perm != 0)).all())
+    perm_cols = sorted(set((perm.abs() > 1e-4 * peak).any(dim=0).nonzero().flatten().tolist()))
+    col_sum_ok = torch.allclose(a_h.sum(dim=0), perm.sum(dim=0), atol=1e-6)
+    multiset_ok = all(
+        torch.allclose(a_h[:, t].sort().values, perm[:, t].sort().values, atol=1e-7)
+        for t in range(seq_len)
+    )
+    moved = int((a_h != perm).sum())
+    print(f"  support identical         {same_support}")
+    print(f"  live columns after perm   {perm_cols}")
+    print(f"  per-column multiset kept  {multiset_ok}")
+    print(f"  per-column sum kept (~0)  {col_sum_ok}")
+    print(f"  entries actually moved    {moved} of {n * seq_len}")
+    print("  -> same branch points, same magnitudes, same zero-centring;")
+    print("     only which sibling owns which forecast is destroyed.")
+    print("     `uniform` matches none of this: its delta is lam*band at every")
+    print("     supported position, ~15x signed's mean and mean-shifting.")
+
     print("\n" + "=" * 74)
     print("what the sparsity does NOT mean")
     print("=" * 74)

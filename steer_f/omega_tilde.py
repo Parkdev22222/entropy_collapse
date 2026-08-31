@@ -96,6 +96,11 @@ class SteerFConfig:
         winsor_q: tail fraction clamped at each end when ``mapping="winsor"``.
         baseline: ``"sibling"`` or ``"group"`` — see
             :func:`steer_f.entropy_forecast.entropy_advantage`.
+        permute_a_h: shuffle ``A_H`` among prefix-matched siblings before it is
+            used.  The control arm for "does the forecast's *value* matter, or
+            only where it is defined" — see
+            :func:`steer_f.entropy_forecast.permute_a_h_within_siblings`.
+            Never enable this for a treatment run.
         kappa / gamma_h: forecast horizon and discount.
         beta_mtp: weight of the MTP cross-entropy auxiliary loss.
         kl_drift_threshold: KL(policy || head-1) above which ``lam`` is halved.
@@ -110,6 +115,7 @@ class SteerFConfig:
     mapping: str = "minmax"
     winsor_q: float = 0.01
     baseline: str = "sibling"
+    permute_a_h: bool = False
     kappa: int = 4
     gamma_h: float = 0.85
     beta_mtp: float = 0.05
@@ -137,6 +143,18 @@ class SteerFConfig:
             raise ValueError(f"gamma_h must be > 0, got {self.gamma_h}")
 
         warnings: list[str] = []
+        if self.permute_a_h:
+            if self.lam == 0.0:
+                warnings.append(
+                    "permute_a_h=True with lam=0 does nothing: A_H is not consumed at all, "
+                    "so this is stock STEER under a misleading run name."
+                )
+            else:
+                warnings.append(
+                    "permute_a_h=True is a CONTROL arm -- A_H is shuffled among "
+                    "prefix-matched siblings, so the forecast's values are destroyed while "
+                    "its support and magnitude are kept. Never report this as a treatment."
+                )
         if self.norm == "z" and mode == "symmetric":
             warnings.append(
                 'norm="z" recentres the metric, but mode="symmetric" takes abs() of it, '
@@ -634,6 +652,16 @@ def branch_weight_correction(
     have siblings here" is answered by the rollout group alone.  If it matches
     ``signed``, the forecast is not carrying the effect.
 
+    Measured, ``uniform`` is not a magnitude-matched control: its ``delta`` is
+    ``lam * band`` at every supported position, while ``signed``'s ``tanh``
+    argument is typically far from saturation, so the two differ by ~15x in
+    mean ``|delta|`` (0.061 vs 0.004 at step 40 of the paired tree runs) *and*
+    ``uniform`` shifts the branch tokens' mean weight where ``signed`` cannot.
+    Two variables move at once, so neither outcome attributes the effect.
+    :func:`steer_f.entropy_forecast.permute_a_h_within_siblings` is the control
+    that holds both fixed -- it runs this same ``signed`` path on a permuted
+    ``A_H`` -- and ``branch_corr_rms`` below is what verifies the match.
+
     Args:
         token_weights: ``[B, T]`` output of STEER's mapping.
         visit: ``[B, T]`` ``dlogpi_hat * clip(A_H)``, the same quantity the
@@ -692,6 +720,12 @@ def branch_weight_correction(
     out = out * response_mask.float()
     stats["steerf/branch_corr_mean_abs"] = float(delta[support].abs().mean())
     stats["steerf/branch_corr_max_abs"] = float(delta[support].abs().max())
+    # `max_abs` is `lam * band` in both modes -- `uniform` by definition, and
+    # `signed` as soon as one token in millions saturates the tanh -- so it
+    # says nothing about how hard either arm actually pushes.  `rms` is what
+    # sets the variance the correction adds to the weights, and is therefore
+    # the quantity two arms have to match on to be comparable.
+    stats["steerf/branch_corr_rms"] = float(delta[support].float().pow(2).mean().sqrt())
     return out, stats
 
 

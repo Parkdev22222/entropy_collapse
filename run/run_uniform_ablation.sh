@@ -8,47 +8,61 @@
 #     http://www.apache.org/licenses/LICENSE-2.0
 #
 # ---------------------------------------------------------------------------
-# The one experiment that decides whether the forecast is doing anything.
+# The experiment that decides whether the forecast is doing anything.
 #
-# `branch_weight_correction` has two modes and the difference is the whole
-# claim:
+# Three arms, all on the same code path, all computing the MTP forecast, so
+# `support` and the wall-clock are identical across them:
 #
-#   signed  (STEERF_APPLY=weight)  delta = lam*band*tanh(visit/rms)
-#                                  uses A_H's VALUE to rank siblings
-#   uniform (STEERF_APPLY=branch)  delta = -lam*band  on the same support
-#                                  uses only WHERE A_H is defined, never its value
+#   signed   ARM=signed    delta = lam*band*tanh(visit/rms)
+#                          uses A_H's VALUE to rank siblings.  The treatment.
+#   uniform  ARM=uniform   delta = -lam*band  on the same support
+#                          uses only WHERE A_H is defined, never its value.
+#   permuted ARM=permuted  signed's delta, computed from an A_H shuffled among
+#                          prefix-matched siblings.  Same support, same
+#                          magnitude distribution, same zero-centring; the only
+#                          thing destroyed is which sibling owns which forecast.
 #
-# Both compute the MTP forecast, so `support` and the wall-clock are identical;
-# the only thing that changes is whether the forecast's numbers are read. From
-# omega_tilde.py's own docstring:
+# `uniform` was run first and turned out NOT to be magnitude-matched: measured
+# over steps 10-40 of the paired tree runs its mean |delta| is 0.061 against
+# signed's 0.004, a factor of ~15, and it also shifts the branch tokens' mean
+# weight where signed provably cannot (A_H is zero-centred within a sibling
+# set by construction).  `branch_corr_max_abs` reads 0.075 = lam*band in both
+# arms, which hid this -- that is a max over millions of tokens, and one
+# saturating tanh sets it.  With two variables moving at once, no uniform
+# result attributes the effect, which is why `permuted` exists.
 #
-#     "it needs no forecast, no MTP heads and no Phase 1, because 'does this
-#      rollout still have siblings here' is answered by the rollout group
-#      alone. If it matches `signed`, the forecast is not carrying the effect."
+# Why an arm and not more seeds: no logged metric bears on the question.
+# `branch_recall` is pinned at ~0.5 by the sign of a zero-centred score (pure
+# noise scores 0.49 -- scripts/measure_ah_support.py), and
+# `branch_entropy_gap` selects the same decile.  Adding seeds now measures an
+# arm whose mechanism is unidentified.
 #
-# Why this is the next run and not seeds or baseline=group: no logged metric
-# bears on the question. `branch_recall` is pinned at ~0.5 by the sign of a
-# zero-centred score (pure noise scores 0.49 -- scripts/measure_ah_support.py),
-# and `branch_entropy_gap` selects the same decile. Adding seeds now measures
-# an arm whose mechanism is unidentified.
+# Reading signed vs permuted -- the comparison that decides the paper:
+#   signed  >  permuted -> the forecast's VALUES rank siblings usefully. The
+#                          MTP heads, the calibration and Phase 1 are
+#                          justified. First direct evidence for the claim.
+#   signed  ~= permuted -> the values contribute nothing; the effect comes
+#                          from the support alone. The method reduces to
+#                          "attenuate branch points" -- cheaper, and a
+#                          different paper.
+#   permuted >  signed  -> A_H points the wrong way. Hunt the sign.
 #
-# Reading it:
-#   uniform ~= signed  -> the forecast contributes nothing. The MTP heads,
-#                         the calibration and Phase 1 are all unjustified, and
-#                         the method reduces to "attenuate branch points",
-#                         which is a cleaner and much cheaper claim.
-#   signed  >  uniform -> the forecast ranks siblings usefully. That is the
-#                         first direct evidence for it.
-#   uniform >  signed  -> A_H's values are actively misleading.
+# Both comparisons are n=1 vs n=1. The uniform arm puts the noise floor of
+# this setup at roughly +-0.015 on the val metrics; do not call a difference
+# smaller than that.
 #
 # Every knob below is pinned to the in-flight signed run
 # (steer-f-Qwen2.5-Math-1.5B-s1-tree-rollout, read off its log) so the two arms
 # differ in STEERF_APPLY and nothing else.
 #
 # Usage
+#   ARM=permuted bash run/run_uniform_ablation.sh    # the arm that decides it
 #   bash run/run_uniform_ablation.sh                 # the uniform arm
-#   ARM=signed bash run/run_uniform_ablation.sh      # re-run the control
-#   DRY_RUN=1 bash run/run_uniform_ablation.sh       # print the command only
+#   ARM=signed bash run/run_uniform_ablation.sh      # re-run the treatment
+#   DRY_RUN=1 ARM=permuted bash run/run_uniform_ablation.sh   # print only
+#
+# The file name predates the permuted arm; the path is kept because the
+# in-flight uniform run was launched through it.
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
@@ -57,9 +71,10 @@ STEER_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 ARM=${ARM:-uniform}
 case "${ARM}" in
-    uniform) APPLY=branch ;;
-    signed)  APPLY=weight ;;
-    *) echo "ARM must be 'uniform' or 'signed', got '${ARM}'" >&2; exit 2 ;;
+    uniform)  APPLY=branch; PERM=0 ;;
+    signed)   APPLY=weight; PERM=0 ;;
+    permuted) APPLY=weight; PERM=1 ;;
+    *) echo "ARM must be 'uniform', 'signed' or 'permuted', got '${ARM}'" >&2; exit 2 ;;
 esac
 
 # ---- matched to the in-flight signed run; change these only in pairs --------
@@ -81,8 +96,9 @@ export STEERF_HEADS=${STEERF_HEADS:-${STEER_ROOT}/checkpoints/mtp_heads_Qwen2.5-
 export STEERF_CALIB=${STEERF_CALIB:-${STEER_ROOT}/checkpoints/mtp_calibration_Qwen2.5-Math-1.5B-paper.json}
 export RESUME_MODE=${RESUME_MODE:-auto}
 
-# the one line under test
+# the two lines under test
 export STEERF_APPLY=${APPLY}
+export STEERF_PERMUTE_AH=${PERM}
 
 TREE_DEPTHS=${TREE_DEPTHS:-64,192,384}
 TREE_FACTORS=${TREE_FACTORS:-2,2,2}
@@ -138,7 +154,7 @@ fi
 mkdir -p "${LOG_DIR}"
 
 echo "=============================================================="
-echo " arm            ${ARM}   (STEERF_APPLY=${STEERF_APPLY})"
+echo " arm            ${ARM}   (STEERF_APPLY=${STEERF_APPLY} STEERF_PERMUTE_AH=${STEERF_PERMUTE_AH})"
 echo " run name       ${RUN_NAME}"
 echo " control        steer-f-Qwen2.5-Math-1.5B-s${SEED}-tree-rollout"
 echo " lam/kappa/g_H  ${STEERF_LAM} / ${STEERF_KAPPA} / ${STEERF_GAMMA_H}"
@@ -161,7 +177,8 @@ ARGS=(
 
 if [ "${DRY_RUN:-0}" = "1" ]; then
     echo "DRY RUN — would execute:"
-    printf '  STEERF_APPLY=%s RUN_NAME=%s bash run/run_steerf.sh \\\n' "${STEERF_APPLY}" "${RUN_NAME}"
+    printf '  STEERF_APPLY=%s STEERF_PERMUTE_AH=%s RUN_NAME=%s bash run/run_steerf.sh \\\n' \
+        "${STEERF_APPLY}" "${STEERF_PERMUTE_AH}" "${RUN_NAME}"
     printf '      %s \\\n' "${ARGS[@]}"
     echo "  > ${LOG} 2>&1"
     exit 0
@@ -176,7 +193,8 @@ bash "${STEER_ROOT}/run/run_steerf.sh" "${ARGS[@]}" > "${LOG}" 2>&1 || status=$?
 
 echo "[${ARM}] exit ${status} -> ${LOG}"
 grep -m2 "steerf-tree" "${LOG}" || true
-for k in branch_corr_frac branch_corr_frac_strict branch_corr_mean_abs tw_std twg_std; do
+for k in permute_ah branch_corr_frac branch_corr_frac_strict branch_corr_mean_abs \
+         branch_corr_rms branch_corr_max_abs tw_std twg_std; do
     printf '  %-24s %s\n' "${k}" "$(grep -o "steerf/${k}:[0-9.]*" "${LOG}" | tail -1)"
 done
 echo

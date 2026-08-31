@@ -15,6 +15,7 @@ from steer_f.entropy_forecast import (  # noqa: E402
     fit_head_calibration,
     group_mean_baseline,
     h_togo,
+    permute_a_h_within_siblings,
     sibling_prefix_baseline,
 )
 
@@ -347,3 +348,135 @@ def test_oracle_a_h_is_zero_without_siblings():
     h = oracle_h_togo(torch.rand(1, 4), mask, kappa=2, gamma_h=0.85)
     a = entropy_advantage(h, ["p"], mask, responses=responses, baseline="sibling")
     assert torch.all(a == 0)
+
+
+# ----------------------------------------------------------------------
+# permute_a_h_within_siblings -- the control arm
+#
+# The arm is only a control if it destroys the forecast-to-rollout pairing and
+# nothing else, so every invariant it has to keep is asserted here rather than
+# read off a training log 47 GPU-hours later.
+# ----------------------------------------------------------------------
+def _tree_batch(n=8, cuts=(3, 6), T=10):
+    """n rollouts sharing a prefix, splitting at each cut. Returns (resp, mask, h)."""
+    resp = torch.zeros(n, T, dtype=torch.long)
+    for i in range(n):
+        path = [(i >> (len(cuts) - 1 - k)) & 1 for k in range(len(cuts))]
+        for p in range(T):
+            depth = sum(1 for c in cuts if p >= c)
+            resp[i, p] = 1000 * p + int("".join(map(str, path[:depth])) or "0", 2)
+    mask = torch.ones(n, T)
+    # H_togo is a deterministic function of the causal prefix, as it is in the
+    # real forecast -- that is what makes A_H vanish away from a cut.
+    h = torch.zeros(n, T)
+    for i in range(n):
+        for p in range(T):
+            key = tuple(resp[i, : p + 1].tolist())
+            h[i, p] = (abs(hash(key)) % 10_000) / 10_000.0
+    return resp, mask, h
+
+
+def _a_h_tree(**kw):
+    resp, mask, h = _tree_batch(**kw)
+    uid = ["g"] * resp.shape[0]
+    a_h = entropy_advantage(h, group_index=uid, mask=mask,
+                            responses=resp, baseline="sibling")
+    return a_h, resp, mask, uid
+
+
+def test_permute_preserves_the_multiset_of_a_h():
+    a_h, resp, mask, uid = _a_h_tree()
+    got = permute_a_h_within_siblings(
+        a_h, resp, mask, uid, generator=torch.Generator().manual_seed(0))
+    # column by column: a sibling class never spans two positions
+    for t in range(a_h.shape[1]):
+        assert torch.allclose(a_h[:, t].sort().values, got[:, t].sort().values, atol=1e-7)
+
+
+def test_permute_preserves_the_support():
+    """`support` sets rms AND where delta lands, so it must survive exactly."""
+    a_h, resp, mask, uid = _a_h_tree()
+    got = permute_a_h_within_siblings(
+        a_h, resp, mask, uid, generator=torch.Generator().manual_seed(1))
+    assert bool(((a_h != 0) == (got != 0)).all())
+
+
+def test_permute_preserves_the_zero_centring():
+    """A_H sums to 0 over a sibling class; a permutation cannot shift the mean."""
+    a_h, resp, mask, uid = _a_h_tree()
+    got = permute_a_h_within_siblings(
+        a_h, resp, mask, uid, generator=torch.Generator().manual_seed(2))
+    assert torch.allclose(a_h.sum(dim=0), got.sum(dim=0), atol=1e-6)
+
+
+def test_permute_actually_moves_values():
+    """A control that silently no-ops would look like a perfect replication."""
+    a_h, resp, mask, uid = _a_h_tree()
+    got = permute_a_h_within_siblings(
+        a_h, resp, mask, uid, generator=torch.Generator().manual_seed(0))
+    assert not torch.allclose(a_h, got)
+    assert int((a_h != got).sum()) > 0
+
+
+def test_permute_only_touches_branch_columns():
+    """Off a cut, siblings share y_t, so A_H is 0 for all of them and the
+    permutation is the identity on zeros -- no branch detection needed."""
+    a_h, resp, mask, uid = _a_h_tree(cuts=(3, 6))
+    got = permute_a_h_within_siblings(
+        a_h, resp, mask, uid, generator=torch.Generator().manual_seed(0))
+    changed = sorted(set((a_h != got).nonzero()[:, 1].tolist()))
+    assert changed and set(changed).issubset({3, 6})
+
+
+def test_permute_is_identity_without_siblings():
+    a_h = torch.tensor([[0.3, -0.2, 0.5]])
+    resp = torch.tensor([[1, 2, 3]])
+    mask = torch.ones(1, 3)
+    got = permute_a_h_within_siblings(a_h, resp, mask, ["only"])
+    assert torch.equal(got, a_h)
+
+
+def test_permute_is_zero_outside_the_mask():
+    a_h, resp, mask, uid = _a_h_tree()
+    mask[:, 7:] = 0.0
+    a_h = a_h * mask
+    got = permute_a_h_within_siblings(
+        a_h, resp, mask, uid, generator=torch.Generator().manual_seed(3))
+    assert bool((got[:, 7:] == 0).all())
+
+
+def test_permute_is_reproducible_from_the_generator_alone():
+    a_h, resp, mask, uid = _a_h_tree()
+    first = permute_a_h_within_siblings(
+        a_h, resp, mask, uid, generator=torch.Generator().manual_seed(7))
+    torch.rand(1000)  # ambient RNG moves; the arm must not
+    second = permute_a_h_within_siblings(
+        a_h, resp, mask, uid, generator=torch.Generator().manual_seed(7))
+    assert torch.equal(first, second)
+
+
+def test_permute_does_not_leak_across_prompt_groups():
+    a_h, resp, mask, _ = _a_h_tree()
+    uid = ["a"] * 4 + ["b"] * 4
+    got = permute_a_h_within_siblings(
+        a_h, resp, mask, uid, generator=torch.Generator().manual_seed(4))
+    for rows in ([0, 1, 2, 3], [4, 5, 6, 7]):
+        assert torch.allclose(a_h[rows].sum(dim=0), got[rows].sum(dim=0), atol=1e-6)
+
+
+def test_compute_a_h_is_unchanged_when_the_arm_is_off():
+    """Regression guard: the treatment path must be bit-identical."""
+    from steer_f.omega_tilde import SteerFConfig
+    from steer_f.verl_integration import compute_a_h
+
+    _, resp, mask, uid = _a_h_tree()
+    _, _, h = _tree_batch()
+    plain = compute_a_h(h, resp, mask, uid, SteerFConfig(lam=0.25))
+    direct = entropy_advantage(h.float(), group_index=uid, mask=mask,
+                               responses=resp, baseline="sibling")
+    assert torch.equal(plain, direct)
+
+    shuffled = compute_a_h(h, resp, mask, uid,
+                           SteerFConfig(lam=0.25, permute_a_h=True),
+                           generator=torch.Generator().manual_seed(0))
+    assert not torch.equal(shuffled, direct)

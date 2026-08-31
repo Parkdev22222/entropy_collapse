@@ -1227,9 +1227,17 @@ class RayPPOTrainer:
                             from steer_f.omega_tilde import SteerFConfig
                             from steer_f.verl_integration import compute_a_h
 
+                            # hydra hands this over as 0/1, True/False or the
+                            # shell's "0"/"1" string depending on how it was
+                            # overridden; bool("0") is True, so parse by value.
+                            _sf_perm_raw = steerf_cfg_src.get("steerf_permute_ah", 0)
+                            _sf_perm = str(_sf_perm_raw).strip().lower() in (
+                                "1", "true", "yes", "on",
+                            )
                             steerf_cfg = SteerFConfig(
                                 lam=_sf_lam,
                                 baseline=str(steerf_cfg_src.get("steerf_baseline", "sibling")),
+                                permute_a_h=_sf_perm,
                             )
                             if _sf_oracle:
                                 # The control arm: no heads, no forecast, no extra
@@ -1243,12 +1251,24 @@ class RayPPOTrainer:
                                 )
                             else:
                                 _h_togo = old_log_prob.batch["h_togo"]
+                            # Seeded per step, not from the ambient RNG: the
+                            # permuted-A_H control has to be reproducible from
+                            # (seed, step) alone, or a rerun after any unrelated
+                            # code change draws a different shuffle.
+                            _sf_gen = None
+                            if _sf_perm:
+                                _sf_gen = torch.Generator()
+                                _sf_gen.manual_seed(
+                                    int(self.config.data.get("seed", 1)) * 1_000_003
+                                    + int(self.global_steps)
+                                )
                             a_h = compute_a_h(
                                 h_togo_vals=_h_togo,
                                 responses=batch.batch["responses"],
                                 response_mask=response_masks,
                                 uid=batch.non_tensor_batch["uid"],
                                 cfg=steerf_cfg,
+                                generator=_sf_gen,
                             )
                             batch.batch["a_h"] = a_h
                             # Without `support` this statistic scores the region
@@ -1273,6 +1293,7 @@ class RayPPOTrainer:
                                     _h_togo[response_masks.bool()].mean()
                                 ),
                                 "steerf/forecast_oracle": float(_sf_oracle),
+                                "steerf/permute_ah": float(_sf_perm),
                                 "steerf/a_h_abs_mean": float(a_h[response_masks.bool()].abs().mean()),
                                 "steerf/branch_recall": recall["recall"],
                                 "steerf/branch_lift": recall["lift"],

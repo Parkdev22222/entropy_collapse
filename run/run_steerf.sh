@@ -66,6 +66,7 @@ STEERF_CLIP_C=${STEERF_CLIP_C:-1.0}
 STEERF_NORM=${STEERF_NORM:-scale}
 STEERF_BASELINE=${STEERF_BASELINE:-sibling}   # or: group   (ablation A5)
 STEERF_APPLY=${STEERF_APPLY:-weight}          # metric | weight | branch
+STEERF_PERMUTE_AH=${STEERF_PERMUTE_AH:-0}     # 1 = shuffle A_H among siblings (CONTROL arm)
 STEERF_MAPPING=${STEERF_MAPPING:-minmax}      # minmax | winsor | rank
 STEERF_WINSOR_Q=${STEERF_WINSOR_Q:-0.01}
 STEERF_FORECAST=${STEERF_FORECAST:-mtp}       # mtp | oracle (free control arm)
@@ -166,7 +167,11 @@ export WANDB_MAX_RETRIES=10
 save_contents=${SAVE_CONTENTS:-"['hf_model']"}
 RESUME_MODE=${RESUME_MODE:-disable}
 current_datetime=$(date +"%Y%m%d_%H%M%S")
-run_name=${RUN_NAME:-"STEERF-${SCALE}-${model_tag}-lam${STEERF_LAM}-k${STEERF_KAPPA}-g${STEERF_GAMMA_H}-${STEERF_APPLY}-${STEERF_MAPPING}_${current_datetime}"}
+# A permuted run is a different arm, not a rerun: keep it out of the treatment's
+# checkpoint directory and make the log name say which one it was.
+perm_tag=""
+if [ "${STEERF_PERMUTE_AH}" = "1" ]; then perm_tag="-permAH"; fi
+run_name=${RUN_NAME:-"STEERF-${SCALE}-${model_tag}-lam${STEERF_LAM}-k${STEERF_KAPPA}-g${STEERF_GAMMA_H}-${STEERF_APPLY}${perm_tag}-${STEERF_MAPPING}_${current_datetime}"}
 
 train_files="['$train_path']"
 test_files="['$test_path']"
@@ -203,6 +208,7 @@ python3 -m verl.trainer.main_ppo \
     ++actor_rollout_ref.actor.policy_loss.steerf_norm=${STEERF_NORM} \
     ++actor_rollout_ref.actor.policy_loss.steerf_baseline=${STEERF_BASELINE} \
     ++actor_rollout_ref.actor.policy_loss.steerf_apply=${STEERF_APPLY} \
+    ++actor_rollout_ref.actor.policy_loss.steerf_permute_ah=${STEERF_PERMUTE_AH} \
     ++actor_rollout_ref.actor.policy_loss.steerf_mapping=${STEERF_MAPPING} \
     ++actor_rollout_ref.actor.policy_loss.steerf_winsor_q=${STEERF_WINSOR_Q} \
     ++actor_rollout_ref.actor.policy_loss.steerf_forecast=${STEERF_FORECAST} \

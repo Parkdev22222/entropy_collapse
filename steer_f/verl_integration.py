@@ -37,7 +37,12 @@ from typing import Optional, Sequence
 
 import torch
 
-from .entropy_forecast import HeadCalibration, entropy_advantage, h_togo
+from .entropy_forecast import (
+    HeadCalibration,
+    entropy_advantage,
+    h_togo,
+    permute_a_h_within_siblings,
+)
 from .omega_tilde import SteerFConfig
 
 __all__ = ["slice_response_hidden", "forecast_h_togo", "compute_a_h"]
@@ -122,6 +127,7 @@ def compute_a_h(
     response_mask: torch.Tensor,
     uid: Sequence,
     cfg: SteerFConfig,
+    generator: Optional[torch.Generator] = None,
 ) -> torch.Tensor:
     """``A_H`` for a full rollout batch, ready to drop into ``batch.batch["a_h"]``.
 
@@ -132,7 +138,10 @@ def compute_a_h(
         response_mask: ``[B, T]``.
         uid: ``batch.non_tensor_batch["uid"]`` — the prompt-group key verl
             already uses for GRPO advantages.
-        cfg: supplies ``baseline``.
+        cfg: supplies ``baseline`` and ``permute_a_h``.
+        generator: only read when ``cfg.permute_a_h`` -- seed it per step so the
+            control arm is reproducible instead of depending on how much
+            randomness the rest of the step happened to consume.
 
     Returns:
         ``[B, T]`` float32, unclipped (``compute_token_weights_steerf`` clips).
@@ -141,10 +150,17 @@ def compute_a_h(
         raise ValueError(
             f"h_togo {tuple(h_togo_vals.shape)} != responses {tuple(responses.shape)}"
         )
-    return entropy_advantage(
+    a_h = entropy_advantage(
         h_togo_vals.float(),
         group_index=uid,
         mask=response_mask,
         responses=responses,
         baseline=cfg.baseline,
     )
+    if getattr(cfg, "permute_a_h", False):
+        # Control arm. Keeps the support, the magnitudes and the zero-centring
+        # of A_H; destroys only which sibling each forecast belongs to.
+        a_h = permute_a_h_within_siblings(
+            a_h, responses, response_mask, uid, generator=generator
+        )
+    return a_h
