@@ -1,0 +1,460 @@
+diff --git a/docs/STEERF_renyi2.md b/docs/STEERF_renyi2.md
+new file mode 100644
+index 0000000..828046d
+--- /dev/null
++++ b/docs/STEERF_renyi2.md
+@@ -0,0 +1,85 @@
++# `entropy_kind="renyi2"` — 꼬리에 면역인 A_H (ablation arm)
++
++## 왜
++
++`A_H`의 판별 대상은 **형제 간 미래 다양성의 차이**인데, Shannon 엔트로피는 그
++차이를 꼬리 질량이 지배한다. 해석적 예시(상위 토큰 q, 잔여를 m개에 균등):
++
++| 분포 | Shannon | Rényi-2 | 실효 선택지 `1/Σp²` |
++|---|---|---|---|
++| q=0.9, 실질 대안 2개 | 0.396 | 0.205 | 1.23 |
++| q=0.9, 실질 대안 1000개 (각 1e-4) | **1.017** | 0.211 | 1.23 |
++| q=0.5, 실질 대안 2개 | 1.049 | 0.981 | 2.67 |
++
++절대 뽑히지 않을 1000개의 1e-4 토큰이 Shannon을 2.5배 벌리고, Rényi-2는
++무시한다. 형제 판별 과제로 재면: 머리는 같고 꼬리만 다른 두 형제의 차이를
++Shannon은 0.62로, Rényi-2는 0.006으로 읽고, 실질 선택지 수가 다른 두 형제는
++0.82 vs 0.89 — 신호 대 꼬리잡음이 **약 1.3:1 vs 146:1**. 학습 로그의
++`a_h_std=0.009` (h_togo 수준 대비 2.6%)의 유력한 원인이 정확히 이 공통
++꼬리이며, 이 arm이 그 가설을 검정한다.
++
++## 무엇이 바뀌나 (스위치 하나, 기본값은 stock)
++
++`STEERF_ENTROPY_KIND=renyi2` (hydra: `policy_loss.steerf_entropy_kind`).
++기본 `shannon`이면 **모든 코드 경로가 기존과 비트 동일**하다.
++
++켰을 때 바뀌는 것 — MTP 헤드가 내놓는 예측 분포에서 읽는 **함수** 하나:
++
++    H_shannon = lse(l) − <softmax(l), l>
++    H_renyi2  = −log Σ p²  =  2·lse(l) − lse(2l)      (steer_f/mtp_heads.py)
++
++항등식은 2000회 랜덤 로짓(스케일 1..1000, 오프셋 ±1e4)에서 직접 계산과
++1e-9 이내 일치, shift 불변, `0 ≤ H₂ ≤ H_shannon` 확인됨.
++
++바뀌지 **않는** 것:
++- 헤드 자체 (CE로 학습되므로 kind 무관 — 재학습 불필요)
++- `Ω`, verl의 `entropys`, `actor/entropy` 로깅 — 전부 Shannon 유지
++- `steerf_forecast=oracle` — verl의 Shannon `entropys`를 읽는 경로라
++  renyi2와의 조합은 **하드 에러** (ray_trainer가 거부)
++
++## 반드시 할 것: 캘리브레이션 재적합
++
++scale/bias는 "예보 엔트로피 → 실측 엔트로피"의 아핀 적합이다. Shannon으로
++적합한 것을 Rényi-2 값에 적용하면 수치적으로 무의미하므로:
++
++    python scripts/phase1_validate.py ... --entropy-kind renyi2 --calibrate
++
++가 `calibration` dict에 `"entropy_kind": "renyi2"`를 **스탬프**하고
++(warmup_and_validate.sh가 그 dict를 그대로 mtp_calibration_*.json으로 추출),
++학습 시작 시 dp_actor가 스탬프와 `steerf_entropy_kind`의 불일치를 하드
++에러로 거부한다. 스탬프 없는 기존 파일은 `shannon`으로 간주된다.
++`phase1_branch_recall.py --entropy-kind`도 같은 검사를 한다.
++
++(κ, γ_H) 선택도 같은 실행에서 다시 나온다 — C6의 스케일 붕괴(a₂≈0.13,
++유효 지평 1스텝)가 Rényi-2에서 어떻게 달라지는지가 이 arm의 1차 관측값이다.
++
++## 이론 주의 (논문에 쓸 때)
++
++C5의 [정확] 등급은 연쇄법칙 `H_traj = E[Σ H]`에서 오고 **그 등식은 Shannon
++전용**이다. Rényi-2는 가법적으로 분해되지 않으므로, 이 arm에서 방문 항은
++"유도된 보정"이 아니라 **꼬리에 강건한 대리(proxy)**다. C6의 과대추정
++항등식(초과분 = 상호정보량)도 Shannon 전용이며, Rényi-2에서는 Jensen에 의해
++충돌확률 영역(`exp(−H₂)`)에서만 같은 방향이 보장된다. 두 사실 모두
++`SteerFConfig.validate()`가 경고로 출력한다. 논문에는 "Shannon 유도 + 꼬리
++강건화 ablation"으로 표시할 것 — Rényi-2로 C5를 재유도하기 전까지는.
++
++## 실행
++
++    # 재적합 (한 번)
++    python scripts/phase1_validate.py --model ... --heads ... \
++        --problems ... --out docs/phase1_results_..._renyi2.json \
++        --entropy-kind renyi2 --calibrate
++    # calibration dict를 checkpoints/mtp_calibration_..._renyi2.json 로 추출 후:
++
++    STEERF_ENTROPY_KIND=renyi2 \
++    STEERF_CALIB=checkpoints/mtp_calibration_..._renyi2.json \
++    bash run/run_steerf.sh
++
++run name에 `-renyi2` 태그가 자동으로 붙는다 (shannon일 땐 기존 이름 그대로).
++
++## 판정 기준
++
++- `steerf/a_h_abs_mean`·`a_h_std`가 Shannon 대비 유의하게 커지면 → 꼬리
++  가설 확인, F 항이 처음으로 실질 신호를 받음
++- 그대로면 → 꼬리가 원인이 아님: 형제 미래가 실제로 고르다는 쪽
++  (`phase1_sibling_spread.py` Part A와 교차 확인)
+diff --git a/run/run_steerf.sh b/run/run_steerf.sh
+index 95ed148..049bbd4 100644
+--- a/run/run_steerf.sh
++++ b/run/run_steerf.sh
+@@ -69,6 +69,7 @@ STEERF_APPLY=${STEERF_APPLY:-weight}          # metric | weight | branch
+ STEERF_MAPPING=${STEERF_MAPPING:-minmax}      # minmax | winsor | rank
+ STEERF_WINSOR_Q=${STEERF_WINSOR_Q:-0.01}
+ STEERF_FORECAST=${STEERF_FORECAST:-mtp}       # mtp | oracle (free control arm)
++STEERF_ENTROPY_KIND=${STEERF_ENTROPY_KIND:-shannon}  # shannon | renyi2 (calib must match; oracle is shannon-only)
+ STEERF_HEADS=${STEERF_HEADS:-${STEER_ROOT}/checkpoints/mtp_heads_${model_tag}${SCALE:+-${SCALE}}.pt}
+ STEERF_CALIB=${STEERF_CALIB:-${STEER_ROOT}/checkpoints/mtp_calibration_${model_tag}${SCALE:+-${SCALE}}.json}
+ 
+@@ -166,7 +167,9 @@ export WANDB_MAX_RETRIES=10
+ save_contents=${SAVE_CONTENTS:-"['hf_model']"}
+ RESUME_MODE=${RESUME_MODE:-disable}
+ current_datetime=$(date +"%Y%m%d_%H%M%S")
+-run_name=${RUN_NAME:-"STEERF-${SCALE}-${model_tag}-lam${STEERF_LAM}-k${STEERF_KAPPA}-g${STEERF_GAMMA_H}-${STEERF_APPLY}-${STEERF_MAPPING}_${current_datetime}"}
++KIND_TAG=""
++[ "${STEERF_ENTROPY_KIND}" != "shannon" ] && KIND_TAG="-${STEERF_ENTROPY_KIND}"
++run_name=${RUN_NAME:-"STEERF-${SCALE}-${model_tag}-lam${STEERF_LAM}-k${STEERF_KAPPA}-g${STEERF_GAMMA_H}-${STEERF_APPLY}-${STEERF_MAPPING}${KIND_TAG}_${current_datetime}"}
+ 
+ train_files="['$train_path']"
+ test_files="['$test_path']"
+@@ -206,6 +209,7 @@ python3 -m verl.trainer.main_ppo \
+     ++actor_rollout_ref.actor.policy_loss.steerf_mapping=${STEERF_MAPPING} \
+     ++actor_rollout_ref.actor.policy_loss.steerf_winsor_q=${STEERF_WINSOR_Q} \
+     ++actor_rollout_ref.actor.policy_loss.steerf_forecast=${STEERF_FORECAST} \
++    ++actor_rollout_ref.actor.policy_loss.steerf_entropy_kind=${STEERF_ENTROPY_KIND} \
+     ++actor_rollout_ref.actor.policy_loss.steerf_heads_path=${STEERF_HEADS} \
+     ++actor_rollout_ref.actor.policy_loss.steerf_calib_path=${STEERF_CALIB} \
+     actor_rollout_ref.model.enable_gradient_checkpointing=True \
+diff --git a/scripts/phase1_branch_recall.py b/scripts/phase1_branch_recall.py
+index 7e63668..a51d225 100644
+--- a/scripts/phase1_branch_recall.py
++++ b/scripts/phase1_branch_recall.py
+@@ -74,6 +74,8 @@ def build_argparser():
+                    help="docs/phase1_results.json — supplies rho for the joint verdict")
+     p.add_argument("--kappa", type=int, default=4)
+     p.add_argument("--gamma-h", type=float, default=0.85)
++    p.add_argument("--entropy-kind", default="shannon", choices=["shannon", "renyi2"],
++                   help="must match the kind the calibration was fitted on")
+     p.add_argument("--baseline", default="sibling", choices=["sibling", "group"])
+     p.add_argument("--top-frac", type=float, default=0.1)
+     p.add_argument("--no-restrict-to-support", dest="restrict_to_support",
+@@ -143,6 +145,11 @@ def main(argv=None):
+     calib = None
+     if args.calib and Path(args.calib).exists():
+         d = json.loads(Path(args.calib).read_text())
++        calib_kind = str(d.get("entropy_kind", "shannon"))
++        if calib_kind != args.entropy_kind:
++            sys.exit(f"[recall] --entropy-kind {args.entropy_kind} but {args.calib} was "
++                     f"fitted on {calib_kind!r} entropies — refit with phase1_validate.py "
++                     f"--entropy-kind {args.entropy_kind} --calibrate.")
+         calib = HeadCalibration(
+             scale=torch.tensor(d["scale"]),
+             bias=torch.tensor(d["bias"]),
+@@ -152,7 +159,8 @@ def main(argv=None):
+     else:
+         print("[recall] no calibration — distant heads are biased upward (ablation A6)")
+ 
+-    cfg = SteerFConfig(kappa=args.kappa, gamma_h=args.gamma_h, baseline=args.baseline)
++    cfg = SteerFConfig(kappa=args.kappa, gamma_h=args.gamma_h, baseline=args.baseline,
++                       entropy_kind=args.entropy_kind)
+ 
+     groups = load_groups(args.rollouts, args.min_group_size, args.max_groups)
+     if not groups:
+diff --git a/scripts/phase1_validate.py b/scripts/phase1_validate.py
+index 6683440..201af4f 100755
+--- a/scripts/phase1_validate.py
++++ b/scripts/phase1_validate.py
+@@ -50,7 +50,7 @@ import torch
+ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+ 
+ from steer_f.entropy_forecast import HeadCalibration, fit_head_calibration, h_togo  # noqa: E402
+-from steer_f.mtp_heads import MTPHeads, entropy_from_logits  # noqa: E402
++from steer_f.mtp_heads import ENTROPY_FNS, MTPHeads  # noqa: E402
+ from steer_f.validation import (  # noqa: E402
+     evaluate_gate_g1,
+     select_kappa_gamma,
+@@ -140,7 +140,8 @@ def sample_continuations(model, tokenizer, prefix_ids, n, max_new_tokens,
+ 
+ 
+ @torch.no_grad()
+-def measured_future_entropy(model, prefix_ids, continuations, kappa_max, device):
++def measured_future_entropy(model, prefix_ids, continuations, kappa_max, device,
++                            entropy_fn):
+     """Per-offset entropy of the policy along each continuation.
+ 
+     Returns `[n_cont, kappa_max]` where entry `[c, k]` is the entropy of the
+@@ -154,7 +155,7 @@ def measured_future_entropy(model, prefix_ids, continuations, kappa_max, device)
+         logits = model(input_ids=ids, use_cache=False).logits[0]
+         start = prefix_ids.shape[0] - 1  # distribution that produced the first new token
+         take = min(kappa_max, logits.shape[0] - start)
+-        ent = entropy_from_logits(logits[start:start + take].float())
++        ent = entropy_fn(logits[start:start + take].float())
+         if take < kappa_max:  # continuation hit EOS early
+             ent = torch.cat([ent, torch.full((kappa_max - take,), float("nan"), device=device)])
+         rows.append(ent.cpu())
+@@ -162,13 +163,15 @@ def measured_future_entropy(model, prefix_ids, continuations, kappa_max, device)
+ 
+ 
+ @torch.no_grad()
+-def forecast_head_entropies(model, heads, prefix_ids, device, temperature):
++def forecast_head_entropies(model, heads, prefix_ids, device, temperature,
++                            entropy_kind="shannon"):
+     """Per-head forecast entropy at the prefix's final position.  `[K]`."""
+     ids = prefix_ids.unsqueeze(0).to(device)
+     out = model(input_ids=ids, output_hidden_states=True, use_cache=False)
+     last_hidden = out.hidden_states[-1][:, -1:, :]  # [1, 1, H] — after the last prefix token
+     ent = heads.forecast_entropy(
+-        last_hidden, model.get_output_embeddings(), temperature=temperature
++        last_hidden, model.get_output_embeddings(), temperature=temperature,
++        entropy_kind=entropy_kind,
+     )
+     return ent[:, 0, 0].cpu()
+ 
+@@ -244,6 +247,12 @@ def build_argparser():
+     p.add_argument("--cont-top-p", type=float, default=0.9)
+     p.add_argument("--forecast-temperature", type=float, default=1.0,
+                    help="must match the temperature verl uses for `entropys`")
++    p.add_argument("--entropy-kind", default="shannon", choices=["shannon", "renyi2"],
++                   help="functional of the predicted/measured distributions. BOTH the "
++                        "ground truth and the forecast use it, so the calibration this "
++                        "run fits is only valid for training with the same "
++                        "steerf_entropy_kind — the value is stamped into the "
++                        "calibration dict and checked at load time")
+     p.add_argument("--embed-model", default=None,
+                    help="e.g. sentence-transformers/all-MiniLM-L6-v2; omitted -> token fallback")
+     p.add_argument("--calibrate", action="store_true",
+@@ -321,12 +330,14 @@ def main(argv=None):
+                     args.cont_max_tokens, args.cont_temperature, args.cont_top_p, args.device,
+                 )
+                 measured = measured_future_entropy(
+-                    model, prefix_ids, conts, kappa_max, args.device
++                    model, prefix_ids, conts, kappa_max, args.device,
++                    ENTROPY_FNS[args.entropy_kind],
+                 )  # [n_cont, kappa_max]
+                 gt_per_offset = torch.nanmean(measured, dim=0)  # [kappa_max]
+ 
+                 forecast = forecast_head_entropies(
+-                    model, heads, prefix_ids, args.device, args.forecast_temperature
++                    model, heads, prefix_ids, args.device, args.forecast_temperature,
++                    entropy_kind=args.entropy_kind,
+                 )  # [kappa_max]
+ 
+                 texts = [tokenizer.decode(c, skip_special_tokens=True) for c in conts] \
+@@ -414,7 +425,12 @@ def main(argv=None):
+         "grid": grid,
+         "chosen": chosen,
+         "branch_diversity_rho": div_stats["rho_mean"],
+-        "calibration": calib.to_dict() if calib else None,
++        # entropy_kind rides inside the calibration dict because
++        # warmup_and_validate.sh extracts exactly d["calibration"] into
++        # checkpoints/mtp_calibration_*.json, and the training-time check in
++        # dp_actor reads the stamp from that file.
++        "calibration": ({**calib.to_dict(), "entropy_kind": args.entropy_kind}
++                        if calib else None),
+         "records": records,
+     }
+     out_path = Path(args.out)
+diff --git a/steer_f/mtp_heads.py b/steer_f/mtp_heads.py
+index d50a01b..f0ac771 100644
+--- a/steer_f/mtp_heads.py
++++ b/steer_f/mtp_heads.py
+@@ -32,7 +32,7 @@ from typing import Callable, Optional, Sequence, Union
+ import torch
+ import torch.nn as nn
+ 
+-__all__ = ["MTPHeads", "mtp_ce_loss", "entropy_from_logits"]
++__all__ = ["MTPHeads", "mtp_ce_loss", "entropy_from_logits", "renyi2_from_logits", "ENTROPY_FNS"]
+ 
+ 
+ def entropy_from_logits(logits: torch.Tensor) -> torch.Tensor:
+@@ -52,6 +52,30 @@ def entropy_from_logits(logits: torch.Tensor) -> torch.Tensor:
+     return lse - (probs * logits).sum(dim=-1)
+ 
+ 
++def renyi2_from_logits(logits: torch.Tensor) -> torch.Tensor:
++    """Renyi-2 (collision) entropy in nats of ``softmax(logits)``, last dim.
++
++    ``H_2 = -log(sum_a p_a^2) = 2*lse(l) - lse(2*l)`` -- two logsumexp calls,
++    no ``log(p)``, shift-invariant, and ``0 <= H_2 <= H_shannon`` always.
++
++    Why it exists: Shannon entropy is dominated by tail mass.  A distribution
++    with one 0.9 token and two real alternatives scores 0.396; the same head
++    with 1000 never-sampled 1e-4 tokens scores 1.017 -- 2.5x apart on options
++    that will never be taken -- while Renyi-2 reads 0.205 vs 0.211.  Measured
++    on the sibling-discrimination task ``A_H`` actually performs, the
++    signal-to-tail-noise ratio is ~1.3:1 for Shannon and ~146:1 for Renyi-2,
++    which is the entire point of ``entropy_kind="renyi2"``.
++    """
++    return 2.0 * torch.logsumexp(logits, dim=-1) - torch.logsumexp(2.0 * logits, dim=-1)
++
++
++# What ``entropy_kind`` selects, here and in every consumer (forecast, Phase 1
++# measurement, calibration).  Producer and consumer must use the SAME kind --
++# a calibration fitted on one is meaningless applied to the other, which is
++# why the calibration JSON is stamped and checked.
++ENTROPY_FNS = {"shannon": entropy_from_logits, "renyi2": renyi2_from_logits}
++
++
+ class MTPHeads(nn.Module):
+     """Predict the token distribution at offsets ``+1 .. +K`` in parallel.
+ 
+@@ -186,6 +210,7 @@ class MTPHeads(nn.Module):
+         chunk_size: int = 4096,
+         temperature: Union[float, Sequence[float]] = 1.0,
+         out_dtype: torch.dtype = torch.float32,
++        entropy_kind: str = "shannon",
+     ) -> torch.Tensor:
+         """Per-head predictive entropy without materialising the logit stack.
+ 
+@@ -206,11 +231,21 @@ class MTPHeads(nn.Module):
+                 pass before this parameter existed.)
+             out_dtype: dtype of the returned tensor (float32 recommended —
+                 entropies are summed over ``kappa`` and bf16 loses precision).
++            entropy_kind: ``"shannon"`` (default, stock) or ``"renyi2"`` —
++                which functional of the predicted distribution to return.  The
++                heads themselves are kind-agnostic (they are trained by cross
++                entropy against sampled tokens); only this read-out changes.
++                Temperature composes identically: ``p = softmax(l / T)`` first.
+ 
+         Returns:
+             ``[K', B, T]`` (or ``[K', N]`` for packed input) entropies in nats,
+             where ``K' = kappa or num_heads``.
+         """
++        if entropy_kind not in ENTROPY_FNS:
++            raise ValueError(
++                f"entropy_kind must be one of {sorted(ENTROPY_FNS)}, got {entropy_kind!r}"
++            )
++        entropy_fn = ENTROPY_FNS[entropy_kind]
+         n_heads = self.num_heads if kappa is None else int(kappa)
+         if not (1 <= n_heads <= self.num_heads):
+             raise ValueError(f"kappa must be in [1, {self.num_heads}], got {kappa}")
+@@ -242,7 +277,7 @@ class MTPHeads(nn.Module):
+                 logits = head(proj).float()
+                 if temps[k] != 1.0:
+                     logits = logits / temps[k]
+-                out[k, start:stop] = entropy_from_logits(logits).to(out_dtype)
++                out[k, start:stop] = entropy_fn(logits).to(out_dtype)
+                 del logits, proj
+ 
+         if packed:
+diff --git a/steer_f/omega_tilde.py b/steer_f/omega_tilde.py
+index 8201706..73bed9e 100644
+--- a/steer_f/omega_tilde.py
++++ b/steer_f/omega_tilde.py
+@@ -94,6 +94,11 @@ class SteerFConfig:
+         baseline: ``"sibling"`` or ``"group"`` — see
+             :func:`steer_f.entropy_forecast.entropy_advantage`.
+         kappa / gamma_h: forecast horizon and discount.
++        entropy_kind: which entropy the forecast reads from the head
++            distributions — ``"shannon"`` (stock) or ``"renyi2"`` (collision
++            entropy, tail-immune).  Consumed by ``forecast_h_togo``; the
++            calibration and the (kappa, gamma_h) selection must be refit on
++            the same kind (``phase1_validate.py --entropy-kind``).
+         beta_mtp: weight of the MTP cross-entropy auxiliary loss.
+         kl_drift_threshold: KL(policy || head-1) above which ``lam`` is halved.
+         lam_decay: multiplier applied to ``lam`` on a drift trip.
+@@ -109,6 +114,7 @@ class SteerFConfig:
+     baseline: str = "sibling"
+     kappa: int = 4
+     gamma_h: float = 0.85
++    entropy_kind: str = "shannon"
+     beta_mtp: float = 0.05
+     kl_drift_threshold: float = 0.5
+     lam_decay: float = 0.5
+@@ -132,8 +138,20 @@ class SteerFConfig:
+             raise ValueError(f"kappa must be >= 1, got {self.kappa}")
+         if self.gamma_h <= 0:
+             raise ValueError(f"gamma_h must be > 0, got {self.gamma_h}")
++        if self.entropy_kind not in ("shannon", "renyi2"):
++            raise ValueError(
++                f'entropy_kind must be "shannon" or "renyi2", got {self.entropy_kind!r}')
+ 
+         warnings: list[str] = []
++        if self.entropy_kind == "renyi2":
++            warnings.append(
++                'entropy_kind="renyi2" changes the quantity H_togo estimates. The chain '
++                "rule H_traj = E[sum H] that grades C5 [exact] is Shannon-specific, so "
++                "under Renyi-2 the visitation term is a tail-robust proxy, not the "
++                "derived correction — mark the arm accordingly. Calibration and the "
++                "(kappa, gamma_h) grid must be refit on Renyi-2-measured entropies "
++                "(phase1_validate.py --entropy-kind renyi2 --calibrate)."
++            )
+         if self.norm == "z" and mode == "symmetric":
+             warnings.append(
+                 'norm="z" recentres the metric, but mode="symmetric" takes abs() of it, '
+diff --git a/steer_f/verl_integration.py b/steer_f/verl_integration.py
+index 6483ed8..b7d2902 100644
+--- a/steer_f/verl_integration.py
++++ b/steer_f/verl_integration.py
+@@ -85,7 +85,7 @@ def forecast_h_togo(
+         lm_head: the policy's unembedding (shared with the heads).
+         heads: a :class:`steer_f.mtp_heads.MTPHeads`.
+         response_length: ``T``.
+-        cfg: supplies ``kappa`` and ``gamma_h``.
++        cfg: supplies ``kappa``, ``gamma_h`` and ``entropy_kind``.
+         calib: per-head calibration from Phase 1.  ``None`` means uncalibrated,
+             which biases distant heads upward — fine for a smoke test, not for
+             a reported run (ablation A6 measures exactly this).
+@@ -109,7 +109,8 @@ def forecast_h_togo(
+     else:
+         temps = temperature
+     head_entropies = heads.forecast_entropy(
+-        h, lm_head, kappa=cfg.kappa, chunk_size=chunk_size, temperature=temps
++        h, lm_head, kappa=cfg.kappa, chunk_size=chunk_size, temperature=temps,
++        entropy_kind=cfg.entropy_kind,
+     )
+ 
+     return h_togo(head_entropies, kappa=cfg.kappa, gamma_h=cfg.gamma_h, calib=calib)
+diff --git a/verl/trainer/ppo/ray_trainer.py b/verl/trainer/ppo/ray_trainer.py
+index ade92ac..f86a329 100755
+--- a/verl/trainer/ppo/ray_trainer.py
++++ b/verl/trainer/ppo/ray_trainer.py
+@@ -1222,6 +1222,19 @@ class RayPPOTrainer:
+                         _sf_lam = float(steerf_cfg_src.get("steerf_lam", 0.0))
+                         _sf_mode = str(steerf_cfg_src.get("steerf_forecast", "mtp"))
+                         _sf_oracle = _sf_mode == "oracle" and _sf_lam != 0.0
++                        # The oracle arm reads verl's own `entropys`, which is
++                        # Shannon by construction; combining it with a Renyi-2
++                        # forecast would mix two scales inside one A_H without
++                        # any error surfacing. The policy logits are already
++                        # gone at this point, so it cannot be recomputed here
++                        # -- reject instead of guessing.
++                        _sf_kind = str(steerf_cfg_src.get("steerf_entropy_kind", "shannon"))
++                        if _sf_oracle and _sf_kind != "shannon":
++                            raise ValueError(
++                                "steerf_forecast=oracle is Shannon-only (it reads verl's "
++                                f"`entropys`); got steerf_entropy_kind={_sf_kind!r}. "
++                                "Use the mtp forecast with renyi2, or shannon for the oracle arm."
++                            )
+                         if "h_togo" in old_log_prob.batch.keys() or _sf_oracle:
+                             from steer_f.monitors import branch_recall_at_k
+                             from steer_f.omega_tilde import SteerFConfig
+diff --git a/verl/workers/actor/dp_actor.py b/verl/workers/actor/dp_actor.py
+index 647e6cc..e5bd1f1 100755
+--- a/verl/workers/actor/dp_actor.py
++++ b/verl/workers/actor/dp_actor.py
+@@ -348,7 +348,20 @@ class DataParallelPPOActor(BasePPOActor):
+         calib = None
+         calib_path = cfg.get("steerf_calib_path")
+         if calib_path and os.path.exists(calib_path):
+-            calib = HeadCalibration.from_dict(json.load(open(calib_path)))
++            calib_dict = json.load(open(calib_path))
++            # A calibration is an affine fit of forecast entropy onto MEASURED
++            # entropy of the same kind; scale/bias fitted on Shannon applied to
++            # Renyi-2 values (or vice versa) are numerically meaningless, so a
++            # mismatch is a hard error rather than a silently wrong run.
++            calib_kind = str(calib_dict.get("entropy_kind", "shannon"))
++            want_kind = str(cfg.get("steerf_entropy_kind", "shannon"))
++            if calib_kind != want_kind:
++                raise ValueError(
++                    f"steerf_entropy_kind={want_kind!r} but {calib_path} was fitted on "
++                    f"{calib_kind!r} entropies. Refit it with scripts/phase1_validate.py "
++                    f"--entropy-kind {want_kind} --calibrate (see docs/STEERF_renyi2.md)."
++                )
++            calib = HeadCalibration.from_dict(calib_dict)
+         else:
+             print(
+                 "[STEER-F] no calibration file; distant heads will over-estimate entropy "
+@@ -411,6 +424,7 @@ class DataParallelPPOActor(BasePPOActor):
+         sf_cfg = SteerFConfig(
+             kappa=int(cfg.get("steerf_kappa", 4)),
+             gamma_h=float(cfg.get("steerf_gamma_h", 0.85)),
++            entropy_kind=str(cfg.get("steerf_entropy_kind", "shannon")),
+         )
+ 
+         response_length = micro_batch["responses"].size(1)
