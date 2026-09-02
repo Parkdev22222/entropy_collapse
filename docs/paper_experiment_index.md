@@ -9,7 +9,8 @@
 |---|---|---|---|---|---|---|---|
 | `train-steer-Qwen2.5-Math-1.5B-s1.log` | **STEER** | 0 | minmax | plain | 110 | 12 (0~110) | **완결** |
 | `train-math-Qwen2.5-Math-1.5B-s1.log` | **STEER-F** | 0.25 | **rank** | plain | 141 | 12 (30~140) | **완결** (step 30에서 resume, 앞 30 step은 같은 설정) |
-| `train-steer-f-Qwen2.5-Math-1.5B-s1-tree-rollout.log` | **STEER-F signed** | 0.25 | minmax | **tree** | 79 | 9 (0~70) | ⚠️ **오래됨** — 실제 실행은 ~110까지 갔다 |
+| `train-steer-f-Qwen2.5-Math-1.5B-s1-tree-rollout.log` | **STEER-F signed** | 0.25 | minmax | **tree** | 118 | 13 (0~110) | **완결** |
+| `train-steer-f-Qwen2.5-Math-1.5B-s1-tree-rollout-uniform.log` | **uniform 통제군** | 0.25 | minmax | **tree** (`apply=branch`) | 110 | 12 (0~110) | **완결** |
 | `train-Qwen2.5-Math-1.5B-s1-tree-rollout.log` | — | 0 | minmax | plain | 0 | 1 | 스텁 (step 110 val 한 줄만) |
 | `train-math-Qwen2.5-Math-1.5B-s1-tree-rollout.log` | — | 0 | minmax | plain | 0 | 0 | 스텁 (기동 실패) |
 | `train-math-Qwen2.5-Math-1.5B-s2.log` | — | 0.25 | minmax | plain | 0 | 0 | 스텁 (기동 실패) |
@@ -20,14 +21,15 @@
 
 ## 2. 없는 로그 — pod에서 가져와야 함
 
-논문 표의 통제군 두 arm이 레포에 **전혀 없다.** 두 arm 모두 `run/run_uniform_ablation.sh`로 띄웠고
-로그는 각 pod의 `logs/experiments/` 아래에 있다.
+permuted arm은 아직 학습 중이고, GRPO baseline은 아직 안 돌렸다.
+두 arm 모두 pod의 `logs/experiments/` 아래에서 가져와야 한다.
 
 | 필요한 것 | 파일명 | 왜 필요한가 |
 |---|---|---|
-| **uniform** arm | `train-steer-f-...-tree-rollout-uniform.log` | `δ = −λ·band` 상수 개입. 크기 불일치(15배)를 보여주는 근거 |
-| **permuted** arm | `train-steer-f-...-tree-rollout-permuted.log` | **유일한 단일변수 통제군.** 논문 핵심 주장의 직접 증거 |
-| signed 연장분 | 위 signed 로그의 step 80~110 | 커밋본이 79에서 끊겨 있음 |
+| **permuted** arm | `train-steer-f-...-tree-rollout-permuted.log` | **유일한 단일변수 통제군.** 논문 핵심 주장의 직접 증거. step 110 종료 후 가져올 것 |
+| **GRPO** baseline | `train-grpo-Qwen2.5-Math-1.5B-s1.log` | 사다리의 바닥. `run/run_grpo.sh`로 아직 안 돌렸다 |
+
+uniform arm과 signed의 step 80~110 연장분은 `paper-uniform` 브랜치를 머지하면서 들어왔다.
 
 tensorboard 이벤트(`tensorboard_log/STEER-F/<run>/`)도 함께 가져와야
 `scripts/select_best_checkpoint.py`가 동작한다.
