@@ -31,13 +31,15 @@ case "${MODE}" in
 esac
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-RS="${ROOT}/run/run_steerf.sh"
+# run_uniform_ablation.sh delegates to run_steerf.sh, so patching these two
+# covers all five arms.
+LAUNCHERS=("${ROOT}/run/run_steerf.sh" "${ROOT}/run/run_grpo.sh")
 rc=0
 declare -a TODO=()
 
 say()  { printf '%s\n' "$*"; }
 ok()   { printf '  [ok]     %s\n' "$*"; }
-need() { printf '  [needed] %s\n' "$*"; TODO+=("$1"); rc=1; }
+need() { printf "  [needed] %s\n" "$2"; TODO+=("$1"); rc=1; }
 bad()  { printf '  [ERROR]  %s\n' "$*"; rc=2; }
 
 # ---------------------------------------------------------------- locate verl
@@ -56,25 +58,27 @@ say "verl : ${RT:-<not importable>}"
 say ""
 
 # ------------------------------------------------------------------ 1 + 2
-say "run/run_steerf.sh"
-if [ ! -f "${RS}" ]; then
-    bad "not found -- run this on the pod checkout, not a bare clone"
-else
+for RS in "${LAUNCHERS[@]}"; do
+    say "$(basename "${RS}")"
+    if [ ! -f "${RS}" ]; then
+        bad "not found -- run this on the pod checkout, not a bare clone"
+        continue
+    fi
     if grep -q 'validation_data_dir' "${RS}"; then
         ok "validation_data_dir already wired"
     else
-        need "VAL_DATA_DIR"  "add ++trainer.validation_data_dir"
+        need "VAL_DATA_DIR:${RS}"  "add ++trainer.validation_data_dir"
     fi
 
     if grep -qE '\+\+trainer\.save_best_only=\$\{SAVE_BEST_ONLY' "${RS}"; then
         ok "save_best_only is env-driven"
     elif grep -qE '\+\+trainer\.save_best_only=(True|False)' "${RS}"; then
-        need "SAVE_BEST_ONLY"  "save_best_only is hardcoded; make it \${SAVE_BEST_ONLY:-False}"
+        need "SAVE_BEST_ONLY:${RS}"  "save_best_only is hardcoded; make it \${SAVE_BEST_ONLY:-False}"
     else
         bad "no save_best_only line found -- inspect the file by hand"
     fi
-fi
-say ""
+    say ""
+done
 
 # ---------------------------------------------------------------------- 3
 say "verl ray_trainer.py"
@@ -109,21 +113,29 @@ fi
 # ------------------------------------------------------------------- apply
 stamp="$(date +%Y%m%d_%H%M%S)"
 for what in "${TODO[@]}"; do
-    case "${what}" in
+    RS="${what#*:}"
+    case "${what%%:*}" in
     VAL_DATA_DIR)
-        cp -p "${RS}" "${RS}.bak.${stamp}"
+        [ -f "${RS}.bak.${stamp}" ] || cp -p "${RS}" "${RS}.bak.${stamp}"
         # insert immediately after the rollout_data_dir line, keeping its indent
-        python3 - "${RS}" <<'PY'
+        python3 - "${RS}" <<'PYEOF'
 import re, sys
 p = sys.argv[1]
 s = open(p, encoding="utf-8").read()
-m = re.search(r'^([ \t]*)(.*rollout_data_dir=.*)$', s, re.M)
-assert m, "rollout_data_dir line not found"
-ind = m.group(1)
-add = (ind + '${VAL_DATA_DIR:+++trainer.validation_data_dir=${VAL_DATA_DIR}} \\')
-s = s[:m.end()] + "\n" + add + s[m.end():]
+# Anchor on the real save_best_only argument -- never a comment -- so the flag
+# lands inside the command (run_steerf.sh) or inside ARGS=( ) (run_grpo.sh).
+m = None
+for cand in re.finditer(r'^([ \t]*)((?:\$\{[A-Z_]+:\+)?\+\+trainer\.save_best_only=.*)$', s, re.M):
+    if not cand.group(2).lstrip().startswith('#'):
+        m = cand
+        break
+assert m, "no save_best_only argument line found"
+ind, line = m.group(1), m.group(2)
+cont = ' \\' if line.rstrip().endswith('\\') else ''
+add = ind + '${VAL_DATA_DIR:+++trainer.validation_data_dir=${VAL_DATA_DIR}}' + cont
+s = s[:m.start()] + add + "\n" + s[m.start():]
 open(p, "w", encoding="utf-8").write(s)
-PY
+PYEOF
         ok "added ++trainer.validation_data_dir (backup ${RS}.bak.${stamp})"
         ;;
     SAVE_BEST_ONLY)
@@ -132,7 +144,7 @@ PY
         ok "save_best_only is now \${SAVE_BEST_ONLY:-False}"
         ;;
     SEQ_ENTROPY)
-        cp -p "${RT}" "${RT}.bak.${stamp}"
+        [ -f "${RT}.bak.${stamp}" ] || cp -p "${RT}" "${RT}.bak.${stamp}"
         sed -i -E 's/^(\s*)#\s*(seq_entropy_agg\s*=)/\1\2/; s/^(\s*)#\s*("actor\/seq_entropy")/\1\2/' "${RT}"
         ok "uncommented seq_entropy_agg (backup ${RT}.bak.${stamp})"
         ;;
@@ -141,7 +153,11 @@ done
 
 say ""
 say "verifying syntax"
-if bash -n "${RS}"; then ok "run_steerf.sh parses"; else bad "run_steerf.sh no longer parses -- restore ${RS}.bak.${stamp}"; fi
+for RS in "${LAUNCHERS[@]}"; do
+    [ -f "${RS}" ] || continue
+    if bash -n "${RS}"; then ok "$(basename "${RS}") parses"
+    else bad "$(basename "${RS}") no longer parses -- restore ${RS}.bak.${stamp}"; fi
+done
 if [ -n "${RT}" ]; then
     if python3 -m py_compile "${RT}" 2>/dev/null; then ok "ray_trainer.py compiles"
     else bad "ray_trainer.py no longer compiles -- restore ${RT}.bak.${stamp}"; fi
