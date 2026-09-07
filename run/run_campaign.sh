@@ -41,10 +41,12 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT}" || { echo "FATAL: cannot cd to ${ROOT}" >&2; exit 1; }
 
+# shellcheck source=run/_arms.sh
+. "${ROOT}/run/_arms.sh"
+
 SEEDS=${SEEDS:-"2 3 4 5"}
-ARMS=${ARMS:-"grpo steer permuted signed uniform"}
+ARMS=${ARMS:-${CAMPAIGN_ARMS}}
 STEPS=${STEPS:-110}
-MODEL_TAG=${MODEL_TAG:-Qwen2.5-Math-1.5B}
 LOG_DIR="${ROOT}/logs/experiments"
 CKPT_ROOT="${ROOT}/checkpoints/STEER-F"
 MIN_FREE_GB=${MIN_FREE_GB:-20}
@@ -56,28 +58,7 @@ BUSY_RE="[m]ain_ppo|[r]un_0905_chain"
 
 banner () { printf '\n========================================\n%s\n========================================\n' "$*"; }
 
-run_name_for () {   # <arm> <seed>
-    case "$1" in
-        grpo)     echo "grpo-${MODEL_TAG}-s$2" ;;
-        steer)    echo "steer-${MODEL_TAG}-s$2" ;;
-        signed)   echo "steer-f-${MODEL_TAG}-s$2-tree-rollout" ;;
-        uniform)  echo "steer-f-${MODEL_TAG}-s$2-tree-rollout-uniform" ;;
-        permuted) echo "steer-f-${MODEL_TAG}-s$2-tree-rollout-permuted" ;;
-        *) return 1 ;;
-    esac
-}
-
-# A run is done when its log carries the final optimisation step. The tqdm
-# counter is not usable: total_training_steps is declared as 200 while STEPS is
-# 110, so the bar reads 110/200 on a complete run.
-is_done () {        # <run-name>
-    local f
-    for f in "${LOG_DIR}/train-$1"*.log; do
-        [ -f "${f}" ] || continue
-        grep -q "step:${STEPS} - global_seqlen" "${f}" && return 0
-    done
-    return 1
-}
+is_done () { train_log_done "${LOG_DIR}" "$1" "${STEPS}"; }
 
 free_gb () { df -BG --output=avail "${ROOT}" 2>/dev/null | tail -1 | tr -dc '0-9'; }
 
@@ -142,7 +123,7 @@ if ! mkdir "${LOCK}" 2>/dev/null; then
     rm -rf "${LOCK}"; mkdir "${LOCK}" || { echo "FATAL: cannot take ${LOCK}" >&2; exit 2; }
 fi
 echo $$ > "${LOCK}/pid"
-trap 'rm -rf "${LOCK}"' EXIT
+trap 'rm -rf "${LOCK}"' EXIT INT TERM
 
 if [ "${WAIT}" = "1" ]; then
     # Queue behind whatever is training now. Matching on the command line
@@ -195,19 +176,22 @@ for item in "${QUEUE[@]}"; do
     banner "${arm}  seed ${seed}  ->  ${rn}   (${avail:-?} GB free)"
     start=$(date +%s)
 
-    # run_grpo.sh and run_steerf.sh write to stdout, so the campaign tees them
-    # into the per-run log. run_uniform_ablation.sh already redirects its child
-    # into exactly this path (its line "> ${LOG} 2>&1"), so teeing there would
-    # put two writers on one file and truncate the training output away.
+    # Only run_steerf.sh writes the trainer's output to stdout. run_grpo.sh
+    # and run_uniform_ablation.sh both redirect their child into exactly
+    # ${LOG_DIR}/train-<run>.log themselves, so teeing there would put two
+    # writers at independent offsets on one file and shred it.
     case "${arm}" in
         grpo)
-            SEED="${seed}" RUN_NAME="${rn}" \
-                bash run/run_grpo.sh 2>&1 | tee "${log}"
-            st=${PIPESTATUS[0]}
+            SEED="${seed}" RUN_NAME="${rn}" LOG="${log}" \
+                bash run/run_grpo.sh
+            st=$?
             ;;
         steer)
+            # run_steerf.sh hardcodes STEPS=200 inside its SCALE case, so an
+            # exported STEPS never reaches it -- without the trailing override
+            # this arm trains to 200 and the queue stalls for an extra 20 h.
             SEED="${seed}" RUN_NAME="${rn}" STEERF_LAM=0 \
-                bash run/run_steerf.sh 2>&1 | tee "${log}"
+                bash run/run_steerf.sh $(steer_plain_args "${STEPS}") 2>&1 | tee "${log}"
             st=${PIPESTATUS[0]}
             ;;
         signed|uniform|permuted)
