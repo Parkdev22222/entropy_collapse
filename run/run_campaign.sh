@@ -6,6 +6,7 @@
 #   DRY=1 bash run/run_campaign.sh            # print the queue, run nothing
 #   SEEDS="2 3" bash run/run_campaign.sh      # a subset
 #   REPO=user/repo bash run/run_campaign.sh   # upload + delete each checkpoint
+#   WAIT=1 bash run/run_campaign.sh           # start once the current job ends
 #
 # Seed 1 already exists for all five arms, so the default picks up at 2.
 #
@@ -49,6 +50,9 @@ CKPT_ROOT="${ROOT}/checkpoints/STEER-F"
 MIN_FREE_GB=${MIN_FREE_GB:-20}
 DRY=${DRY:-0}
 REPO=${REPO:-}
+WAIT=${WAIT:-0}            # 1 = queue behind a running job instead of refusing
+WAIT_POLL=${WAIT_POLL:-120}
+BUSY_RE="[m]ain_ppo|[r]un_0905_chain"
 
 banner () { printf '\n========================================\n%s\n========================================\n' "$*"; }
 
@@ -77,6 +81,26 @@ is_done () {        # <run-name>
 
 free_gb () { df -BG --output=avail "${ROOT}" 2>/dev/null | tail -1 | tr -dc '0-9'; }
 
+# Is a training job running? pgrep matches on the whole command line, so the
+# shell that launched this script also matches whenever the launch command
+# mentions main_ppo. Excluding our own ancestors removes exactly those without
+# hiding a real trainer.
+busy_pids () {
+    local anc p
+    anc=" "
+    p=$$
+    while [ "${p}" != "1" ] && [ -r "/proc/${p}/status" ]; do
+        anc="${anc}${p} "
+        p="$(awk '/^PPid:/{print $2}' "/proc/${p}/status" 2>/dev/null)"
+        [ -n "${p}" ] || break
+    done
+    pgrep -f "${BUSY_RE}" 2>/dev/null | while read -r pid; do
+        case "${anc}" in *" ${pid} "*) continue ;; esac
+        echo "${pid}"
+    done
+}
+is_busy () { [ -n "$(busy_pids)" ]; }
+
 # --------------------------------------------------------------- validation
 for a in ${ARMS}; do
     run_name_for "${a}" 0 >/dev/null || { echo "FATAL: unknown arm '${a}'" >&2; exit 2; }
@@ -104,8 +128,37 @@ printf '\n%s run(s) queued, %s arm(s) x %s seed(s)\n' \
 [ "${DRY}" = "1" ] && { echo "(DRY=1, stopping here)"; exit 0; }
 
 # ------------------------------------------------------------------ guards
-if pgrep -f "[m]ain_ppo" >/dev/null 2>&1; then
-    echo "REFUSE: a training process is already running. Wait for it, or stop it." >&2
+# Two campaigns racing would interleave runs on the same GPUs. A directory is
+# an atomic create, so this works without flock; a lock whose PID is gone is
+# stale and reclaimed.
+LOCK="${ROOT}/.campaign.lock"
+if ! mkdir "${LOCK}" 2>/dev/null; then
+    holder="$(cat "${LOCK}/pid" 2>/dev/null || echo '?')"
+    if [ "${holder}" != "?" ] && kill -0 "${holder}" 2>/dev/null; then
+        echo "REFUSE: another campaign is running (pid ${holder}). Remove ${LOCK} if that is wrong." >&2
+        exit 2
+    fi
+    echo "[campaign] reclaiming a stale lock from pid ${holder}"
+    rm -rf "${LOCK}"; mkdir "${LOCK}" || { echo "FATAL: cannot take ${LOCK}" >&2; exit 2; }
+fi
+echo $$ > "${LOCK}/pid"
+trap 'rm -rf "${LOCK}"' EXIT
+
+if [ "${WAIT}" = "1" ]; then
+    # Queue behind whatever is training now. Matching on the command line
+    # rather than a PID means a recycled PID cannot end the wait early.
+    if is_busy; then
+        echo "[campaign] waiting for the running job to finish (polling every ${WAIT_POLL}s)"
+        busy_pids | head -3 | while read -r h; do
+            printf '[campaign]   holder: %s %s\n' "${h}" "$(tr '\0' ' ' < "/proc/${h}/cmdline" 2>/dev/null | cut -c1-80)"
+        done
+        while is_busy; do sleep "${WAIT_POLL}"; done
+        echo "[campaign] $(date -Is)  the box is free, starting"
+        sleep 30    # let the GPUs actually release before vLLM grabs them
+    fi
+elif is_busy; then
+    echo "REFUSE: a training process is already running. Wait for it, stop it," >&2
+    echo "        or re-run with WAIT=1 to queue behind it." >&2
     exit 2
 fi
 if ! bash run/instrument_campaign.sh --check >/dev/null 2>&1; then
