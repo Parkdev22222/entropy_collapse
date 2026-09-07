@@ -226,10 +226,42 @@ where the weights are a monotone map of $\Om$ over the batch.
 \section{Two Channels}
 \label{sec:channels}
 
-\subsection{The decomposition is exact}
+\subsection{Step 1: the chain rule}
 
-Applying the entropy chain rule to $\pit(y \mid x) = \prod_t \pit(y_t \mid s_t)$
-gives an identity, not an approximation:
+The object we would like to protect is the entropy of the distribution the policy
+induces over \emph{whole responses},
+%
+\begin{equation}
+\Htraj(\pit \mid x) := -\sum_{y} \pit(y \mid x)\, \log \pit(y \mid x),
+\label{eq:Hdef}
+\end{equation}
+%
+a sum over an exponentially large set. The autoregressive factorization
+$\pit(y \mid x) = \prod_t \pit(y_t \mid s_t)$ turns the logarithm into a sum and
+lets us exchange the order of summation:
+%
+\begin{equation}
+\begin{split}
+\Htraj
+&= -\sum_{y} \pit(y \mid x) \sum_{t=1}^{T} \log \pit(y_t \mid s_t)\\
+&= \sum_{t=1}^{T} \E_{y \sim \pit}\bigl[-\log \pit(y_t \mid s_t)\bigr].
+\end{split}
+\label{eq:chainstep}
+\end{equation}
+%
+Each summand is still an expectation over whole responses, but the integrand depends
+on $y$ only through $y_{\le t}$. Conditioning on the prefix and applying the tower
+rule replaces the inner expectation with a per-position entropy,
+%
+\begin{equation*}
+\begin{split}
+\E_{y}&\bigl[-\log \pit(y_t \mid s_t)\bigr]\\
+&= \E_{y_{<t}}\Bigl[\,\underbrace{\E_{y_t \sim \pit(\cdot \mid s_t)}\bigl[-\log \pit(y_t \mid s_t)\bigr]}_{= \; H(\pit(\cdot \mid s_t))}\Bigr],
+\end{split}
+\end{equation*}
+%
+because the inner expectation is, by definition, the entropy of the conditional
+distribution at $s_t$. Collecting the terms back under a single expectation gives
 %
 \begin{equation}
 \Htraj(\pit \mid x)
@@ -237,14 +269,42 @@ gives an identity, not an approximation:
 \label{eq:chain}
 \end{equation}
 %
-The left-hand side is what we would like to protect; the right-hand side is what
-instrumentation can measure. The entire argument of this paper follows from the
-observation that the measure $\E_{y \sim \pit}$ depends on $\theta$ as well.
+Equation~\eqref{eq:chain} is an identity, not an approximation. Its left-hand side
+is what we want to protect; its right-hand side is what instrumentation can measure,
+since $H(\pit(\cdot \mid s_t))$ is read directly off the logits at each position.
 
-Set $f_\theta(y) := \sum_t H(\pit(\cdot \mid s_t(y)))$, so that
-$\Htraj = \E_{y \sim \pit}[f_\theta(y)]$. Both the integrand and the measure depend
-on $\theta$, so the product rule --- with the score-function identity restoring the
-second term to an expectation --- yields
+The entire argument of this paper follows from one feature of
+Eq.~\eqref{eq:chain} that is easy to pass over: \emph{the measure
+$\E_{y \sim \pit}$ depends on $\theta$ as well}. The right-hand side is not a sum of
+$\theta$-dependent terms over a fixed set of positions --- it is a $\theta$-dependent
+average of them over a $\theta$-dependent set of trajectories.
+
+\subsection{Step 2: the product rule}
+
+Write the per-trajectory total
+%
+\begin{equation}
+f_\theta(y) := \sum_{t=1}^{T} H\bigl(\pit(\cdot \mid s_t(y))\bigr),
+\label{eq:fdef}
+\end{equation}
+%
+so that Eq.~\eqref{eq:chain} reads
+$\Htraj = \sum_y \pit(y \mid x)\, f_\theta(y)$. Both factors of every summand carry
+$\theta$, so differentiating requires the product rule:
+%
+\begin{equation}
+\begin{split}
+\gradt \Htraj
+&= \sum_y \bigl[\gradt \pit(y \mid x)\bigr] f_\theta(y)\\
+&\quad + \sum_y \pit(y \mid x)\, \gradt f_\theta(y).
+\end{split}
+\label{eq:productrule}
+\end{equation}
+%
+The second sum is already an expectation. The first is not, because
+$\gradt \pit$ is not a probability distribution; the score-function identity
+$\gradt \pit = \pit \gradt \log \pit$ restores it to one. Substituting and naming
+the two terms,
 %
 \begin{equation}
 \begin{split}
@@ -255,6 +315,11 @@ second term to an expectation --- yields
 \label{eq:twochannel}
 \end{equation}
 %
+Equations~\eqref{eq:Hdef}--\eqref{eq:twochannel} contain no approximation of any
+kind. The split into two channels is forced by the product rule, not chosen.
+
+\subsection{Reading the two terms}
+
 \textbf{(L), the local channel}, holds the visited states fixed and asks how the
 conditional distribution at each one changes. Equation~\eqref{eq:omega} is a
 first-order estimate of exactly this.
@@ -360,19 +425,46 @@ the omission cannot be fixed within the local channel.
 
 \subsection{Causal elimination gives a reward-to-go}
 
-Substituting $\gradt \log \pit(y \mid x) = \sum_u \gradt \log \pit(y_u \mid s_u)$
-into (V) produces a double sum over $(t, u)$. For $u \ge t$ the entropy
-$H(\pit(\cdot \mid s_t))$ is a function of $y_{<t}$, hence measurable with respect
-to $y_{<u}$, and the inner conditional expectation vanishes:
+The visitation term of Eq.~\eqref{eq:twochannel} is not yet in a usable form: the
+factor $f_\theta(y)$ multiplying the score is a property of the \emph{whole}
+trajectory, so a naive estimator would credit every token with entropy that appeared
+before it. Causality removes those terms exactly.
+
+Expanding both factors --- $f_\theta$ by Eq.~\eqref{eq:fdef} and the score by
+$\gradt \log \pit(y \mid x) = \sum_u \gradt \log \pit(y_u \mid s_u)$ --- turns (V)
+into a double sum:
 %
-\begin{equation*}
+\begin{equation}
 \begin{split}
-\E\bigl[\gradt \log \pit(y_u \mid s_u) \mid y_{<u}\bigr]&\\
-= \gradt \!\sum_a \pit(a \mid s_u) &= 0 .
+(\mathrm{V}) = \sum_t \sum_u
+\E\bigl[&H(\pit(\cdot \mid s_t))\\
+&\cdot \gradt \log \pit(y_u \mid s_u)\bigr].
 \end{split}
-\end{equation*}
+\label{eq:doublesum}
+\end{equation}
 %
-Only $u < t$ survives, and the surviving inner sum is the entropy still to come:
+Consider a term with $u \ge t$. The entropy $H(\pit(\cdot \mid s_t))$ depends on $y$
+only through $y_{<t}$, and $y_{<t} \subseteq y_{<u}$, so it is measurable with
+respect to $y_{<u}$ and may be pulled out of a conditional expectation given
+$y_{<u}$. What remains is the expected score at a single position, which vanishes
+for any distribution:
+%
+\begin{equation}
+\begin{split}
+\E\bigl[\gradt &\log \pit(y_u \mid s_u) \mid y_{<u}\bigr]\\
+&= \sum_a \pit(a \mid s_u) \frac{\gradt \pit(a \mid s_u)}{\pit(a \mid s_u)}\\
+&= \gradt \!\sum_a \pit(a \mid s_u)
+\;=\; \gradt 1 \;=\; 0 .
+\end{split}
+\label{eq:scorezero}
+\end{equation}
+%
+By the tower rule every $(t, u)$ term with $u \ge t$ is therefore \emph{exactly}
+zero --- not small, zero. This is the same identity that licenses a baseline in
+policy gradients, used here to enforce causality rather than to reduce variance.
+
+Only $u < t$ survives. Swapping the order of summation collects, for each token
+$u$, the entropies at all later positions:
 %
 \begin{equation}
 (\mathrm{V}) = \E\Bigl[\sum_u \gradt \log \pit(y_u \mid s_u)\,
