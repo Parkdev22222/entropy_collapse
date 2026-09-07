@@ -1,0 +1,948 @@
+\documentclass[11pt]{article}
+
+% Change "review" to "final" to generate the final (sometimes called camera-ready) version.
+% Change to "preprint" to generate a non-anonymous version with page numbers.
+\usepackage[review]{acl}
+
+\usepackage{times}
+\usepackage{latexsym}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{xcolor}
+
+% ---- macros -----------------------------------------------------------
+\newcommand{\Htraj}{\mathcal{H}}
+\newcommand{\Htogo}{H_{\mathrm{togo}}}
+\newcommand{\AH}{A_{H}}
+\newcommand{\Om}{\Omega}
+\newcommand{\Omt}{\tilde{\Omega}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\gradt}{\nabla_{\theta}}
+\newcommand{\pit}{\pi_{\theta}}
+\newcommand{\TODO}[1]{\textbf{[TODO: #1]}}
+
+\title{Entropy Collapse Has a Direction:\\
+Correcting the Visitation Channel in Token-Level Entropy Control for RLVR}
+
+\author{Anonymous ACL submission}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Reinforcement learning with verifiable rewards (RLVR) reliably drives a policy's
+entropy toward zero, and a growing family of methods intervenes by re-weighting the
+policy loss with a per-token estimate of how much each token's update costs in
+entropy. We show that every such method estimates only half of the relevant
+quantity. The gradient of the \emph{trajectory} entropy splits exactly into two
+terms: a \emph{local} channel, which asks how the conditional distribution at a
+visited state flattens or sharpens, and a \emph{visitation} channel, which asks how
+the probability of \emph{reaching} that state changes. Existing token-level
+estimators capture the first and are structurally blind to the second. We show the
+blindness is worse than an omission: the local estimator is exactly zero at a
+uniform branch point, that zero is the correct first-order answer, and the
+visitation term's prefactor is simultaneously maximal there --- the two channels are
+\emph{anti-correlated}, so no refinement of the local term can recover the missing
+signal. We then derive an estimator for the visitation channel that costs one extra
+forward pass. The reward-to-go implied by the decomposition is the remaining
+conditional entropy $\Htogo$, which we forecast with parallel
+multi-token-prediction heads; the sibling-prefix baseline that keeps the estimator
+unbiased is supplied by a tree-structured rollout in which several samples share a
+prefix and diverge at scheduled depths. The resulting advantage $\AH$ sums to zero
+within a sibling set by construction, so the method cannot change the average amount
+of damping --- it can only decide which of two siblings is damped. We give the full
+derivation, the four approximations it requires and what each discards, and a
+five-arm design that isolates the contribution of the forecast's \emph{value} from
+that of the apparatus carrying it.
+\end{abstract}
+
+\section{Introduction}
+\label{sec:intro}
+
+Policy-gradient fine-tuning with verifiable rewards sharpens a language model's
+output distribution. Measured as the mean per-token entropy of the policy, this
+sharpening is fast, monotone, and, past a point, coincident with the end of useful
+learning. The standard reading is that the collapse is the problem, and the standard
+remedy is to spend part of the update budget slowing it down: an entropy bonus, a KL
+anchor, a clip on the tokens that lose the most entropy, or --- in the most recent
+line of work --- a per-token re-weighting of the policy loss by a first-order
+estimate of the entropy each token's update destroys.
+
+We argue that the accounting behind that remedy is incomplete, and that the
+incompleteness is structural rather than a matter of estimator quality.
+
+Write $\Htraj(\pit \mid x)$ for the entropy of the distribution the policy induces
+over whole responses to a prompt $x$. The autoregressive factorization turns it into
+an expectation of a sum of per-token conditional entropies, and the gradient of that
+expression splits, by the product rule, into exactly two terms. The first holds the
+visited states fixed and asks how the conditional distribution at each one changes:
+this is what a per-token entropy estimate measures. The second holds the per-state
+entropies fixed and asks how the probability of \emph{visiting} each state changes.
+An update that concentrates mass on one continuation makes the states downstream of
+that continuation more likely and the states downstream of its abandoned siblings
+less likely; the diversity those siblings carried leaves the trajectory distribution
+even though no conditional distribution anywhere became more peaked.
+
+Our first contribution is to show that the local channel is not merely blind to the
+second term but \emph{anti-correlated} with it. The local estimator factors into the
+advantage, a saturation factor, and the deviation of the sampled token's surprisal
+from the mean surprisal --- and that last factor has mean zero by the definition of
+entropy. At a branch point where several continuations are close to equiprobable it
+vanishes identically. The vanishing is not an estimator failure: a uniform
+distribution maximizes entropy, so the first-order change is genuinely zero and the
+damage is second order (Section~\ref{sec:blind}). Meanwhile the visitation term's
+prefactor is $1-\pit(y_t \mid s_t)$, which is maximal precisely at those flat
+states. The local channel therefore spends its budget where the conditional entropy
+is fragile --- rare tokens sampled from confident distributions --- and spends
+nothing where the trajectory entropy is most at risk.
+
+Our second contribution is an estimator for the missing channel that requires no
+additional rollouts. Eliminating the non-causal cross terms turns the visitation
+term into a REINFORCE estimator whose reward-to-go is the sum of the
+\emph{remaining} conditional entropies, $\Htogo$; subtracting any function of the
+state leaves it unbiased. We estimate $\Htogo$ with parallel
+multi-token-prediction (MTP) heads read off the hidden state the policy already
+computes, and we obtain the state-only baseline from rollouts that share a prefix.
+Plain group-relative rollouts almost never share prefixes, so we schedule the
+sharing: a tree-structured sampler branches a single root at fixed depths, and the
+resulting sibling sets give the baseline an actual support
+(Section~\ref{sec:tree}).
+
+The resulting per-token score $\AH$ is a deviation from a sibling mean and therefore
+sums to zero over each sibling set. This has a consequence we state up front because
+it determines what evidence can count: the method \emph{cannot} raise the average
+weight at branch points, only spread the weights of siblings apart. ``Total entropy
+went up'' is therefore not a prediction of this method, and an experiment looking
+for it is testing a different hypothesis (Section~\ref{sec:zerosum}).
+
+We make the following contributions.
+
+\begin{itemize}
+\item An exact two-channel decomposition of the trajectory-entropy gradient, and an
+      argument that the channel captured by current token-level entropy-control
+      methods is anti-correlated with the channel they miss
+      (Sections~\ref{sec:channels}--\ref{sec:blind}).
+\item A derivation of the missing channel into a per-token advantage $\AH$ with no
+      approximation up to the point of estimating $\Htogo$, together with an explicit
+      ledger of the approximations that estimation requires, the sign of each one's
+      error, and the mechanism that absorbs it
+      (Sections~\ref{sec:ahdef}--\ref{sec:ledger}).
+\item A tree-structured rollout that supplies the sibling-prefix baseline, and a
+      bound showing what fraction of positions can carry a non-zero $\AH$ under
+      \emph{any} sampler (Section~\ref{sec:tree}).
+\item A five-arm experimental design that separates the contribution of the
+      forecast's value from the contribution of the apparatus that delivers it, by
+      running the full pipeline twice with the forecast's value destroyed in two
+      different ways (Section~\ref{sec:setup}).
+\end{itemize}
+
+\section{Related Work}
+\label{sec:related}
+
+\paragraph{Entropy collapse in RLVR.}
+Entropy decay under policy-gradient fine-tuning is well documented, and a range of
+interventions add an explicit entropy term to the objective or constrain the update
+so that high-entropy positions are preserved. Recent analyses report that naive
+entropy regularization does not prevent the collapse and that continuing to train
+under it degrades accuracy \citep{rethinkingentropyreg}, which is consistent with
+our reading: the regularizer acts on the local channel, and the local channel is
+not where trajectory diversity is being lost.
+
+\paragraph{Token-level entropy control.}
+The method we build on re-weights the clipped surrogate loss by a per-token
+first-order estimate of the entropy change that token's update induces
+\citep{steer}. That work observes that earlier interventions are ``indirect'' and
+that their effect is therefore limited and can fail. Our decomposition supplies a
+mechanism for that observation: the estimate is a first-order estimate of the local
+channel only, and it is exactly zero at the states where the visitation channel is
+largest.
+
+\paragraph{Which tokens carry the gradient.}
+\citet{eightytwenty} show that restricting policy-gradient updates to a small
+minority of high-entropy ``forking'' tokens matches full-gradient training. That
+result establishes that the identity of the tokens, not the aggregate entropy,
+is what matters, and it motivates a per-token treatment; it does not, however,
+distinguish the two channels, since forking tokens are identified by their local
+entropy. Our analysis predicts that a local criterion will select a systematically
+different set from the one the visitation channel would select.
+
+\paragraph{Local stochasticity without global diversity.}
+\citet{invisibleleash} report that token-level entropy can remain high while the
+diversity of final answers falls. This is precisely the signature our decomposition
+predicts when the visitation channel is unmanaged: per-state entropies are
+preserved --- the local channel is doing its job --- while the trajectory
+distribution concentrates.
+
+\paragraph{Multi-token prediction.}
+We use Medusa-style parallel prediction heads \citep{medusa} not for their intended
+purpose (speculative decoding) but as an entropy forecaster: we need the entropy of
+the distribution over a token $k$ steps ahead, not a good sample of that token.
+Section~\ref{sec:approx} shows that this choice of estimator has a signed,
+monotone error which we characterize and correct.
+
+\section{Preliminaries}
+\label{sec:prelim}
+
+\paragraph{Notation.}
+A prompt is $x$, a response is $y = y_{1:T}$, and the state before emitting token
+$t$ is $s_t = (x, y_{<t})$. We write $H(\pit(\cdot \mid s_t))$ for the entropy of
+the conditional distribution at a single position (lowercase, per-token) and
+$\Htraj(\pit \mid x)$ for the entropy of the distribution over whole responses
+(uppercase, per-trajectory). The surprisal of a token $a$ is
+$I_a := -\log \pit(a \mid s_t)$, so that $H = \E_{a \sim \pit}[I_a]$.
+
+\paragraph{Group-relative policy optimization.}
+We optimize with GRPO. For each prompt, $n$ responses are sampled and scored, and
+each response receives the group-standardized advantage
+$A_i = (r_i - \mathrm{mean}_j r_j) / \mathrm{std}_j r_j$, broadcast to every token
+of that response. Replacing a learned value function with the group mean is what
+makes GRPO cheaper than PPO; it also means that a group whose members all receive
+the same reward contributes no gradient.
+
+\paragraph{Token-level entropy control.}
+The baseline intervention leaves the advantage untouched and instead multiplies each
+token's contribution to the clipped surrogate by a weight
+$\alpha_t \in [w_{\min}, w_{\max}]$ derived from a first-order estimate $\Om_t$ of
+the entropy change that token's update induces. With $w_{\max} = 1$, the weight can
+only attenuate. Writing $A_u$ for the advantage, $\pi_u := \pit(y_u \mid s_u)$ for
+the probability of the sampled token, and $H_u$ for the local entropy, the estimator
+used in that line of work is, up to a positive constant,
+%
+\begin{equation}
+\Om_u \;=\; A_u\,\pi_u (1-\pi_u)\,\bigl(\log \pi_u + H_u\bigr).
+\label{eq:omega}
+\end{equation}
+%
+The policy loss becomes $\sum_u \alpha_u \cdot \mathrm{PPO\text{-}clip}(A_u, r_u)$,
+where the weights are a monotone map of $\Om$ over the batch.
+
+\section{Two Channels}
+\label{sec:channels}
+
+\subsection{The decomposition is exact}
+
+Applying the entropy chain rule to $\pit(y \mid x) = \prod_t \pit(y_t \mid s_t)$
+gives an identity, not an approximation:
+%
+\begin{equation}
+\Htraj(\pit \mid x)
+= \E_{y \sim \pit}\Bigl[\sum_{t=1}^{T} H\bigl(\pit(\cdot \mid s_t)\bigr)\Bigr].
+\label{eq:chain}
+\end{equation}
+%
+The left-hand side is what we would like to protect; the right-hand side is what
+instrumentation can measure. The entire argument of this paper follows from the
+observation that the measure $\E_{y \sim \pit}$ depends on $\theta$ as well.
+
+Set $f_\theta(y) := \sum_t H(\pit(\cdot \mid s_t(y)))$, so that
+$\Htraj = \E_{y \sim \pit}[f_\theta(y)]$. Both the integrand and the measure depend
+on $\theta$, so the product rule --- with the score-function identity restoring the
+second term to an expectation --- yields
+%
+\begin{equation}
+\begin{split}
+\gradt \Htraj
+&= \underbrace{\E\bigl[\gradt f_\theta(y)\bigr]}_{(\mathrm{L})\ \text{local}}\\
+&\quad + \underbrace{\E\bigl[f_\theta(y)\,\gradt \log \pit(y \mid x)\bigr]}_{(\mathrm{V})\ \text{visitation}}.
+\end{split}
+\label{eq:twochannel}
+\end{equation}
+%
+\textbf{(L), the local channel}, holds the visited states fixed and asks how the
+conditional distribution at each one changes. Equation~\eqref{eq:omega} is a
+first-order estimate of exactly this.
+
+\textbf{(V), the visitation channel}, holds the per-state entropies fixed and asks
+how the probability of reaching each state changes. An update that concentrates mass
+on one continuation makes the sub-tree below it more likely and the sub-trees below
+its siblings less likely. Nothing in Eq.~\eqref{eq:omega} can see this: $\Om$ reads
+the conditional distribution at a position and never reads the probability of
+arriving there.
+
+The two terms can have opposite signs. A method that drives (L) to zero has not
+thereby bounded $\gradt \Htraj$.
+
+\subsection{Why the local channel cannot be repaired}
+\label{sec:blind}
+
+A natural objection is that the two channels might coincide in practice: branch
+points are positions where the policy is uncertain, so they are high-entropy
+positions, so $\Om$ should be large there and the local term should protect them
+automatically. The premise is correct --- in warm-up rollouts on our model, branch
+diversity correlates with local entropy at Spearman $\rho = 0.65$, and with the
+entropy-to-go at $\rho = 0.82$. The inference from it fails, in three steps.
+
+\paragraph{Step 1: $\Om$ reads a deviation, not a level.}
+Rewriting Eq.~\eqref{eq:omega} in terms of surprisal gives
+%
+\begin{equation}
+\Om \;=\; A\,\pi_a(1-\pi_a)\,\bigl(H - I_a\bigr),
+\label{eq:omega-surprisal}
+\end{equation}
+%
+and $H = \E_{a\sim\pi}[I_a]$ by definition. The factor $H - I_a$ is therefore a
+mean-zero fluctuation: what sets the magnitude of $|\Om|$ is the \emph{spread} of
+surprisal, not the \emph{height} of the entropy.
+
+\paragraph{Step 2: at a uniform branch point $\Om \equiv 0$.}
+If the distribution is uniform over $k$ candidates then $I_a = \log k = H$ for every
+$a$, so $\Om$ vanishes identically. The positions that are most branch-like --- several
+continuations at comparable probability --- are exactly where the local term
+contributes nothing.
+
+\paragraph{Step 3: and that zero is the correct answer.}
+This is the step that closes the argument. A uniform distribution maximizes entropy,
+so $\partial H / \partial z_a = 0$ for every logit $z_a$; $\Om$ is not wrong, it is
+right. Perturbing one logit of a uniform distribution by $\delta$ and writing
+$S := e^{\delta} + k - 1$ gives the closed form
+%
+\begin{equation}
+H(\delta) = \log S - \frac{\delta e^{\delta}}{S},
+\qquad
+H''(0) = -\,\frac{k-1}{k^{2}},
+\label{eq:secondorder}
+\end{equation}
+%
+with $H'(\delta)$ of sign $-\operatorname{sign}(\delta)$: any push in any direction
+lowers the entropy, but the loss is entirely second order. For a $10$-way uniform
+distribution and $\delta = 0.1$ the actual entropy loss is $4.7\times10^{-4}$,
+roughly two orders of magnitude below that of a peaked distribution under the same
+perturbation. \emph{As far as local entropy is concerned, uniform branch points are
+genuinely safe}, and a local estimator that allocates them no protection is
+allocating correctly for its own objective. No refinement of the local term
+recovers the missing signal, because the missing signal is not local.
+
+\paragraph{The two channels are anti-correlated.}
+The visitation term's prefactor, derived in Section~\ref{sec:weights}, is
+$1 - \pi_a$, which approaches $1$ as the distribution flattens --- and the
+probability that a group of $n$ samples actually diverges at a position approaches
+$1$ in the same limit. Table~\ref{tab:anticorr} evaluates both channels on a family
+of distributions that interpolates between confident and flat. $|\Om|$ is dominated
+by positions where the model is fairly confident but a tail token was sampled; at
+those positions siblings diverge only about half the time. Where divergence is
+certain, the local term is identically zero and the visitation prefactor is maximal.
+
+\begin{table}[t]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{lcccc}
+\toprule
+distribution & $H$ & $P(\mathrm{split})$ & $\E|\Om|/|A|$ & $\E[1{-}\pi_a]$ \\
+\midrule
+$q{=}.99$          & 0.10 & 0.08 & 0.092 & 0.020 \\
+$q{=}.9$, tail     & 1.25 & 0.57 & \textbf{1.129} & 0.190 \\
+$q{=}.6$, $m{=}3$  & 1.11 & 0.98 & 0.457 & 0.587 \\
+unif.\ $k{=}10$    & 2.30 & \textbf{1.00} & \textbf{0.000} & \textbf{0.900} \\
+unif.\ $k{=}100$   & 4.61 & \textbf{1.00} & \textbf{0.000} & \textbf{0.990} \\
+\bottomrule
+\end{tabular}
+\caption{The local channel and the visitation channel are ordered oppositely.
+Distribution family: top token has mass $q$, the remaining $1-q$ is spread uniformly
+over $m$ tokens. $P(\text{split})$ is the probability that $n{=}8$ samples do not all
+agree. $\E|\Om|$ is taken over the token actually sampled at that position.}
+\label{tab:anticorr}
+\end{table}
+
+The statement we can therefore make is stronger than ``the local term is
+incomplete'': \emph{the local term is anti-correlated with the term it omits}, and
+the omission cannot be fixed within the local channel.
+
+\section{Estimating the Visitation Channel}
+\label{sec:ahdef}
+
+\subsection{Causal elimination gives a reward-to-go}
+
+Substituting $\gradt \log \pit(y \mid x) = \sum_u \gradt \log \pit(y_u \mid s_u)$
+into (V) produces a double sum over $(t, u)$. For $u \ge t$ the entropy
+$H(\pit(\cdot \mid s_t))$ is a function of $y_{<t}$, hence measurable with respect
+to $y_{<u}$, and the inner conditional expectation vanishes:
+%
+\begin{equation*}
+\begin{split}
+\E\bigl[\gradt \log \pit(y_u \mid s_u) \mid y_{<u}\bigr]&\\
+= \gradt \!\sum_a \pit(a \mid s_u) &= 0 .
+\end{split}
+\end{equation*}
+%
+Only $u < t$ survives, and the surviving inner sum is the entropy still to come:
+%
+\begin{equation}
+(\mathrm{V}) = \E\Bigl[\sum_u \gradt \log \pit(y_u \mid s_u)\,
+\Htogo(s_u \oplus y_u)\Bigr],
+\label{eq:togo}
+\end{equation}
+%
+with $\Htogo(s_u \oplus y_u) := \sum_{t > u} H(\pit(\cdot \mid s_t))$.
+
+We stress that $\Htogo$ was not posited. Equation~\eqref{eq:togo} is a REINFORCE
+estimator whose reward is ``the conditional entropy remaining after this token'',
+and $\Htogo$ is that reward-to-go.
+
+\subsection{The sibling-prefix baseline}
+
+Any function $b(s_u)$ of the state alone leaves Eq.~\eqref{eq:togo} unbiased, by the
+same argument. Subtracting one gives the per-token advantage
+%
+\begin{equation}
+\AH(s_u, y_u) := \Htogo(s_u \oplus y_u) - \bar{H}_{\mathrm{togo}}(s_u),
+\label{eq:ah}
+\end{equation}
+%
+and up to this point \emph{no approximation has been made}.
+
+The baseline we use is the mean of $\Htogo$ over the rollouts in the same prompt
+group whose prefixes $y_{<u}$ agree exactly. Those rollouts share the state $s_u$ by
+definition, so their mean is a function of $s_u$ alone and the baseline is
+admissible. The condition is agreement on $y_{<u}$ and not on $y_{\le u}$: the
+rollouts must diverge \emph{at} $u$ for the difference to be a branch score.
+
+Two properties follow immediately and matter later. First, the implementation
+includes a rollout in its own sibling set, so $b$ depends weakly on $y_u$ and the
+estimator is not strictly leave-one-out; the resulting bias is $O(1/m)$ in the
+number $m$ of surviving siblings, the same property GRPO's group-mean advantage
+has. Second, when $m = 1$ the baseline equals the rollout's own value and
+$\AH \equiv 0$, so a position with no siblings is silent rather than noisy.
+
+\section{Four Approximations}
+\label{sec:approx}
+
+Equation~\eqref{eq:ah} is exact but not computable: $\Htogo$ sums conditional
+entropies at states the update has not visited. Three approximations make it
+computable and a fourth bounds its influence.
+
+\subsection{A1: horizon truncation and discounting}
+
+We truncate the sum to $\kappa$ steps and discount:
+%
+\begin{equation}
+\Htogo(s_u \oplus y_u) \approx
+\sum_{k=1}^{\kappa} \gamma_H^{\,k}\, H\bigl(\pi(\cdot \mid s_{u+k})\bigr).
+\label{eq:a1}
+\end{equation}
+%
+The discount serves two purposes: distant terms carry more forecast error (A2) and
+therefore deserve less trust, and the sum stays bounded independently of $\kappa$.
+
+What this discards --- the tail $\sum_{k > \kappa}$ and a fraction of the retained
+terms --- is largely harmless for a reason specific to our use. Equation~\eqref{eq:ah}
+consumes only the \emph{difference} between siblings. Any bias common to rollouts
+sharing $s_u$ cancels in that difference, and truncation bias is common to first
+order.
+
+\subsection{A2: forecasting the unrealized future}
+
+Even Eq.~\eqref{eq:a1} requires the future states $s_{u+k}$. At update time they do
+not exist: rollouts came from $\pi_{\mathrm{old}}$, each state has exactly one
+sampled continuation, and re-rolling is prohibitive. We replace the realized future
+with a parallel forecast from the current hidden state $h_u$:
+%
+\begin{equation}
+H\bigl(\pi(\cdot \mid s_{u+k})\bigr) \;\longrightarrow\;
+H\bigl(p^{(k)}_{\mathrm{MTP}}(\cdot \mid h_u)\bigr).
+\label{eq:a2}
+\end{equation}
+%
+Head $k$ is a two-layer residual MLP applied to $h_u$, followed by the policy's own
+unembedding; the heads own no vocabulary parameters. Their last layer is
+zero-initialized, so before any training every head reproduces the policy's own
+next-token distribution and the forecast starts from a sane value. In the RL path the
+logits are materialized in chunks and reduced to an entropy immediately, so the
+$[\kappa, B, T, V]$ tensor never exists.
+
+\paragraph{The error of this substitution has a known sign.}
+Conditioning on the intervening tokens is exactly what the forecast omits. Fixing
+$S_u$, the $k$-th term of Eq.~\eqref{eq:a1} has expectation
+$H(Y_{u+k} \mid Y_{u+1:u+k-1}, S_u)$, whereas the MTP head models the
+\emph{marginal} $p(Y_{u+k} \mid S_u)$. Since conditioning reduces entropy,
+%
+\begin{equation}
+\begin{split}
+H(Y_{u+k} \mid S_u) &- \E\bigl[H(\pi(\cdot \mid S_{u+k-1}))\bigr]\\
+&= I\bigl(Y_{u+k};\, Y_{u+1:u+k-1} \mid S_u\bigr)\\
+&\ge 0 .
+\end{split}
+\label{eq:mi}
+\end{equation}
+%
+The forecast \emph{always over-estimates}, and the excess is precisely the mutual
+information with the intervening tokens, which grows monotonically with $k$.
+
+Equation~\eqref{eq:mi} is not merely a bound: it is the reason the marginal is the
+quantity we want. It is the fan-out of the continuation --- how many ways the next
+$k$ tokens can unfold --- rather than the residual uncertainty along the one path
+that happened to be sampled.
+
+\subsection{A3: per-head affine calibration}
+
+Equation~\eqref{eq:mi} predicts a per-head, monotone inflation, so we absorb it with
+a per-head affine correction fitted by least squares against oracle entropies on
+warm-up rollouts:
+%
+\begin{equation}
+\hat{H}_k = a_k\, H\bigl(p^{(k)}_{\mathrm{MTP}}(\cdot \mid h_u)\bigr) + b_k .
+\label{eq:a3}
+\end{equation}
+%
+The fitted coefficients confirm the prediction. On our model the first head has
+$a_1 = 1.03$ --- a one-step forecast has no intervening tokens, so the mutual
+information in Eq.~\eqref{eq:mi} is zero and the approximation is exact --- while
+$a_k$ drops to $0.10$--$0.19$ for $k \ge 2$. Calibration switches the unreliable
+heads off on its own.
+
+Combining A1--A3 gives the forecast that is actually computed:
+%
+\begin{equation}
+\begin{split}
+&\hat{H}_{\mathrm{togo}}(s_u \oplus y_u) =\\
+&\qquad \max\Bigl(0,\ \sum_{k=1}^{\kappa} \gamma_H^{\,k}\bigl(a_k H_k(h_u) + b_k\bigr)\Bigr),
+\end{split}
+\label{eq:forecast}
+\end{equation}
+%
+the clamp encoding the fact that an entropy cannot be negative. With
+$\kappa = 2$ and $\gamma_H = 0.7$ this instantiates to
+$\hat{H}_{\mathrm{togo}} = 0.72\,H_1 + 0.06\,H_2 + 0.11$: the second head
+contributes about $8\%$, so the effective horizon is close to one step. We regard
+this as a consequence of Eq.~\eqref{eq:mi} rather than a tuning artifact, and note
+it as a limitation --- a forecaster whose error did not grow with $k$ would leave a
+longer horizon usable.
+
+\paragraph{Alignment.}
+One detail decides whether the signal is a branch score at all. The hidden state at
+position $u$ is conditioned on $s_u$ and predicts $y_u$; it does not know $y_u$. The
+quantity we need, $\Htogo(s_u \oplus y_u)$, must therefore be read from position
+$u+1$ and shifted back by one. Omitting the shift measures the value of the state
+\emph{before} the branch rather than the value of the branch taken.
+
+\section{From Gradient to Token Weights}
+\label{sec:weights}
+
+Equation~\eqref{eq:ah} is a term to add to a gradient, but methods in this family do
+not add gradients --- they re-weight a loss. What is needed is a first-order
+prediction of how much one update, acting through token $u$, changes the trajectory
+entropy.
+
+\paragraph{How far one step moves a logit.}
+With $w_u = \mathrm{clip}(r_u, 1-\epsilon_{\mathrm{lo}}, 1+\epsilon_{\mathrm{hi}})A_u$
+the coefficient the policy loss actually applies, a single step moves only the
+sampled token's logit, $\Delta z_{u,a} = \eta\, w_u\, \delta_{a, y_u} + O(\eta^2)$.
+The softmax Jacobian $\partial \log \pi_a / \partial z_a = 1 - \pi_a$ then gives
+%
+\begin{equation}
+\widehat{\Delta \log \pi}_u = \eta\, w_u\,(1 - \pi_u),
+\label{eq:dlogpi}
+\end{equation}
+%
+which vanishes as $\pi_u \to 1$: a token that already holds the mass cannot be given
+more. This is the prefactor whose anti-correlation with $|\Om|$ Table~\ref{tab:anticorr}
+records.
+
+\paragraph{The visitation-channel prediction.}
+Because $\gradt \log \pi_u \cdot \Delta\theta = \Delta \log \pi_u$, substituting into
+Eq.~\eqref{eq:ah} gives the per-token quantity
+%
+\begin{equation}
+\begin{split}
+\mathrm{visit}_u := \widehat{\Delta \log \pi}_u \cdot
+\mathrm{clip}\bigl(\AH(s_u,y_u), -c, +c\bigr).
+\end{split}
+\label{eq:visit}
+\end{equation}
+%
+\textbf{A4} is the clip, and it is applied to $\AH$ \emph{before} the product rather
+than after, so that one token's influence is bounded by $|\eta w_u| \cdot c$.
+Clipping the product instead would let forecast error be amplified without bound at
+tokens with large $w_u$.
+
+\paragraph{Sign quadrants.}
+Equation~\eqref{eq:visit} defines the collapse channel precisely.
+When $\widehat{\Delta \log \pi}_u > 0$ and $\AH > 0$, mass moves toward a branch
+richer than its siblings and trajectory entropy rises. When
+$\widehat{\Delta \log \pi}_u > 0$ and $\AH < 0$, mass moves into a dead end and the
+diversity carried by the abandoned siblings is destroyed --- this is the collapse
+path that (L) is structurally unable to see. Negative
+$\widehat{\Delta \log \pi}_u$ reverses both readings.
+
+\section{Combining the Channels}
+\label{sec:combine}
+
+The two channels enter the same weight:
+%
+\begin{equation}
+\Omt_u = \mathrm{norm}(\Om_u) + \lambda \cdot \mathrm{norm}(\mathrm{visit}_u),
+\label{eq:combine}
+\end{equation}
+%
+after which $\Omt$ is passed to the unmodified min--max mapping of the base method,
+producing $\alpha_u \in [w_{\min}, w_{\max}]$. We emphasize that the hook is
+inserted where $\Om$ is finalized and that nothing downstream is changed; when
+$\lambda = 0$ the pipeline is bitwise identical to the base method, which we
+enforce with a regression test.
+
+Three choices in Eq.~\eqref{eq:combine} deserve comment. Normalization is required
+even though both terms carry units of nats, because $\Om$ contains a factor
+$1/\pi_{\mathrm{old}}$ and is heavy-tailed. Because normalization removes scale, the
+step size $\eta$ in Eq.~\eqref{eq:dlogpi} only ever appears multiplied by $\lambda$;
+we fix $\eta = 1$ and sweep $\lambda$ alone. Finally, $\mathrm{norm}$ is an RMS
+rescaling rather than a $z$-score, since subtracting a mean would break the
+$\lambda = 0$ equivalence.
+
+\section{Tree-Structured Rollouts}
+\label{sec:tree}
+
+\subsection{Why plain rollouts cannot support $\AH$}
+
+$\hat{H}_{\mathrm{togo}}$ is a deterministic function of the causal prefix, so two
+rollouts sharing $y_{\le u}$ produce identical forecasts. Combined with
+Eq.~\eqref{eq:ah} this gives a sharp characterization:
+%
+\begin{equation}
+\begin{split}
+\AH[i, u] \neq 0 \iff\ &\text{siblings share } y_{<u}\\
+&\text{but diverge at } y_u,
+\end{split}
+\label{eq:branchonly}
+\end{equation}
+%
+that is, $u$ is a branch point of the group. Under independent sampling from a
+sharpened policy, group members diverge at their first token and never share a
+prefix again, so $m = 1$ almost everywhere and $\AH \equiv 0$: the visitation
+channel is not merely weak, it is identically absent.
+
+We therefore schedule the sharing. A tree sampler expands a single root and cuts it
+at fixed depths $d_1 < d_2 < d_3$ with branching factor $2$, yielding $n = 8$ leaves
+whose sibling structure is known in advance. The cuts create the only positions at
+which Eq.~\eqref{eq:branchonly} can fire.
+
+\subsection{A ceiling on the support}
+
+It is tempting to treat the fraction of positions with $\AH \neq 0$ as a quantity to
+be maximized. It is not, and the reason is combinatorial rather than empirical. Two
+quantities behave very differently under the tree:
+
+\begin{itemize}
+\item the fraction of positions where \emph{some} other rollout shares $y_{<u}$ is
+      moved by the cuts, and equals $d_L/T$ by construction;
+\item the fraction where $\AH \neq 0$ is \emph{not}, because by
+      Eq.~\eqref{eq:branchonly} it counts branch points, and $n$ sequences form a
+      trie with at most $n-1$ internal branching nodes.
+\end{itemize}
+
+Since the one-position alignment shift widens each branch node into two columns, the
+fraction of positions carrying a non-zero $\AH$ is bounded by $2(n-1)/T$ for
+\emph{any} sampler whatsoever. With $n = 8$ and responses of $\sim 10^3$ tokens this
+ceiling is on the order of a percent. The tree's role is to make the branch points
+exist and to place them at controlled depths, not to make them numerous.
+
+\subsection{The correction cannot move the mean}
+\label{sec:zerosum}
+
+$\AH$ is a deviation from a sibling mean, so on each sibling set
+%
+\begin{equation}
+\sum_{j \in \mathrm{sib}(s_u)} \AH\bigl(s_u, y^{(j)}_u\bigr) = 0 .
+\label{eq:zerosum}
+\end{equation}
+%
+The correction in Eq.~\eqref{eq:combine} therefore cannot change the average weight
+assigned to branch tokens. It can only spread siblings apart. This is not a defect
+to be engineered away: an unbiased estimator requires a baseline, and a baseline
+forces the mean to zero.
+
+The consequence for evaluation is direct, and we state it before presenting any
+experiment. ``Mean entropy at branch points increased'' is \emph{not} a prediction of
+this method and cannot serve as evidence that it works; the corresponding prediction
+is that the \emph{variance across siblings} widens. A method designed to raise the
+mean is a different and weaker hypothesis --- it does not need a forecast at all,
+only a support --- and we include it below as a control arm.
+
+\section{The Approximation Ledger}
+\label{sec:ledger}
+
+Table~\ref{tab:ledger} collects every departure from Eq.~\eqref{eq:twochannel}.
+
+\begin{table*}[t]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lp{2.6cm}p{4.0cm}p{2.3cm}p{4.1cm}@{}}
+\toprule
+& approximation & what it discards & sign / bound & mitigation \\
+\midrule
+--- & Eqs.~\eqref{eq:chain}--\eqref{eq:ah} & nothing --- identities & --- & --- \\
+A1 & horizon $\kappa$, discount $\gamma_H$ & the tail $\sum_{k>\kappa}$, and a fraction of the retained terms & under-estimate & the common component cancels in the sibling difference \\
+A2 & realized future $\to$ MTP marginal & mutual information with intervening tokens, Eq.~\eqref{eq:mi} & \textbf{over-estimate, monotone in $k$} & A3 \\
+A3 & per-head affine calibration & non-affine residual of A2 & least-squares residual & oracle-forecast control arm \\
+A4 & clip $\AH$ to $\pm c$ & magnitude of extreme branch scores & bounded by $c$ & saturation rate is logged \\
+B1 & first order in $\eta$ & $O(\eta^2)$ & --- & small learning rate \\
+B2 & only the sampled logit moves & cross-position effects of weight sharing & --- & \emph{inherited from the base method} \\
+B3 & rollouts come from $\pi_{\mathrm{old}}$ & mismatch with the $\pit$ expectation & --- & importance ratio restores $r$ \\
+B4 & self included in sibling set & $O(1/m)$ relative to leave-one-out & --- & same property as the GRPO advantage \\
+\bottomrule
+\end{tabular}
+\caption{Every approximation between the exact decomposition and the implemented
+weight. A1--A4 are introduced by this work; B1--B4 are shared with the token-level
+entropy-control method we extend.}
+\label{tab:ledger}
+\end{table*}
+
+The strongest assumptions are A2 and B2. A2 has a known sign and a known monotonicity
+(Eq.~\ref{eq:mi}), which is what makes the affine correction in A3 an appropriate
+remedy rather than a curve fit. B2 --- that updating one token does not change the
+conditional distribution at other positions --- is false for a network with shared
+parameters and has no corrective mechanism. It is not a risk this work introduces,
+since the base method already relies on it, but adding a second channel adds a second
+copy of its error.
+
+\section{Experimental Setup}
+\label{sec:setup}
+
+\subsection{Model, data, and optimization}
+
+All runs fine-tune the same base model on the same data with the same optimizer
+settings, and differ only in the intervention. We use a $1.5$B-parameter
+mathematics-specialized model, train on a $17$k-problem competition-mathematics
+set, and validate on AIME 2024 ($30$ problems) with $32$ samples per problem.
+With a training batch of $512$ prompts, $110$ optimization steps correspond to
+about $3.2$ epochs.
+
+Optimization uses GRPO with $n = 8$ responses per prompt, a constant learning rate
+of $1\mathrm{e}{-6}$ with no warm-up (so that the schedule is independent of the
+declared total step count), a maximum response length of $3072$ tokens, no entropy
+bonus, and no KL loss. Rollouts are sampled at temperature $1.0$ with no nucleus
+truncation; validation uses temperature $1.0$ and $\mathrm{top\text{-}}p = 0.7$.
+Every arm uses the same data seed and the same initial checkpoint, which we verify by
+requiring the step-$0$ validation scores to agree.
+
+\subsection{Method hyperparameters}
+
+The forecaster uses $\kappa = 2$ heads with discount $\gamma_H = 0.7$ and the
+per-head calibration of Eq.~\eqref{eq:a3}. The combination uses $\lambda = 0.25$,
+RMS normalization, clip $c = 1.0$, the sibling-prefix baseline, and the base
+method's min--max mapping into $[w_{\min}, w_{\max}] = [0.7, 1.0]$ --- so the weight
+can only attenuate, never amplify. The tree sampler uses a single root, cuts at
+depths $\{64, 192, 384\}$, and branching factor $2$ at each cut, giving $n = 8$
+leaves.
+
+\subsection{Five arms}
+
+The design isolates one question: does the \emph{value} of the forecast matter, or
+only the apparatus that carries it? A comparison between the base method and the
+full method changes two things at once ($\lambda$ and the sampler), so it cannot
+answer this. We therefore add two arms that keep the entire apparatus --- the tree,
+the forecaster, the support, the weight mapping --- and destroy only the information
+in $\AH$.
+
+\begin{table}[t]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}llll@{}}
+\toprule
+arm & $\lambda$ & rollout & signal in the weight \\
+\midrule
+GRPO      & ---   & plain & none \\
+STEER     & $0$   & plain & local $\Om$ only \\
+uniform   & $.25$ & tree  & support only \\
+permuted  & $.25$ & tree  & $\AH$ shuffled \\
+\textbf{STEER-F} & $.25$ & tree & $\AH$ as derived \\
+\bottomrule
+\end{tabular}
+\caption{The five arms. \textsc{uniform} and \textsc{permuted} run the full pipeline
+with the forecast's value destroyed in two different ways, so any gain they show is
+attributable to the apparatus rather than to the visitation signal.}
+\label{tab:arms}
+\end{table}
+
+\textsc{uniform} applies the same attenuation to every position in the support,
+discarding $\AH$'s value but keeping its support --- this is the implementation of
+the ``raise the mean'' hypothesis that Section~\ref{sec:zerosum} distinguishes from
+ours. \textsc{permuted} keeps the multiset of $\AH$ values within each sibling set and
+shuffles the assignment, so the support, the magnitudes, and Eq.~\eqref{eq:zerosum}
+all survive while the pairing between a branch and its score is destroyed. Together
+they bracket the claim: if the visitation signal is doing the work, both controls
+should behave like the no-forecast arms.
+
+\subsection{Metrics}
+
+We report $\mathrm{acc@}32$ (mean accuracy over $32$ samples) and $\mathrm{maj@}32$
+(accuracy of the majority vote over the same $32$ samples), and their difference
+%
+\begin{equation*}
+\mathrm{uplift} := \mathrm{maj@}32 - \mathrm{acc@}32,
+\end{equation*}
+%
+which measures how much better a set of $32$ samples is than its average member ---
+that is, whether correct answers concentrate while incorrect ones scatter. We use
+uplift rather than $\mathrm{pass@}32$ because the latter does not separate the arms.
+
+Because single validation points are noisy on a $30$-problem set, the primary
+statistic is the mean over the converged window, steps $40$--$110$ ($8$ validation
+points per arm). We quote differences in units of the across-problem standard error,
+$\mathrm{SE} = \mathrm{std@}32 / \sqrt{30} \approx 0.027$, which is the correct scale
+for generalization to new problems. We separately note that the pure re-sampling
+noise of the protocol --- estimated from two validations of identical weights --- is
+about $0.004$ in accuracy, an order of magnitude smaller; the two scales answer
+different questions and we are explicit about which is in use.
+
+One instrumentation caveat propagates into every entropy number we report. The
+logged \texttt{actor/entropy} is aggregated with a token-mean, so it is
+$\Htraj$ divided by the mean response length, not $\Htraj$. Since response lengths
+differ by under $5\%$ across arms, we report the raw quantity and, where the
+distinction could matter, the length-corrected product as well.
+
+\section{Results}
+\label{sec:results}
+
+\TODO{This section is deliberately left as scaffolding. The training logs for four
+of the five arms are available; the GRPO arm's log and the multi-benchmark
+evaluation are pending, and the numbers will be filled in once both are verified
+from source.}
+
+\subsection{Main comparison}
+\label{sec:res:main}
+
+\TODO{Table: per-arm plateau means over steps 40--110 --- acc@32, maj@32, uplift,
+entropy, mean response length, length-corrected entropy. Five rows, one per arm of
+Table~\ref{tab:arms}.}
+
+\subsection{Does the forecast's value matter?}
+\label{sec:res:contrasts}
+
+\TODO{Table of pairwise contrasts in SE units: STEER-F versus each of GRPO, STEER,
+uniform, permuted, and the three null contrasts among the control arms. The
+prediction of Section~\ref{sec:setup} is that the first group separates and the
+second does not.}
+
+\subsection{Decomposing the gain}
+\label{sec:res:decomp}
+
+\TODO{Split the maj@32 gain into the part attributable to per-sample accuracy and
+the part attributable to uplift, and split the total gain into the apparatus
+component (permuted minus base) and the information component (STEER-F minus
+permuted).}
+
+\subsection{Entropy is not the channel}
+\label{sec:res:entropy}
+
+\TODO{Table contrasting entropy gaps against accuracy gaps across arms, testing
+whether arms with matched aggregate entropy differ in accuracy. Section~\ref{sec:zerosum}
+predicts that they can, and that aggregate entropy therefore does not order the
+arms.}
+
+\subsection{Mechanism diagnostics}
+\label{sec:res:diag}
+
+\TODO{Support fraction, mean sibling-set size, and branch-point fraction per step,
+against the $2(n-1)/T$ ceiling of Section~\ref{sec:tree}; the two-term balance
+$\lambda\|\mathrm{visit}\| / \|\Om\|$; and the $\AH$ clip saturation rate.}
+
+\subsection{Cost}
+\label{sec:res:cost}
+
+\TODO{Seconds per step per arm and the resulting wall-clock overhead, attributed to
+the MTP forward pass.}
+
+\section{Conclusion}
+
+The gradient of trajectory entropy has two terms, and the token-level entropy
+controls now in use estimate one of them. We showed that the omission is structural:
+the estimated term vanishes exactly where the omitted term is largest, and it
+vanishes for a correct reason, so the gap cannot be closed by improving the
+estimator. We then showed that the omitted term is a REINFORCE estimator whose
+reward-to-go is the remaining conditional entropy, that a parallel forecaster
+estimates it for the price of one forward pass with an error whose sign and
+monotonicity are known in closed form, and that a tree-structured rollout supplies
+the baseline it requires. The resulting correction is mean-preserving by
+construction: it does not slow entropy collapse, it redirects it.
+
+\section*{Limitations}
+
+\paragraph{A single validation benchmark.}
+Every claim rests on AIME 2024, which has $30$ problems. At $\mathrm{SE} \approx
+0.027$, differences of interest are a fraction of one problem, and a multi-benchmark
+evaluation is required before the direction of any gap can be called robust. We
+report the standard error explicitly rather than significance stars for this reason.
+
+\paragraph{A single seed.}
+All arms use one data seed. The standard error we quote is an across-problem
+quantity and does not bound run-to-run variation, which for these runs is
+uncontrolled because rollout sampling is not seeded across processes. A re-run of
+the same configuration is a second draw, not a restoration.
+
+\paragraph{The effective horizon is one step.}
+The calibration in Eq.~\eqref{eq:a3} suppresses heads beyond the first, so
+$\hat{H}_{\mathrm{togo}}$ is dominated by a single step ahead. This is the predicted
+behavior of Eq.~\eqref{eq:mi} rather than a bug, but it means the ``future'' in the
+visitation term is a short future, and a forecaster whose error did not grow with
+$k$ would test the idea more sharply. A sequential forecaster is the obvious
+comparison and we have not run it.
+
+\paragraph{The support is small by construction.}
+Section~\ref{sec:tree} bounds the fraction of positions carrying a non-zero $\AH$ at
+$2(n-1)/T$, on the order of a percent for our settings. Whether the effect scales
+with $n$, or with a branching schedule chosen adaptively rather than at fixed
+depths, is untested.
+
+\paragraph{An assumption with no remedy.}
+Approximation B2 --- that a token's update does not change the conditional
+distribution at other positions --- is false in a network with shared parameters.
+It is inherited from the base method rather than introduced here, but our
+construction adds a second estimator that relies on it.
+
+\paragraph{One prediction of the analysis is unmeasured.}
+Section~\ref{sec:blind} argues that the two channels are anti-correlated. The
+prefactor half of that claim is analytic and the $\AH$ half is inferred from a
+correlation with branch diversity; we have not measured their \emph{product} at real
+sibling-divergence positions in a live rollout. Until that measurement exists,
+Table~\ref{tab:anticorr} is a prediction rather than an observation.
+
+\paragraph{Scale.}
+All experiments use a single $1.5$B model. The relative size of the two channels
+plausibly depends on how sharp the base policy already is, and we have no evidence
+about larger models.
+
+\section*{Ethics Statement}
+
+This work studies an optimization-time regularizer for reinforcement learning on
+mathematics problems with automatically verifiable answers. It introduces no new
+data collection, no human subjects, and no new model release. The intervention acts
+on which of several equally-scored continuations receives a slightly smaller
+gradient weight; it does not alter the reward, and so does not change what behavior
+is being optimized for. The training data is a public competition-mathematics set
+and the evaluation set is a public examination.
+
+The main foreseeable risk is indirect. Methods that preserve diversity during RL
+fine-tuning are not specific to mathematics, and the same mechanism would apply to a
+reward model encoding any objective, including a harmful one; we note that our
+method inherits, and does not mitigate, whatever the reward function encodes. The
+computational cost of the method (a forward pass through a set of small prediction
+heads at every optimization step) is a real environmental cost, which we quantify in
+Section~\ref{sec:res:cost} so that it can be weighed against the benefit.
+
+\bibliography{custom}
+
+\appendix
+
+\section{Closed Forms for Section~\ref{sec:blind}}
+\label{sec:appendix-closed}
+
+\TODO{Derivation of Eq.~\eqref{eq:secondorder} and the numerical table of first-order
+prediction versus actual entropy change for peaked and uniform distributions.}
+
+\section{Implementation Notes}
+\label{sec:appendix-impl}
+
+\TODO{Tensor layout of the sibling mask, the one-position alignment shift, the
+chunked entropy reduction that avoids materializing the head logits, and the
+$\lambda = 0$ bitwise-equivalence test.}
+
+\end{document}
