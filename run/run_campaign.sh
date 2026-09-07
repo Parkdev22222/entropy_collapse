@@ -195,21 +195,27 @@ for item in "${QUEUE[@]}"; do
     banner "${arm}  seed ${seed}  ->  ${rn}   (${avail:-?} GB free)"
     start=$(date +%s)
 
+    # run_grpo.sh and run_steerf.sh write to stdout, so the campaign tees them
+    # into the per-run log. run_uniform_ablation.sh already redirects its child
+    # into exactly this path (its line "> ${LOG} 2>&1"), so teeing there would
+    # put two writers on one file and truncate the training output away.
     case "${arm}" in
         grpo)
             SEED="${seed}" RUN_NAME="${rn}" \
                 bash run/run_grpo.sh 2>&1 | tee "${log}"
+            st=${PIPESTATUS[0]}
             ;;
         steer)
             SEED="${seed}" RUN_NAME="${rn}" STEERF_LAM=0 \
                 bash run/run_steerf.sh 2>&1 | tee "${log}"
+            st=${PIPESTATUS[0]}
             ;;
         signed|uniform|permuted)
             ARM="${arm}" SEED="${seed}" RUN_NAME="${rn}" STEERF_LAM=0.25 \
-                bash run/run_uniform_ablation.sh 2>&1 | tee "${log}"
+                bash run/run_uniform_ablation.sh
+            st=$?
             ;;
     esac
-    st=${PIPESTATUS[0]}
     printf '[campaign] %s seed %s exit %s after %s min\n' \
         "${arm}" "${seed}" "${st}" "$(( ($(date +%s) - start) / 60 ))"
 
