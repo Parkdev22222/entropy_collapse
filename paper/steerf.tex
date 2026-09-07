@@ -719,26 +719,54 @@ $\widehat{\Delta \log \pi}_u$ reverses both readings.
 \section{Combining the Channels}
 \label{sec:combine}
 
-The two channels enter the same weight:
+The visitation term could be added to $\Om$ before the weight map, but measured on
+real rollouts that map destroys the signal: $\Om$ carries a factor
+$1/\pi_{\mathrm{old}}$, so $\max|\Om| / \mathrm{median}|\Om|$ reaches $3\times10^{4}$
+and the band is spent on one or two outliers while the bulk lands on a point. We
+therefore apply the correction \emph{after} the map, as a bounded adjustment of the
+weights the base method has already produced.
+
+Let $\mathcal{S} = \{u : \mathrm{visit}_u \neq 0\}$ be the support --- by
+Eq.~\eqref{eq:branchonly}, the branch points --- and let
+$b = \lambda_{\max} - \lambda_{\min}$ be the width of the weight band. For
+$u \in \mathcal{S}$,
 %
 \begin{equation}
-\Omt_u = \mathrm{norm}(\Om_u) + \lambda \cdot \mathrm{norm}(\mathrm{visit}_u),
+\begin{split}
+\alpha^{\mathrm{f}}_u = \mathrm{clamp}\Bigl(&\alpha_u
+  + \lambda\, b\, \tanh\!\bigl(\mathrm{visit}_u / \rho\bigr),\\
+  &\lambda_{\min},\ \lambda_{\max}\Bigr),
+\end{split}
 \label{eq:combine}
 \end{equation}
 %
-after which $\Omt$ is passed to the \emph{unmodified} exponential map of
-Eq.~\eqref{eq:steermap}, producing $\alpha_u \in [\lambda_{\min}, 1]$. We emphasize
-that the hook is inserted at the single point where $\Om$ is finalized and that
-nothing downstream is changed; when $\lambda = 0$ the pipeline is bitwise identical
-to the base method, which we enforce with a regression test.
+with $\rho = \mathrm{rms}\{\mathrm{visit}_v : v \in \mathcal{S}\}$;
+$\alpha^{\mathrm{f}}_u = \alpha_u$ elsewhere.
 
-Three choices in Eq.~\eqref{eq:combine} deserve comment. Normalization is required
-even though both terms carry units of nats, because $\Om$ contains a factor
-$1/\pi_{\mathrm{old}}$ and is heavy-tailed. Because normalization removes scale, the
-step size $\eta$ in Eq.~\eqref{eq:dlogpi} only ever appears multiplied by $\lambda$;
-we fix $\eta = 1$ and sweep $\lambda$ alone. Finally, $\mathrm{norm}$ is an RMS
-rescaling rather than a $z$-score, since subtracting a mean would break the
-$\lambda = 0$ equivalence.
+Three properties matter. The $\tanh$ is odd, monotone and bounded, so it preserves
+the sign of the visitation term, caps one token's movement at $\lambda b$, and does
+not depend on the absolute scale of $\mathrm{visit}$. The RMS is taken over
+$\mathcal{S}$ alone rather than over the whole response: normalizing by the whole
+response would shrink the correction in proportion to how sparse branch points are,
+which is a property of the sampler and not of the signal. And at $\lambda = 0$ the
+correction vanishes identically, so the pipeline is bitwise identical to the base
+method --- a regression test enforces this.
+
+Because the map runs first and the correction second, the step size $\eta$ of
+Eq.~\eqref{eq:dlogpi} enters only through $\mathrm{visit}_u / \rho$, where it
+cancels. We fix $\eta = 1$ and sweep $\lambda$ alone.
+
+\paragraph{The support is part of the treatment.}
+$\mathcal{S}$ is defined by $\mathrm{visit}_u \neq 0$ rather than by a threshold,
+deliberately: it selects both where the correction lands and, through $\rho$, how
+large every correction is, so a tighter test would change what is trained rather than
+what is logged. One consequence is that $\mathcal{S}$ admits float32 round-off ---
+$\AH$ is a deviation from a mean over token-identical siblings, and
+$\sum_j g_j / m$ does not reproduce $g_i$ bitwise, leaving $|\AH| \sim 6\times10^{-8}$
+where it is interpretively zero. Those residuals are $\sim\!10^{-6}$ relative to a
+real branch score and cannot move a weight, but they are counted in the support
+statistics of Section~\ref{sec:res:diag}, which should be read as an upper bound on
+the branch-point fraction.
 
 \section{Tree-Structured Rollouts}
 \label{sec:tree}
@@ -1133,7 +1161,9 @@ $\AH$ at $2(n-1)/T$ for any sampler. With $n = 8$ and a mean response length of
 $984$ tokens the bound is $.0142$. Measured over training, the three tree arms sit
 at $.0136$ (\textsc{uniform}), $.0129$ (\textsc{permuted}) and $.0120$ (STEER-F),
 i.e.\ at $84$--$96\%$ of a ceiling that no sampler can exceed. A plain-rollout run
-with the same $\lambda$ reaches $.003$.
+with the same $\lambda$ reaches $.003$. As Section~\ref{sec:combine} notes, this
+count admits float32 round-off and is an upper bound; the runs reported here predate
+the round-off-free counter, so we quote the loose figure and label it as such.
 
 Two readings follow. The tree sampler is close to saturating what the combinatorics
 allow, so there is little headroom in scheduling more cuts; and the intervention is
