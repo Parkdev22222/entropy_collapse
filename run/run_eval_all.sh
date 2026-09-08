@@ -44,7 +44,8 @@ cd "${ROOT}" || { echo "FATAL: cannot cd to ${ROOT}" >&2; exit 1; }
 
 SEEDS=${SEEDS:-"1 2 3 4 5"}
 EVAL_SET=${EVAL_SET:-campaign}          # campaign | followups | all
-FOLLOWUP_ARMS=${FOLLOWUP_ARMS:-"lam0.1 lam0.5 lam0-tree xclip-signed xclip-steer rloo-signed rloo-steer opo-signed opo-steer"}
+FOLLOWUP_ARMS=${FOLLOWUP_ARMS:-"lam0-tree grpo-long lam0.1 lam0.5 xclip-signed xclip-steer rloo-signed rloo-steer opo-signed opo-steer"}
+LONG_STEPS=${LONG_STEPS:-200}
 STEPS=${STEPS:-110}
 LOG_DIR="${ROOT}/logs/experiments"
 CKPT_ROOT="${ROOT}/checkpoints/STEER-F"
@@ -62,8 +63,9 @@ declare -a QUEUE=()
 add_run () {   # <arm> <seed>
     local rn
     rn="$(run_name_for "$1" "$2")" || { echo "FATAL: unknown arm '$1'" >&2; exit 2; }
-    if ! train_log_done "${LOG_DIR}" "${rn}" "${STEPS}"; then
-        printf '  skip  %-24s s%-2s %-52s (training log never reached step %s)\n' "$1" "$2" "${rn}" "${STEPS}"
+    local want; want="$(steps_for_arm "$1")"
+    if ! train_log_done "${LOG_DIR}" "${rn}" "${want}"; then
+        printf '  skip  %-24s s%-2s %-52s (training log never reached step %s)\n' "$1" "$2" "${rn}" "${want}"
         return
     fi
     if [ "${FORCE}" != "1" ] && [ -s "${LOG_DIR}/eval-$1-s$2.log" ]; then

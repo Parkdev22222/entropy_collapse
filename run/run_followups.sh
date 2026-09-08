@@ -44,9 +44,10 @@ cd "${ROOT}" || { echo "FATAL: cannot cd to ${ROOT}" >&2; exit 1; }
 # shellcheck source=run/_arms.sh
 . "${ROOT}/run/_arms.sh"
 
-ARMS=${ARMS:-"lam0-tree lam0.1 lam0.5 xclip-signed xclip-steer rloo-signed rloo-steer opo-signed opo-steer"}
+ARMS=${ARMS:-"lam0-tree grpo-long lam0.1 lam0.5 xclip-signed xclip-steer rloo-signed rloo-steer opo-signed opo-steer"}
 SEED=${SEED:-1}
 STEPS=${STEPS:-110}
+LONG_STEPS=${LONG_STEPS:-200}      # grpo-long only: run past the wall-clock crossing
 LOG_DIR="${ROOT}/logs/experiments"
 MIN_FREE_GB=${MIN_FREE_GB:-20}
 DRY=${DRY:-0}
@@ -87,6 +88,7 @@ arm_spec () {   # <arm>
         xclip-signed) echo "tree STEERF_LAM=0.25 -- ${XCLIP}" ;;
         rloo-signed)  echo "tree STEERF_LAM=0.25 -- algorithm.adv_estimator=rloo" ;;
         opo-signed)   echo "tree STEERF_LAM=0.25 -- algorithm.adv_estimator=opo"  ;;
+        grpo-long)    echo "grpo STEERF_LAM=0" ;;
         xclip-steer)  echo "plain STEERF_LAM=0 -- ${XCLIP}" ;;
         rloo-steer)   echo "plain STEERF_LAM=0 -- algorithm.adv_estimator=rloo" ;;
         opo-steer)    echo "plain STEERF_LAM=0 -- algorithm.adv_estimator=opo"  ;;
@@ -107,7 +109,7 @@ needs_passthrough=0
 for a in ${ARMS}; do
     rn="$(run_name_for "${a}" "${SEED}")"
     spec="$(arm_spec "${a}")"
-    if train_log_done "${LOG_DIR}" "${rn}" "${STEPS}"; then
+    if train_log_done "${LOG_DIR}" "${rn}" "$(steps_for_arm "${a}")"; then
         printf '  skip  %-14s %-52s (done)\n' "${a}" "${rn}"
         continue
     fi
@@ -115,7 +117,8 @@ for a in ${ARMS}; do
     QUEUE+=("${a}")
     case "${spec}" in tree*--*) needs_passthrough=1 ;; esac
 done
-printf '\n%s run(s) queued at seed %s, %s steps each\n' "${#QUEUE[@]}" "${SEED}" "${STEPS}"
+printf '\n%s run(s) queued at seed %s, %s steps (grpo-long: %s)\n' \
+    "${#QUEUE[@]}" "${SEED}" "${STEPS}" "${LONG_STEPS}"
 [ "${#QUEUE[@]}" -eq 0 ] && { echo "Nothing to do."; exit 0; }
 [ "${DRY}" = "1" ] && { echo "(DRY=1, stopping here)"; exit 0; }
 
@@ -195,7 +198,12 @@ for a in "${QUEUE[@]}"; do
     start=$(date +%s)
 
     # shellcheck disable=SC2086  -- extra_part is a deliberate word list
-    if [ "${kind}" = "tree" ]; then
+    if [ "${kind}" = "grpo" ]; then
+        # run_grpo.sh honours STEPS and writes ${LOG_DIR}/train-<run>.log itself.
+        SEED="${SEED}" RUN_NAME="${rn}" LOG="${LOG_DIR}/train-${rn}.log" \
+            STEPS="$(steps_for_arm "${a}")" bash run/run_grpo.sh
+        st=$?
+    elif [ "${kind}" = "tree" ]; then
         # run_uniform_ablation.sh writes ${LOG_DIR}/train-${RUN_NAME}.log itself.
         ARM=signed SEED="${SEED}" RUN_NAME="${rn}" STEERF_LAM="${lam}" STEPS="${STEPS}" \
             bash run/run_uniform_ablation.sh ${extra_part}
@@ -213,8 +221,8 @@ for a in "${QUEUE[@]}"; do
         diagnose_startup_failure "${LOG_DIR}/train-${rn}.log" "${a}" || true
         continue
     fi
-    if ! train_log_done "${LOG_DIR}" "${rn}" "${STEPS}"; then
-        echo "[followups] WARNING: exit 0 but the log never reached step ${STEPS}; not uploading"
+    if ! train_log_done "${LOG_DIR}" "${rn}" "$(steps_for_arm "${a}")"; then
+        echo "[followups] WARNING: exit 0 but the log never reached step $(steps_for_arm "${a}"); not uploading"
         continue
     fi
     if [ -n "${REPO}" ]; then
@@ -227,6 +235,6 @@ done
 banner "follow-ups finished"
 for a in ${ARMS}; do
     rn="$(run_name_for "${a}" "${SEED}")"
-    train_log_done "${LOG_DIR}" "${rn}" "${STEPS}" && r=done || r=MISSING
+    train_log_done "${LOG_DIR}" "${rn}" "$(steps_for_arm "${a}")" && r=done || r=MISSING
     printf '  %-14s %-52s %s\n' "${a}" "${rn}" "${r}"
 done

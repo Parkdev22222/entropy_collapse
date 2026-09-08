@@ -28,7 +28,25 @@ run_name_for () {   # <arm> <seed>  -> the trainer's experiment_name
         rloo-steer)   echo "steer-${MODEL_TAG}-s$2-rloo" ;;
         opo-signed)   echo "steer-f-${MODEL_TAG}-s$2-tree-rollout-opo" ;;
         opo-steer)    echo "steer-${MODEL_TAG}-s$2-opo" ;;
+        # The compute-matched control. STEER-F costs ~1.75x GRPO per step, so
+        # "is the gain worth the wall clock" is only answered by giving GRPO the
+        # same wall clock -- 200 steps covers a ratio up to ~1.8. The analysis
+        # reads the step whose cumulative seconds match STEER-F at 110 rather
+        # than assuming a ratio, so the log has to run past the crossing.
+        grpo-long)    echo "grpo-${MODEL_TAG}-s$2-long" ;;
         *) return 1 ;;
+    esac
+}
+
+# Almost every arm stops at the campaign's 110 steps. grpo-long is the one
+# exception: it is the compute-matched control and has to run past the point
+# where its cumulative wall clock crosses STEER-F's at 110, which 200 covers.
+# Both the training queue and the eval queue need the same answer, so it lives
+# here rather than in either of them.
+steps_for_arm () {   # <arm>
+    case "$1" in
+        grpo-long) echo "${LONG_STEPS:-200}" ;;
+        *)         echo "${STEPS:-110}" ;;
     esac
 }
 
