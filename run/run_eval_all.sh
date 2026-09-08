@@ -100,8 +100,19 @@ if ! bash run/instrument_phase2.sh --check >/dev/null 2>&1; then
         exit 2
     fi
 fi
-if [ -n "${REPO}" ] && ! command -v hf >/dev/null 2>&1; then
-    echo "REFUSE: REPO is set but the 'hf' CLI is not on PATH." >&2
+# The eval passes are verl val_only runs, so they die on a broken stack exactly
+# as training does -- and 20 of them failing in sequence looks like 20 missing
+# checkpoints rather than one broken box.
+if ! env_preflight "${ROOT}"; then
+    echo "REFUSE: the training environment is broken -- nothing would evaluate." >&2
+    exit 2
+fi
+# `hf` in huggingface_hub >= 0.34, `huggingface-cli` before that. Accept either
+# so nobody upgrades the package to get the new name -- see run/hf_backup.sh.
+HF_CLI=${HF_CLI:-$(command -v hf || command -v huggingface-cli || true)}
+if [ -n "${REPO}" ] && [ -z "${HF_CLI}" ]; then
+    echo "REFUSE: REPO is set but neither 'hf' nor 'huggingface-cli' is on PATH." >&2
+    echo "        pip install \"huggingface_hub>=0.34,<1.0\"   (an unpinned upgrade breaks training)" >&2
     exit 2
 fi
 
@@ -149,7 +160,7 @@ PY
     [ -n "${step}" ] || return 1
     local dest="${STAGE}/${rn}/global_step_${step}"
     rm -rf "${dest}"; mkdir -p "${dest}"
-    hf download "${REPO}" --repo-type model \
+    "${HF_CLI}" download "${REPO}" --repo-type model \
         --include "${rn}/global_step_${step}/*" --local-dir "${STAGE}/_dl" >/dev/null 2>&1 || return 1
     mv "${STAGE}/_dl/${rn}/global_step_${step}"/* "${dest}/" 2>/dev/null || return 1
     rm -rf "${STAGE}/_dl"

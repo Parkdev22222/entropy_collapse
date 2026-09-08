@@ -160,6 +160,11 @@ if [ "${needs_passthrough}" = "1" ] && ! bash run/instrument_phase2.sh --check >
     exit 2
 fi
 
+if ! env_preflight "${ROOT}"; then
+    echo "REFUSE: the training environment is broken -- nothing would train." >&2
+    exit 2
+fi
+
 # ---------------------------------------------------------- shared settings
 export SAVE_BEST_ONLY=True
 export SAVE_CONTENTS="['hf_model']"
@@ -205,6 +210,7 @@ for a in "${QUEUE[@]}"; do
 
     if [ "${st}" -ne 0 ]; then
         echo "[followups] FAILED -- keeping the checkpoint, moving on"
+        diagnose_startup_failure "${LOG_DIR}/train-${rn}.log" "${a}" || true
         continue
     fi
     if ! train_log_done "${LOG_DIR}" "${rn}" "${STEPS}"; then

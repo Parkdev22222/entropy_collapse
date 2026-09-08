@@ -145,6 +145,25 @@ else
     ok "transformers ${TV} (<5)"
 fi
 
+# 선언된 핀을 실제로 만족하는지. 2026-09-08: 핀 없는 `pip install -U huggingface_hub`
+# 가 1.30.0 을 깔았고, transformers 는 자기 핀(>=0.34,<1.0)을 import 시점에 다시
+# 검사하므로 `import verl` 이 전부 죽었습니다. 큐에 걸려 있던 arm 두 개가 시작
+# 몇 초 만에 사라졌고, 원인은 며칠 뒤 traceback 을 열어보고서야 드러났습니다.
+# 버전을 하드코딩하지 않고 설치된 메타데이터에서 제약을 읽으므로 낡지 않습니다.
+if [ -f "${STEER_ROOT}/scripts/check_env_pins.py" ]; then
+    PIN_OUT="$(python3 "${STEER_ROOT}/scripts/check_env_pins.py" 2>&1)"; PIN_RC=$?
+    case "${PIN_RC}" in
+        0) ok "선언된 버전 핀 전부 충족" ;;
+        1) printf '%s\n' "${PIN_OUT}" | sed 's/^/  /'
+           bad "버전 핀 위반 — import 시점에 학습이 죽습니다"
+           FIXCMD="$(printf '%s\n' "${PIN_OUT}" | sed -n 's/^ *fix: //p' | tail -1)"
+           [ -n "${FIXCMD}" ] && NEED+=("${FIXCMD}") ;;
+        *) warn "핀 검사 불가: $(printf '%s' "${PIN_OUT}" | tail -1)" ;;
+    esac
+else
+    warn "scripts/check_env_pins.py 없음 — 핀 검사 건너뜀"
+fi
+
 
 # ---------------------------------------------------------------- 4. 순수 파이썬
 # 성공적인 `import X` 는 X 가 설치돼 있다는 뜻이 아닙니다. __init__.py 가 없는

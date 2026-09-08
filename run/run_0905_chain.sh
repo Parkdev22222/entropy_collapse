@@ -32,6 +32,8 @@ set -uo pipefail
 
 STEER_ROOT=${STEER_ROOT:-/workspace/entropy_collapse}
 cd "${STEER_ROOT}" || { echo "FATAL: no ${STEER_ROOT}"; exit 1; }
+# shellcheck source=run/_arms.sh
+. "${STEER_ROOT}/run/_arms.sh"
 
 TAG=${TAG:-0905}
 SEED=${SEED:-1}
@@ -62,6 +64,14 @@ banner () {
     echo " $*   |   $(date '+%F %T')"
     echo "=========================================================="
 }
+
+# Re-running this chain must not redo an arm that already finished, and left
+# alone it would: run_uniform_ablation.sh refuses when the checkpoint directory
+# exists, so a completed signed would be recorded as FAILED and the summary
+# would lie about it. This is not hypothetical -- on 2026-09-08 a huggingface_hub
+# upgrade killed steer and uniform at import while signed had already completed,
+# and the fix is to re-run the chain for the two that died.
+arm_done () { train_log_done "${LOG_DIR}" "$1" "${STEPS}"; }
 
 # eval only needs actor/huggingface; optimizer/extra exist for resume.
 trim_ckpt () {
@@ -97,20 +107,29 @@ if pgrep -f main_ppo >/dev/null 2>&1; then
     echo "REFUSE: a trainer is already running (pgrep main_ppo). Stop it first."
     exit 2
 fi
+if ! env_preflight "${STEER_ROOT}"; then
+    echo "REFUSE: the training environment is broken -- nothing would train."
+    exit 2
+fi
 
 banner "0905 chain: signed -> steer -> uniform   steps=${STEPS} seed=${SEED}"
 df -h /workspace | tail -1
 
 # ---------------------------------------------------------------- 1/3 signed
 RUN_SIGNED="steer-f-Qwen2.5-Math-1.5B-s${SEED}-tree-rollout_${TAG}"
-banner "1/3  signed (STEER-F, lam=0.25, tree)  ->  ${RUN_SIGNED}"
-ray stop --force >/dev/null 2>&1 || true
-sleep 5
-ARM=signed RUN_NAME="${RUN_SIGNED}" STEPS="${STEPS}" STEERF_LAM=0.25 \
-    bash run/run_uniform_ablation.sh
-st_signed=$?
-echo "[chain] signed exit ${st_signed}"
-finish "${st_signed}" "${RUN_SIGNED}" signed
+if arm_done "${RUN_SIGNED}"; then
+    banner "1/3  signed -- already at step ${STEPS}, skipping"
+    st_signed=0
+else
+    banner "1/3  signed (STEER-F, lam=0.25, tree)  ->  ${RUN_SIGNED}"
+    ray stop --force >/dev/null 2>&1 || true
+    sleep 5
+    ARM=signed RUN_NAME="${RUN_SIGNED}" STEPS="${STEPS}" STEERF_LAM=0.25 \
+        bash run/run_uniform_ablation.sh
+    st_signed=$?
+    echo "[chain] signed exit ${st_signed}"
+    finish "${st_signed}" "${RUN_SIGNED}" signed
+fi
 
 # ---------------------------------------------------------------- 2/3 steer
 # lam=0, no tree overrides. run_uniform_ablation.sh only accepts
@@ -119,29 +138,39 @@ finish "${st_signed}" "${RUN_SIGNED}" signed
 # logger (select_best_checkpoint.py parses the event files) and
 # rollout_data_dir=null (writing rollouts leaked ~300 GB of host RAM).
 RUN_STEER="steer-Qwen2.5-Math-1.5B-s${SEED}_${TAG}"
-banner "2/3  steer (lam=0, plain rollout)  ->  ${RUN_STEER}"
-ray stop --force >/dev/null 2>&1 || true
-sleep 5
-STEERF_LAM=0 STEERF_APPLY=weight STEERF_PERMUTE_AH=0 RUN_NAME="${RUN_STEER}" \
-    bash run/run_steerf.sh \
-        "trainer.logger=['console','tensorboard']" \
-        "++trainer.total_training_steps=${STEPS}" \
-        "++trainer.rollout_data_dir=null" \
-    > "${LOG_DIR}/train-${RUN_STEER}.log" 2>&1
-st_steer=$?
-echo "[chain] steer exit ${st_steer}"
-finish "${st_steer}" "${RUN_STEER}" steer
+if arm_done "${RUN_STEER}"; then
+    banner "2/3  steer -- already at step ${STEPS}, skipping"
+    st_steer=0
+else
+    banner "2/3  steer (lam=0, plain rollout)  ->  ${RUN_STEER}"
+    ray stop --force >/dev/null 2>&1 || true
+    sleep 5
+    STEERF_LAM=0 STEERF_APPLY=weight STEERF_PERMUTE_AH=0 RUN_NAME="${RUN_STEER}" \
+        bash run/run_steerf.sh \
+            "trainer.logger=['console','tensorboard']" \
+            "++trainer.total_training_steps=${STEPS}" \
+            "++trainer.rollout_data_dir=null" \
+        > "${LOG_DIR}/train-${RUN_STEER}.log" 2>&1
+    st_steer=$?
+    echo "[chain] steer exit ${st_steer}"
+    finish "${st_steer}" "${RUN_STEER}" steer
+fi
 
 # -------------------------------------------------------------- 3/3 uniform
 RUN_UNIFORM="steer-f-Qwen2.5-Math-1.5B-s${SEED}-tree-rollout-uniform_${TAG}"
-banner "3/3  uniform (lam=0.25, tree, apply=branch)  ->  ${RUN_UNIFORM}"
-ray stop --force >/dev/null 2>&1 || true
-sleep 5
-ARM=uniform RUN_NAME="${RUN_UNIFORM}" STEPS="${STEPS}" STEERF_LAM=0.25 \
-    bash run/run_uniform_ablation.sh
-st_uniform=$?
-echo "[chain] uniform exit ${st_uniform}"
-finish "${st_uniform}" "${RUN_UNIFORM}" uniform
+if arm_done "${RUN_UNIFORM}"; then
+    banner "3/3  uniform -- already at step ${STEPS}, skipping"
+    st_uniform=0
+else
+    banner "3/3  uniform (lam=0.25, tree, apply=branch)  ->  ${RUN_UNIFORM}"
+    ray stop --force >/dev/null 2>&1 || true
+    sleep 5
+    ARM=uniform RUN_NAME="${RUN_UNIFORM}" STEPS="${STEPS}" STEERF_LAM=0.25 \
+        bash run/run_uniform_ablation.sh
+    st_uniform=$?
+    echo "[chain] uniform exit ${st_uniform}"
+    finish "${st_uniform}" "${RUN_UNIFORM}" uniform
+fi
 
 # ---------------------------------------------------------------- summary
 banner "chain finished"

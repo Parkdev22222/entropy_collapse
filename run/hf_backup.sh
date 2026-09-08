@@ -49,6 +49,20 @@ shift
 
 : "${REPO:?set REPO to the Hub repo id, e.g. REPO=DSDSh/steer-f_2}"
 
+# huggingface_hub renamed its CLI from `huggingface-cli` to `hf` in 0.34. Accept
+# either. This matters more than it looks: on 2026-09-08 a missing `hf` is the
+# most likely reason someone ran an unpinned `pip install -U huggingface_hub`,
+# which pulled 1.30.0, broke the pin transformers enforces at import, and killed
+# two queued training arms. Taking the old name removes the reason to upgrade.
+HF_CLI=${HF_CLI:-$(command -v hf || command -v huggingface-cli || true)}
+if [ -z "${HF_CLI}" ]; then
+    echo "FATAL: neither 'hf' nor 'huggingface-cli' is on PATH."
+    echo "       Install it INSIDE the pin transformers declares -- an unpinned"
+    echo "       upgrade breaks every training run:"
+    echo "         pip install \"huggingface_hub>=0.34,<1.0\""
+    exit 1
+fi
+
 case "${RUN}" in
     *"${LIVE_TAG}"*)
         if [ "${FORCE:-0}" != "1" ]; then
@@ -117,7 +131,7 @@ for step in "${steps[@]}"; do
     echo "---- global_step_${step}  ($(du -sh "${src}" 2>/dev/null | cut -f1))"
     if [ ! -d "${src}" ]; then echo "  skip: ${src} missing"; rc=1; continue; fi
 
-    hf upload "${REPO}" "${src}" "${RUN}/global_step_${step}" \
+    "${HF_CLI}" upload "${REPO}" "${src}" "${RUN}/global_step_${step}" \
         --repo-type model --commit-message "backup ${RUN} step ${step}"
     if [ $? -ne 0 ]; then echo "  upload FAILED -- not verifying, not deleting"; rc=1; continue; fi
 

@@ -28,6 +28,8 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT}" || { echo "FATAL: cannot cd to ${ROOT}" >&2; exit 1; }
+# shellcheck source=run/_arms.sh
+. "${ROOT}/run/_arms.sh"
 
 DRY=${DRY:-0}
 REPO=${REPO:-}
@@ -102,6 +104,23 @@ if campaign_running; then
 fi
 echo "[phase2] $(date -Is)  the box is free"
 sleep 60      # let the GPUs actually release before vLLM grabs them
+
+# ------------------------------------------------------- 1b. environment
+# This session wakes up weeks after it was armed, so the box it wakes into is
+# not the box it was armed on. It WAITS rather than exiting: phase 2 is
+# unattended, and giving up here would silently throw away the whole queue over
+# a pip upgrade. The diagnosis below names the fix; apply it and this continues
+# on its own.
+if ! env_preflight "${ROOT}"; then
+    echo
+    echo "[phase2] the environment is broken. Waiting for it to be fixed --"
+    echo "[phase2] apply the fix above and this queue continues by itself."
+    while ! env_preflight "${ROOT}" >/dev/null 2>&1; do
+        sleep 1800
+        echo "[phase2] $(date -Is)  still waiting for a working environment"
+    done
+    echo "[phase2] $(date -Is)  environment repaired, continuing"
+fi
 
 # ----------------------------------------------------------------- 2. patch
 banner "$(date -Is)  applying the phase-2 instrumentation"

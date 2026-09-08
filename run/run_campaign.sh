@@ -151,6 +151,13 @@ if [ -n "${REPO}" ] && ! python3 -c "import huggingface_hub" 2>/dev/null; then
     echo "REFUSE: REPO is set but huggingface_hub is not importable." >&2
     exit 2
 fi
+# Five seconds in front of a 40-hour run. On 2026-09-08 an unpinned
+# huggingface_hub upgrade made every `import verl` raise, and a queued chain
+# burned two arms in seconds before anyone noticed.
+if ! env_preflight "${ROOT}"; then
+    echo "REFUSE: the training environment is broken -- nothing would train." >&2
+    exit 2
+fi
 
 # ---------------------------------------------------------- shared settings
 export SAVE_BEST_ONLY=True                 # keep only the best checkpoint
@@ -205,6 +212,7 @@ for item in "${QUEUE[@]}"; do
 
     if [ "${st}" -ne 0 ]; then
         echo "[campaign] FAILED -- keeping the checkpoint so it can be resumed, moving on"
+        diagnose_startup_failure "${log}" "${arm} seed ${seed}" || true
         continue
     fi
     if ! is_done "${rn}"; then
