@@ -37,23 +37,9 @@ WAIT_POLL=${WAIT_POLL:-300}
 SKIP_EVAL=${SKIP_EVAL:-0}
 SKIP_FOLLOWUPS=${SKIP_FOLLOWUPS:-0}
 EVAL_FOLLOWUPS=${EVAL_FOLLOWUPS:-1}
-BUSY_RE="[m]ain_ppo|[r]un_0905_chain"
 
 banner () { printf '\n############################################\n# %s\n############################################\n' "$*"; }
 
-busy_pids () {
-    local anc p
-    anc=" "; p=$$
-    while [ "${p}" != "1" ] && [ -r "/proc/${p}/status" ]; do
-        anc="${anc}${p} "
-        p="$(awk '/^PPid:/{print $2}' "/proc/${p}/status" 2>/dev/null)"
-        [ -n "${p}" ] || break
-    done
-    pgrep -f "${BUSY_RE}" 2>/dev/null | while read -r pid; do
-        case "${anc}" in *" ${pid} "*) continue ;; esac
-        echo "${pid}"
-    done
-}
 campaign_running () {
     local holder
     if [ -d "${ROOT}/.campaign.lock" ]; then

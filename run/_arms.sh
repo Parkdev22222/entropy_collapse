@@ -147,3 +147,45 @@ diagnose_startup_failure () {   # <log-file> <label>
     fi
     return 1
 }
+
+# --- is a trainer running? ---------------------------------------------------
+# `pgrep -f` matches whole command lines, so the shell that launched this script
+# matches too whenever the launch command mentions main_ppo. Excluding our own
+# ancestors removes exactly those without hiding a real trainer. Three queues
+# had their own copy of this; a second trainer on the same two cards OOMs both,
+# so the check is worth having in exactly one place.
+BUSY_RE=${BUSY_RE:-"[m]ain_ppo|[r]un_0905_chain"}
+busy_pids () {
+    local anc p
+    anc=" "; p=$$
+    while [ "${p}" != "1" ] && [ -r "/proc/${p}/status" ]; do
+        anc="${anc}${p} "
+        p="$(awk '/^PPid:/{print $2}' "/proc/${p}/status" 2>/dev/null)"
+        [ -n "${p}" ] || break
+    done
+    # Our own cmdline, to drop forks of ourselves. Excluding ancestors is not
+    # enough when the checking shell's OWN command line mentions main_ppo (a
+    # tmux launch string, say): every subshell it forks inherits that cmdline,
+    # matches pgrep, and is a DESCENDANT rather than an ancestor. A real trainer
+    # is "python3 -m verl.trainer.main_ppo ..." and never byte-identical to the
+    # shell asking the question.
+    local self_cmd
+    self_cmd="$(tr '\0' ' ' < "/proc/$$/cmdline" 2>/dev/null || true)"
+    pgrep -f "${BUSY_RE}" 2>/dev/null | while read -r pid; do
+        case "${anc}" in *" ${pid} "*) continue ;; esac
+        [ -n "${self_cmd}" ] && \
+            [ "$(tr '\0' ' ' < "/proc/${pid}/cmdline" 2>/dev/null || true)" = "${self_cmd}" ] \
+            && continue
+        echo "${pid}"
+    done
+}
+is_busy () { [ -n "$(busy_pids)" ]; }
+
+# Is one of the other queues holding its lock with a live process?
+lock_holder () {   # <lock-dir>  -> prints the live pid, or nothing
+    local h
+    [ -d "$1" ] || return 1
+    h="$(cat "$1/pid" 2>/dev/null || true)"
+    [ -n "${h}" ] && kill -0 "${h}" 2>/dev/null && { echo "${h}"; return 0; }
+    return 1
+}

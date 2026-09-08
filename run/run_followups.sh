@@ -54,28 +54,10 @@ DRY=${DRY:-0}
 REPO=${REPO:-}
 WAIT=${WAIT:-0}
 WAIT_POLL=${WAIT_POLL:-120}
-BUSY_RE="[m]ain_ppo|[r]un_0905_chain"
 
 banner () { printf '\n========================================\n%s\n========================================\n' "$*"; }
 free_gb () { df -BG --output=avail "${ROOT}" 2>/dev/null | tail -1 | tr -dc '0-9'; }
 
-# pgrep matches whole command lines, so the shell that launched this script
-# matches too whenever the launch command mentions main_ppo. Excluding our own
-# ancestors removes exactly those without hiding a real trainer.
-busy_pids () {
-    local anc p
-    anc=" "; p=$$
-    while [ "${p}" != "1" ] && [ -r "/proc/${p}/status" ]; do
-        anc="${anc}${p} "
-        p="$(awk '/^PPid:/{print $2}' "/proc/${p}/status" 2>/dev/null)"
-        [ -n "${p}" ] || break
-    done
-    pgrep -f "${BUSY_RE}" 2>/dev/null | while read -r pid; do
-        case "${anc}" in *" ${pid} "*) continue ;; esac
-        echo "${pid}"
-    done
-}
-is_busy () { [ -n "$(busy_pids)" ]; }
 
 # ------------------------------------------------------- the arm definitions
 # Each arm prints, on stdout, one line per token: the launcher, then the env

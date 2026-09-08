@@ -33,6 +33,17 @@ Correcting the Visitation Channel in Token-Level Entropy Control for RLVR}
 
 \author{Anonymous ACL submission}
 
+% ---- generated numbers ------------------------------------------------
+% scripts/analyze_seeds.py writes results/numbers.tex from the training logs.
+% \num{X} prints \X when the campaign has produced it and a loud placeholder
+% when it has not, so this file can be compiled at any point in the campaign
+% without ever printing a number nobody measured. Predicting a result and
+% typing it in "to save time" is how a predicted number reaches a submission.
+\providecommand{\PENDING}{\textcolor{red}{\textbf{[pending]}}}
+\newcommand{\num}[1]{\ifcsname #1\endcsname\csname #1\endcsname\else\PENDING\fi}
+\IfFileExists{../results/numbers.tex}{\input{../results/numbers.tex}}{%
+  \IfFileExists{results/numbers.tex}{\input{results/numbers.tex}}{}}
+
 \begin{document}
 \maketitle
 
@@ -1032,22 +1043,21 @@ Table~\ref{tab:plateau} averages each arm over steps $40$--$110$.
 
 \begin{table}[t]
 \centering
-\footnotesize
-\setlength{\tabcolsep}{3.2pt}
+\scriptsize
+\setlength{\tabcolsep}{2.6pt}
 \begin{tabular}{@{}lccccc@{}}
 \toprule
-arm & acc@32 & maj@32 & uplift & entropy & len \\
+arm & $n$ & acc@32 & maj@32 & uplift & entropy \\
 \midrule
-GRPO             & .1350 & .1963 & .0612 & \textbf{.1491} & 964 \\
-\textsc{steer}   & .1330 & .1984 & .0654 & .1214 & 988 \\
-\textsc{uniform} & .1313 & .1953 & .0640 & .1374 & 946 \\
-\textsc{permuted}& .1370 & .2094 & .0724 & .1190 & 960 \\
-\textbf{STEER-F} & \textbf{.1495} & \textbf{.2349} & \textbf{.0854} & .1210 & 984 \\
+GRPO             & \num{Ngrpo}     & \num{Rgrpoacc}     & \num{Rgrpomaj}     & \num{Rgrpouplift}     & \num{Rgrpoentropy}     \\
+\textsc{steer}   & \num{Nsteer}    & \num{Rsteeracc}    & \num{Rsteermaj}    & \num{Rsteeruplift}    & \num{Rsteerentropy}    \\
+\textsc{uniform} & \num{Nuniform}  & \num{Runiformacc}  & \num{Runiformmaj}  & \num{Runiformuplift}  & \num{Runiformentropy}  \\
+\textsc{permuted}& \num{Npermuted} & \num{Rpermutedacc} & \num{Rpermutedmaj} & \num{Rpermuteduplift} & \num{Rpermutedentropy} \\
+\textbf{STEER-F} & \num{Nsigned}   & \num{Rsignedacc}   & \num{Rsignedmaj}   & \num{Rsigneduplift}   & \num{Rsignedentropy}   \\
 \bottomrule
 \end{tabular}
 \caption{Means over the converged window (steps $40$--$110$, eight validation points
-per arm). \emph{uplift} is $\mathrm{maj@}32 - \mathrm{acc@}32$; \emph{len} is the mean
-response length in tokens. Entropy is the token-mean quantity discussed in
+per run), averaged over $n$ seeds. \emph{uplift} is $\mathrm{maj@}32 - \mathrm{acc@}32$. Entropy is the token-mean quantity discussed in
 Section~\ref{sec:setup}, i.e.\ $\Htraj$ divided by mean length.}
 \label{tab:plateau}
 \end{table}
@@ -1067,24 +1077,25 @@ reports the mean difference together with a paired $t$ over the eight points.
 \begin{table}[t]
 \centering
 \footnotesize
-\setlength{\tabcolsep}{3pt}
-\begin{tabular}{@{}lrrrr@{}}
+\scriptsize
+\setlength{\tabcolsep}{1.8pt}
+\begin{tabular}{@{}lcrrrr@{}}
 \toprule
-contrast & $\Delta$acc & $t$ & $\Delta$maj & $t$ \\
+contrast & $n$ & $\Delta$acc & $t$ & $\Delta$maj & $t$ \\
 \midrule
-STEER-F $-$ GRPO      & $+.0145$ & $3.08$ & $+.0386$ & $4.74$ \\
-STEER-F $-$ \textsc{steer}   & $+.0165$ & $6.68$ & $+.0365$ & $5.09$ \\
-STEER-F $-$ \textsc{unif} & $+.0182$ & $7.18$ & $+.0396$ & $5.50$ \\
-STEER-F $-$ \textsc{perm}& $+.0125$ & $2.56$ & $+.0255$ & $5.26$ \\
+STEER-F $-$ GRPO           & \num{Nsignedgrpo}     & $\num{Csignedgrpoacc}$     & $\num{Tsignedgrpoacc}$     & $\num{Csignedgrpomaj}$     & $\num{Tsignedgrpomaj}$ \\
+STEER-F $-$ \textsc{steer} & \num{Nsignedsteer}    & $\num{Csignedsteeracc}$    & $\num{Tsignedsteeracc}$    & $\num{Csignedsteermaj}$    & $\num{Tsignedsteermaj}$ \\
+STEER-F $-$ \textsc{unif}  & \num{Nsigneduniform}  & $\num{Csigneduniformacc}$  & $\num{Tsigneduniformacc}$  & $\num{Csigneduniformmaj}$  & $\num{Tsigneduniformmaj}$ \\
+STEER-F $-$ \textsc{perm}  & \num{Nsignedpermuted} & $\num{Csignedpermutedacc}$ & $\num{Tsignedpermutedacc}$ & $\num{Csignedpermutedmaj}$ & $\num{Tsignedpermutedmaj}$ \\
 \midrule
-GRPO $-$ \textsc{steer}      & $+.0020$ & $0.34$ & $-.0021$ & $-0.21$ \\
-\textsc{perm} $-$ \textsc{steer}  & $+.0040$ & $0.83$ & $+.0110$ & $1.75$ \\
-\textsc{unif} $-$ \textsc{steer}   & $-.0017$ & $-0.62$ & $-.0031$ & $-0.52$ \\
+\textsc{steer} $-$ GRPO    & \num{Nsteergrpo}      & $\num{Csteergrpoacc}$      & $\num{Tsteergrpoacc}$      & $\num{Csteergrpomaj}$      & $\num{Tsteergrpomaj}$ \\
+\textsc{unif} $-$ \textsc{steer} & \num{Nuniformsteer} & $\num{Cuniformsteeracc}$ & $\num{Tuniformsteeracc}$ & $\num{Cuniformsteermaj}$ & $\num{Tuniformsteermaj}$ \\
 \bottomrule
 \end{tabular}
-\caption{Paired contrasts over the eight converged-window steps. $t$ is the paired
-$t$-statistic on those eight differences; it asks whether a gap is consistent across
-the window, not whether it would survive a change of benchmark or seed.}
+\caption{Contrasts paired \emph{by seed}: each arm is averaged over its converged
+window, arms are paired within a seed, and $t$ is the paired $t$ on the $n$ seed-level
+differences ($\mathrm{df} = n-1$). Pairing within a seed cancels any per-seed effect
+common to all five arms. A contrast's $n$ is the smaller of its two arms' seed counts.}
 \label{tab:contrast}
 \end{table}
 
