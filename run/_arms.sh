@@ -46,10 +46,24 @@ ckpt_alias_for () {   # <arm> <seed>  -> extra checkpoint directory names
 # A run is finished when its log carries the final optimisation step. The tqdm
 # counter is not usable: run_steerf.sh declares total_training_steps=200 while
 # the campaign stops at 110, so a complete run's bar reads "110/200".
-# The glob picks up recovery runs with a tag suffix (the _0905 chain) too.
+#
+# The only suffix allowed on top of the run name is _<tag>, which is how the
+# recovery chain names its logs (train-<run>_0905.log). A bare "train-<run>"*
+# glob would ALSO swallow the arm suffixes, and the run names are prefixes of
+# each other by construction:
+#
+#     signed    steer-f-<tag>-s2-tree-rollout
+#     permuted  steer-f-<tag>-s2-tree-rollout-permuted     <- signed + "-..."
+#
+# so one finished permuted would mark signed done, and the campaign runs
+# permuted BEFORE signed. The queue is built once per invocation, so a running
+# campaign is unaffected -- but every restart after the first tree arm of a
+# seed completes would drop the treatment arm silently, with no error anywhere.
+# Every arm suffix starts with "-", every recovery tag with "_", which is
+# exactly the line these two patterns draw. tests/test_run_names.py pins it.
 train_log_done () {   # <log-dir> <run-name> <steps>
     local f
-    for f in "$1/train-$2"*.log; do
+    for f in "$1/train-$2.log" "$1/train-$2"_*.log; do
         [ -f "${f}" ] || continue
         grep -q "step:$3 - global_seqlen" "${f}" && return 0
     done
