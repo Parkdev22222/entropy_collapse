@@ -54,6 +54,37 @@ from steer_f.validation import (  # noqa: E402
 
 TRUNC_FRACS = (0.2, 0.4, 0.6, 0.8)
 
+# 게이트 판정(0=통과, 2=실패)과 구분되는 설정/데이터 오류 코드.
+EMPTY_POOL_EXIT = 3
+
+
+class EmptyPoolError(RuntimeError):
+    """문제 또는 prefix 풀이 비었다 — 이후 스테이지는 전부 무의미하다."""
+
+
+def check_pools(problems: list, prefixes: list) -> None:
+    """빈 풀을 **발생한 지점에서** 잡는다.
+
+    가드가 없으면 stage3~5 가 빈 입력으로 조용히 진행하다가 `select_kappa_gamma` 의
+    "no finite rho in grid results" 로 죽는다 — 원인과 무관한 메시지라 GPU 시간을 버린다.
+    """
+    if not problems:
+        raise EmptyPoolError(
+            "선정된 문제가 0개다. 모델이 정답/오답을 섞어 내는 문제가 후보에 없었다.\n"
+            "  - --problem-pool 을 늘려 후보를 넓힐 것\n"
+            "  - --min-pass-rate / --max-pass-rate 범위를 완화할 것 "
+            "(전부 오답이면 min 을 0.0 까지 내려야 한다)\n"
+            "  - 모델/프롬프트 조합이 맞는지 확인할 것"
+        )
+    if not prefixes:
+        raise EmptyPoolError(
+            f"prefix 가 0개다. 각 궤적은 절단 지점 수({len(TRUNC_FRACS)}개) 이상의 "
+            "'스텝'(비어 있지 않은 줄)을 가져야 한다.\n"
+            "  - --max-response-length 를 늘려 궤적을 길게 뽑을 것\n"
+            "  - 모델이 줄바꿈 없는 한 줄 응답만 내는지 확인할 것 "
+            "(split_steps 는 줄 단위로 스텝을 센다)"
+        )
+
 
 # ----------------------------------------------------------------------
 # 정답 판정 (문제 선정용 — 엄밀한 채점기가 아니라 혼합 난이도 필터)
@@ -411,6 +442,12 @@ def main() -> int:
 
     problems = stage_trajectories(args, tok, backend, workdir)
     prefixes = stage_prefixes(problems, workdir, args.force)
+    try:
+        check_pools(problems, prefixes)
+    except EmptyPoolError as exc:
+        print(f"[fatal] {exc}", file=sys.stderr)
+        return EMPTY_POOL_EXIT
+
     gt = stage_ground_truth(args, model, tok, backend, prefixes, workdir)
     fc = stage_forecast(args, model, tok, heads, prefixes, workdir)
 

@@ -42,6 +42,7 @@ from scripts._common import (  # noqa: E402
     load_policy,
     load_prompts_from_parquet,
     load_rollouts_jsonl,
+    load_tokenizer,
     save_rollouts_jsonl,
 )
 from steer_f.mtp_heads import MTPHeads  # noqa: E402
@@ -51,9 +52,7 @@ from steer_f.mtp_heads import MTPHeads  # noqa: E402
 # 롤아웃 생성
 # ----------------------------------------------------------------------
 def cmd_generate(args) -> int:
-    from transformers import AutoTokenizer
-
-    tok = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
+    tok = load_tokenizer(args.model)
     problems = load_prompts_from_parquet(args.prompts, limit=args.n_prompts)
     print(f"[generate] {len(problems)} prompts × {args.n_samples} samples")
 

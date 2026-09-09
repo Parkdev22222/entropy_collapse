@@ -13,13 +13,40 @@ from typing import Any, Iterable, Optional, Sequence
 
 __all__ = [
     "Rollout",
+    "is_smoke_model",
     "load_prompts_from_parquet",
     "load_rollouts_jsonl",
     "save_rollouts_jsonl",
     "load_policy",
+    "load_tokenizer",
     "get_last_hidden_states",
     "GenerationBackend",
 ]
+
+
+def is_smoke_model(model_path: str) -> bool:
+    """`smoke:` 센티널인가. 실모델 경로는 절대 여기 걸리면 안 된다 (접두사 일치만)."""
+    from scripts.smoke_model import SMOKE_PREFIX
+
+    return str(model_path).startswith(SMOKE_PREFIX)
+
+
+def _parse_smoke_spec(model_path: str) -> dict:
+    """`smoke:h32,l2,seed0` → {hidden_size, num_layers, seed}. 빈 스펙은 기본값."""
+    spec = {"hidden_size": 32, "num_layers": 2, "seed": 0}
+    body = str(model_path).split(":", 1)[1]
+    for part in (p.strip() for p in body.split(",")):
+        if not part:
+            continue
+        if part.startswith("h"):
+            spec["hidden_size"] = int(part[1:])
+        elif part.startswith("seed"):
+            spec["seed"] = int(part[4:])
+        elif part.startswith("l"):
+            spec["num_layers"] = int(part[1:])
+        else:
+            raise ValueError(f"알 수 없는 smoke 옵션: {part!r} (h<int>,l<int>,seed<int>)")
+    return spec
 
 
 @dataclass
@@ -49,7 +76,14 @@ def load_prompts_from_parquet(path: str | pathlib.Path, limit: Optional[int] = N
     """STEER 동봉 parquet(DAPO-Math-17k 등)에서 프롬프트를 읽는다.
 
     스키마: data_source / prompt(list[{role, content}]) / ability / reward_model / extra_info
+
+    `.json` / `.jsonl` 도 같은 스키마로 받는다 — 스모크 실행에서 pandas/pyarrow 없이
+    돌리기 위한 경로다 (`scripts/make_smoke_data.py` 가 생성).
     """
+    path = pathlib.Path(path)
+    if path.suffix in (".json", ".jsonl"):
+        return _load_prompts_from_json(path, limit)
+
     import pandas as pd
 
     df = pd.read_parquet(path)
@@ -69,6 +103,36 @@ def load_prompts_from_parquet(path: str | pathlib.Path, limit: Optional[int] = N
             {
                 "problem_id": str(pid if pid is not None else i),
                 "messages": [dict(m) for m in messages],
+                "ground_truth": gt,
+            }
+        )
+    return out
+
+
+def _load_prompts_from_json(path: pathlib.Path, limit: Optional[int]) -> list[dict]:
+    """parquet 과 동일 스키마의 json 배열 또는 jsonl."""
+    text = path.read_text().strip()
+    if not text:
+        return []
+    if text.lstrip().startswith("["):
+        rows = json.loads(text)
+    else:
+        rows = [json.loads(ln) for ln in text.splitlines() if ln.strip()]
+    if limit is not None:
+        rows = rows[:limit]
+
+    out = []
+    for i, row in enumerate(rows):
+        rm = row.get("reward_model")
+        gt = rm.get("ground_truth") if isinstance(rm, dict) else None
+        extra = row.get("extra_info")
+        pid = row.get("problem_id")
+        if pid is None and isinstance(extra, dict):
+            pid = extra.get("index")
+        out.append(
+            {
+                "problem_id": str(pid if pid is not None else i),
+                "messages": [dict(m) for m in row["prompt"]],
                 "ground_truth": gt,
             }
         )
@@ -111,8 +175,33 @@ def load_rollouts_jsonl(path: str | pathlib.Path, limit: Optional[int] = None) -
 # ----------------------------------------------------------------------
 # 모델
 # ----------------------------------------------------------------------
+def load_tokenizer(model_path: str):
+    """토크나이저만 필요한 경로용 (롤아웃 생성 등). `smoke:` 는 합성 토크나이저."""
+    if is_smoke_model(model_path):
+        from scripts.smoke_model import TinyTokenizer
+
+        return TinyTokenizer()
+
+    from transformers import AutoTokenizer
+
+    tok = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+    if tok.pad_token is None:
+        tok.pad_token = tok.eos_token
+    return tok
+
+
 def load_policy(model_path: str, dtype: str = "bfloat16", device: str = "cuda"):
-    """(model, tokenizer) 반환. 정책은 항상 eval 모드로 둔다."""
+    """(model, tokenizer) 반환. 정책은 항상 eval 모드로 둔다.
+
+    `model_path` 가 `smoke:` 로 시작하면 transformers 대신 합성 스택을 쓴다
+    (`scripts/smoke_model.py`). 배관 검증 전용 — 결과에 의미는 없다.
+    """
+    if is_smoke_model(model_path):
+        from scripts.smoke_model import build_smoke_stack
+
+        model, tok = build_smoke_stack(**_parse_smoke_spec(model_path))
+        return model.to(device), tok
+
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -161,6 +250,13 @@ class GenerationBackend:
         self.model_path = model_path
         self.kind = "hf"
         self._llm = None
+
+        if is_smoke_model(model_path):
+            # vLLM 에는 이 모델의 경로가 없다. 스모크는 언제나 로컬 합성 스택.
+            self.kind = "smoke"
+            self._model, self._tok = load_policy(model_path, dtype=dtype, device="cpu")
+            return
+
         if prefer_vllm:
             try:
                 from vllm import LLM
@@ -198,7 +294,12 @@ class GenerationBackend:
             outs = self._llm.generate(list(prompts), params)
             return [[o.text for o in out.outputs] for out in outs]
 
-        import torch  # pragma: no cover - 환경 의존
+        import torch
+
+        # vLLM 경로는 SamplingParams(seed=...) 로 재현성을 얻는다. 로컬 생성 경로에도
+        # 같은 보장을 줘야 캐시 재계산(--force)이 같은 결과를 낸다.
+        if seed is not None:
+            torch.manual_seed(seed)
 
         results = []
         for prompt in prompts:
