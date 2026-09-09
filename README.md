@@ -21,13 +21,17 @@ H_togo^κ(s)   = Σ_{k=1..κ} γ_H^k · H( p_MTP(y_{t+k} | s) )
 | Phase | 코드/문서 | 실행 |
 |---|---|---|
 | 0 — 코드 맵 | ✅ `docs/steer_code_map.md` | 재현 학습 ❌ (GPU 없음) |
-| 1 — MTP 헤드·검증 | ✅ 모듈 + 워밍업/검증 스크립트 | ❌ (GPU 없음) |
-| 2 — Ω̃ 통합 | ✅ 패치 + 105개 단위 테스트 통과 | ❌ (GPU 없음) |
+| 1 — MTP 헤드·검증 | ✅ 모듈 + 워밍업/검증 스크립트 | 배관만 ✅ (CPU 스모크), 실측 ❌ |
+| 2 — Ω̃ 통합 | ✅ 패치 + 154개 테스트 통과 | ❌ (GPU 없음) |
 | 3 — 패밀리 전이 | ✅ 이식 헬퍼 | ❌ |
 | 4 — Ablation | ✅ 전 축이 config 노출됨 | ❌ |
 
 게이트 G0/G1/G2/G3는 **모두 미판정**이다 — 판정에 필요한 학습·샘플링이 이 개발
 환경(CPU 전용)에서 실행 불가하기 때문. 자세한 내용은 `docs/experiment_log.md`.
+
+Phase 1 파이프라인은 합성 모델로 CPU에서 **end-to-end 완주가 확인**됐다
+(`bash run/run_smoke_cpu.sh`). 이는 배관 검증일 뿐 실험 결과가 아니다.
+이어서 할 일은 `docs/HANDOFF.md` 참조.
 
 ---
 
@@ -47,15 +51,19 @@ scripts/
   phase1_warmup_heads.py   롤아웃 생성 + 헤드 CE 워밍업
   phase1_validate.py       MC 검증 + (κ, γ_H) 그리드 + G1 판정 + 리포트
   phase3_port_model.py     패밀리 이식 점검 + 그룹 pass rate 분포
+  smoke_model.py           의존성 없는 합성 정책 스택 (배관 검증 전용)
+  make_smoke_data.py       parquet 동일 스키마의 합성 문제 jsonl
 patches/
   core_algos_steerf.patch  verl 수정분 (git apply 검증 완료)
 run/
   run_steerf_linear.sh     LAMBDA=0이면 STEER 재현, >0이면 STEER-F
+  run_smoke_cpu.sh         Phase 1 전 구간 CPU 스모크 (GPU/transformers 불필요)
 docs/
   steer_code_map.md        Phase 0 산출물 — 실제 코드 기준 라인 단위 맵
   experiment_log.md        전 실험 러닝 로그 (실패 포함)
   phase1_report.md         phase1_validate.py가 생성 (현재는 자리표시자)
-tests/                     105 tests, CPU에서 2초
+  HANDOFF.md               인수인계 — 현재 상태와 다음에 할 일
+tests/                     154 tests, CPU에서 10초 내외
 ```
 
 ---
@@ -63,9 +71,21 @@ tests/                     105 tests, CPU에서 2초
 ## 빠른 시작
 
 ```bash
-pip install torch pytest numpy pandas pyarrow
-python -m pytest tests/ -q          # 105 passed
+pip install torch pytest numpy         # 필수는 이 셋뿐
+pip install pandas pyarrow             # parquet 데이터셋을 쓸 때만
+python -m pytest tests/ -q             # 154 passed, 10초 내외
 ```
+
+### CPU 스모크 (GPU 없이 배관 확인)
+
+```bash
+bash run/run_smoke_cpu.sh
+```
+
+합성 모델로 Phase 1 전 구간(문제 생성 → 롤아웃 → 헤드 워밍업 → 검증 → 리포트)을
+완주시킨다. **결과 숫자에는 의미가 없다** — 난수 가중치이므로 게이트 G1은 거의 항상
+실패한다(종료코드 2). 확인하는 것은 "판정이 내려지고 리포트가 쓰이는가"이다.
+예상치 못한 종료코드가 나오면 배관이 깨진 것이므로 GPU 노드에 올리기 전에 고칠 것.
 
 ### 전체 파이프라인 (GPU 노드)
 

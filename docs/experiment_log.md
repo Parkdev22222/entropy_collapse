@@ -80,6 +80,94 @@ Phase 2 첫 실행에서 `steerf/alpha_saturated`를 반드시 확인할 것.
 
 ---
 
+## 2026-09-09 — Phase 1 배관 검증 (CPU 스모크). 여전히 실험 없음
+
+### 환경
+
+새 컨테이너. 여전히 **CPU 전용**이고, 이번엔 의존성도 비어 있었다.
+
+```
+$ nvidia-smi
+bash: nvidia-smi: command not found
+$ pip install torch --index-url https://download.pytorch.org/whl/cpu
+ERROR: 프록시가 download.pytorch.org 를 차단 (403) — PyPI 기본 인덱스로는 설치됨
+$ python -c "import transformers, pandas, vllm"
+ModuleNotFoundError (셋 다 없음, 설치 불가/불필요)
+```
+
+torch 2.14.0+cu130(CPU 실행) + numpy + pytest 만 확보. 게이트 G0~G3 는 **여전히 전부
+미판정**이며 이 세션에서도 어떤 실험 결론도 주장하지 않는다.
+
+### 문제 인식
+
+기존 105개 테스트는 `steer_f/` 모듈만 덮고 있었다. 반면 `scripts/phase1_warmup_heads.py`
+와 `scripts/phase1_validate.py` 는 **한 번도 실행된 적이 없었다**. 즉 GPU 노드에서 가장
+비싼 첫 실행이 곧 이 스크립트들의 첫 실행이 되는 상황이었다 — 배관 버그 하나로 GPU
+시간을 통째로 버릴 수 있다.
+
+### 수행한 것
+
+의존성 없는 합성 스택(`scripts/smoke_model.py`)을 만들어 Phase 1 전 구간을 CPU에서
+완주시켰다. 문자 단위 토크나이저 + 소형 causal transformer로, 실제 코드가 **실제로
+호출하는 표면만** 흉내낸다(형상 계약은 `tests/test_smoke_model.py`가 강제).
+
+```
+$ bash run/run_smoke_cpu.sh
+[stage1] kept 3 mixed-outcome problems
+[stage2] 48 prefixes
+[grid] selected kappa=1 gamma_h=0.85 rho=0.1251
+[G1 FAIL] ... rho 0.1251 < 0.2 / recall lift 1.00
+게이트 종료코드: 2   파이프라인 완주 — 배관 정상.
+```
+
+**이 숫자들은 아무 의미도 없다** (난수 가중치). 확인한 것은 "판정이 내려지고 리포트가
+쓰이는가"이지 "통과했는가"가 아니다.
+
+### 발견 — 실제 버그: 빈 prefix 풀이 조용히 통과한다
+
+스모크 첫 실행에서 `[stage2] 0 prefixes` 가 나왔는데도 stage3/4/5 가 **빈 입력으로
+그대로 진행**했고, 네 단계 뒤 `select_kappa_gamma` 에서 원인과 무관한 메시지로 죽었다:
+
+```
+[stage2] 0 prefixes
+[stage3] sampling 2 continuations for 0 prefixes
+UserWarning: The use of `x.T` on tensors of dimension other than 2 ...
+ValueError: no finite rho in grid results        ← 진짜 원인과 무관
+```
+
+GPU 노드에서 이 경로를 밟으면 원인 추적에 사람 시간과 GPU 시간을 모두 버린다.
+실모델에서도 충분히 발생 가능하다 — 모델이 줄바꿈 없는 짧은 응답만 내거나
+(`split_steps` 가 줄 단위로 스텝을 센다), `--problem-pool` 이 작아 혼합 난이도 문제가
+안 걸리는 경우.
+
+대응: `check_pools()` 가드를 **발생 지점**(stage2 직후)에 넣고, 어떤 인자를 고칠지
+메시지에 담았다. 종료코드는 게이트 판정(0=통과, 2=실패)과 구분되는 **3**을 쓴다 —
+설정/데이터 오류를 게이트 실패로 오독하면 계획서 §3 실패 절차를 헛되이 밟게 된다.
+
+### 발견 — 재현성 구멍
+
+`GenerationBackend.generate` 의 `seed` 인자는 **vLLM 경로에서만** 쓰이고 HF 로컬 생성
+경로에서는 무시되고 있었다. `--force` 로 캐시를 재계산하면 다른 결과가 나온다는 뜻이다.
+로컬 경로에도 `torch.manual_seed(seed)` 를 적용했다.
+
+### 관찰 — 진단 신호로 기록해 둘 것
+
+스모크에서 **κ 와 γ_H 를 바꿔도 ρ가 0.1251 로 완전히 동일**했다. 원인은 헤드 막 Linear
+0-초기화(설계 결정) + 학습 3스텝 → 모든 헤드가 사실상 같은 분포를 내고, 그러면 H_togo 는
+단일 값의 단조 변환이라 Spearman 순위가 κ/γ에 불변이 된다. 스모크 픽스처의 산물이다.
+
+다만 **실제 워밍업 후에도 그리드 전체에서 ρ가 동일하다면 그것은 헤드가 분화하지 않았다는
+신호**다 (워밍업 부족 또는 헤드가 본체 분포를 그대로 복사). Phase 1 리포트에서 반드시
+확인할 것 — 이 경우 ρ 값 자체보다 먼저 워밍업을 의심해야 한다.
+
+### 상태
+
+- 테스트 106 → **154 passed** (CPU, 8.4초). 실모델 경로는 전부 `smoke:` 접두사 가드
+  뒤에 있어 동작 무변경.
+- 게이트 G0~G3: **여전히 전부 미판정**. 이 세션이 줄인 것은 배관 리스크뿐이다.
+
+---
+
 ## (다음 기록은 GPU 노드에서 Phase 0 재현 실험부터)
 
 기록 시 반드시 포함할 것:

@@ -15,7 +15,9 @@ python scripts/phase1_validate.py \
     --calibrate
 ```
 
-종료 코드: `0` = 게이트 G1 통과, `2` = 실패.
+종료 코드: `0` = 게이트 G1 통과, `2` = 실패, `3` = 설정/데이터 오류(빈 문제/prefix 풀).
+`3` 은 게이트 판정이 **아니다** — 계획서 §3 실패 절차를 밟지 말고 메시지가 지시하는
+인자(`--problem-pool`, `--min/max-pass-rate`, `--max-response-length`)를 고칠 것.
 
 ## 생성될 내용
 
