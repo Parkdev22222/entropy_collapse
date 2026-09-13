@@ -7,6 +7,11 @@
 #   STAGES=analysis bash run/run_paper.sh               # re-run one stage
 #   STAGES="measure analysis" bash run/run_paper.sh     # a subset, in order
 #
+# Two boxes, one campaign -- name each box's share with ROLE instead of STAGES:
+#   ROLE=campaign  bash run/run_paper.sh    # the 5-arm x 5-seed table, one box
+#   ROLE=followups bash run/run_paper.sh    # measurements + ablations + their eval
+#   ROLE=final     bash run/run_paper.sh    # six-benchmark eval + analysis, at the end
+#
 # Arm it and walk away:
 #   tmux new -d -s paper "cd /workspace/entropy_collapse && \
 #     REPO=DSDSh/steer-f_2 bash run/run_paper.sh > logs/experiments/paper.log 2>&1"
@@ -56,10 +61,47 @@ REPO=${REPO:-}
 SEEDS=${SEEDS:-"2 3 4 5"}
 STEPS=${STEPS:-110}
 LONG_STEPS=${LONG_STEPS:-200}
-FOLLOWUP_ARMS=${FOLLOWUP_ARMS:-}   # empty = every arm run_followups.sh defines
-MODEL_PATH=${MODEL_PATH:-Qwen/Qwen2.5-Math-1.5B}
+FOLLOWUP_ARMS=${FOLLOWUP_ARMS:-}   # empty = every arm run_followups.sh defines; ROLE=followups narrows it
+# MODEL_PATH and MODEL_TAG come from _arms.sh; a second default here is the
+# drift that had one launcher on 7B while the run names said 1.5B.
+model_guard || exit 2
+export MODEL_PATH
 KAPPA=${STEERF_KAPPA:-2}
 GAMMA_H=${STEERF_GAMMA_H:-0.7}
+# ROLE names a machine's share of the work, so splitting the campaign across two
+# boxes is one word rather than a STAGES string retyped by hand. On 2026-09-13 a
+# second pod was launched with the default STAGES and started running campaign
+# seeds -- work the first box already owned -- because the default is "all of
+# it" and nothing said otherwise.
+#
+#   campaign   the 5-arm x 5-seed table, plus seed 1's recovery. One box owns it.
+#   followups  everything else that trains: the reviewer measurements, the
+#              ablations, and their evaluation. Excludes grpo-long, see below.
+#   final      the six-benchmark evaluation and the analysis, once both boxes'
+#              logs sit in one tree. Trains nothing.
+#
+# WHY grpo-long IS NOT IN followups
+#   analyze_seeds.py:316 pairs grpo-long with the signed run OF THE SAME SEED and
+#   integrates its per-step wall clock against what signed spent. Seconds from a
+#   different machine are not the same unit, so the compute-matched control has
+#   to run wherever its signed reference trained -- the campaign box, after the
+#   campaign. It is one run:
+#       FOLLOWUP_ARMS=grpo-long STAGES=followups bash run/run_paper.sh
+ROLE=${ROLE:-}
+case "${ROLE}" in
+    "") ;;
+    campaign)
+        [ -n "${STAGES:-}" ] && { echo "FATAL: set ROLE or STAGES, not both" >&2; exit 2; }
+        STAGES="preflight recover campaign" ;;
+    followups)
+        [ -n "${STAGES:-}" ] && { echo "FATAL: set ROLE or STAGES, not both" >&2; exit 2; }
+        STAGES="preflight measure followups eval2"
+        FOLLOWUP_ARMS=${FOLLOWUP_ARMS:-"lam0-tree lam0.1 lam0.5 xclip-signed xclip-steer rloo-signed rloo-steer opo-signed opo-steer"} ;;
+    final)
+        [ -n "${STAGES:-}" ] && { echo "FATAL: set ROLE or STAGES, not both" >&2; exit 2; }
+        STAGES="eval analysis" ;;
+    *)  echo "FATAL: unknown ROLE '${ROLE}' (campaign | followups | final)" >&2; exit 2 ;;
+esac
 STAGES=${STAGES:-"preflight recover campaign measure eval followups eval2 analysis"}
 
 LOG_DIR="${ROOT}/logs/experiments"

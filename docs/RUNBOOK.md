@@ -265,12 +265,20 @@ verified`가 뜨기 전에는 옛 박스를 지우지 마라.**
 
 ```bash
 tmux new -d -s paper \
-  "cd /workspace/entropy_collapse && \
-   REPO=DSDSh/steer-f_2 \
-   STAGES='preflight measure followups eval2' \
-   FOLLOWUP_ARMS='lam0-tree lam0.1 lam0.5 xclip-signed xclip-steer rloo-signed rloo-steer opo-signed opo-steer' \
+  "cd /workspace/entropy_collapse && ROLE=followups REPO=DSDSh/steer-f_2 \
    bash run/run_paper.sh > logs/experiments/paper_h100.log 2>&1"
 ```
+
+`ROLE`이 그 박스의 몫에 이름을 붙인다. **기본 `STAGES`는 "전부"라서, 두 번째 박스를
+그냥 띄우면 캠페인까지 돈다** — 2026-09-13에 실제로 그랬다.
+
+| ROLE | STAGES | 도는 것 |
+|---|---|---|
+| `campaign` | `preflight recover campaign` | 5 arm × 5 시드 본 표. **한 박스가 소유** |
+| `followups` | `preflight measure followups eval2` | 측정 4종 + ablation 9개 + 그 평가 |
+| `final` | `eval analysis` | 6벤치 평가 + 분석. 학습 없음 |
+
+`ROLE`과 `STAGES`를 같이 주면 거부한다.
 
 `FOLLOWUP_ARMS`가 학습 큐와 `eval2` 양쪽에 같이 전달되므로, 이 박스는 자기가 학습한 9개만
 평가한다. `grpo-long`은 빠져 있다.

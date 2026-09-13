@@ -76,12 +76,12 @@ uniform만 4시드가 되고 `STEER-F − uniform` 대조가 n=4로 묶인다.
 
 ```bash
 tmux new -d -s paper \
-  "cd /workspace/entropy_collapse && \
-   REPO=DSDSh/steer-f_2 \
-   STAGES='preflight measure followups eval2' \
-   FOLLOWUP_ARMS='lam0-tree lam0.1 lam0.5 xclip-signed xclip-steer rloo-signed rloo-steer opo-signed opo-steer' \
+  "cd /workspace/entropy_collapse && ROLE=followups REPO=DSDSh/steer-f_2 \
    bash run/run_paper.sh > logs/experiments/paper_h100.log 2>&1"
 ```
+
+`ROLE=followups`가 `STAGES='preflight measure followups eval2'`와 9개 arm을 동시에 건다.
+**`ROLE` 없이 띄우면 기본 `STAGES`가 "전부"라 캠페인까지 돈다.**
 
 ### `measure` — 표가 답할 수 없는 반론에 답하는 측정
 
