@@ -135,6 +135,7 @@ arm-우선으로 돌리면 STEER-F만 5시드고 GRPO는 1시드로 남는다.
 | | |
 |---|---|
 | **hub 핀** | 재시작마다 되돌아간다. 1단계가 유일한 방어. 두 번 당했다 |
+| **flash-attn 은 선택이 아니다** | `verl/workers/actor/dp_actor.py:43`이 `if is_cuda_available:` 아래에서 `flash_attn.bert_padding`을 **무조건** import한다(옆의 `elif`는 Ascend NPU용, sdpa 폴백 아님). torch가 바뀌면 `.so`가 ABI 불일치로 죽고 **워커 초기화에서** 런이 끝난다. 고치기: `pip uninstall -y flash-attn flash_attn && pip install flash-attn --no-cache-dir --no-build-isolation` — **두 플래그 다** 필요하다(캐시 wheel 회피 + 설치된 torch에 대고 빌드). 소스 빌드 30~60분 |
 | **`run_steerf.sh`의 모델 기본값이 7B** | `run_grpo.sh`·`run_uniform_ablation.sh`는 1.5B인데 `run_steerf.sh:58`만 `Qwen2.5-Math-7B`다. 캠페인의 steer arm이 그걸 직접 부른다. 캠페인이 시작된 파드에선 그 파일이 손으로 1.5B로 고쳐져 있었고 **커밋되지 않았다** — 새 파드가 커밋된 트리를 받자 steer arm이 `steer-...-1.5B-s5` 이름으로 **7B를 학습**하려 했다. 지금은 `_arms.sh`가 `MODEL_PATH`를 export하고 `model_guard`가 이름과 모델이 다르면 REFUSE한다 |
 | **ray 핀 / opentelemetry 줄다리기** | `ray 2.58.0` + `vllm 0.8.4`가 정답이다 — 학습 중인 박스가 그 조합이다. otel을 vllm 선언(`<1.27`)에 맞추면 **ray 대시보드가 import에서 죽고** `ray.init()`이 타임아웃한다(에러에 ray도 opentelemetry도 안 나온다). ray에 맞추면 vllm 선언이 깨지는데, **vllm은 그걸 재검사하지 않는다** — `check_env_pins.py`가 `DECLARED ONLY`로 분류하는 쪽이고 실제로 학습된다. **ray 쪽이 이긴다.** `RAY_PIN=2.58.0`으로 고정해 두 박스를 같은 스택으로 유지할 것 |
 | **Ray가 안 뜨면 먼저 잔해부터** | 죽은 `ray.init()`은 `gcs_server`·`raylet`·`/tmp/ray/session_*`을 남기고 다음 런이 그걸 물려받아 같은 자리에서 죽는다. `ray stop --force && rm -rf /tmp/ray`. 큐는 이제 런마다 자동으로 한다 |

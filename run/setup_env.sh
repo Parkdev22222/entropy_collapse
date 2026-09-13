@@ -105,8 +105,11 @@ for m in torch vllm ray flash_attn; do
         *"undefined symbol"*|*"cannot open shared object"*|*"ABI"*)
             bad "$m ABI 불일치 — 지금 torch 와 다른 버전으로 빌드됐습니다"
             printf '        %s\n' "$err"
-            printf '        고치기: pip uninstall -y %s && pip install --no-cache-dir %s\n' "$m" "$m"
-            printf '        (--no-cache-dir 없으면 예전 torch 로 빌드된 캐시 wheel 을 다시 씁니다)\n'
+            printf '        고치기: pip uninstall -y %s && pip install %s --no-cache-dir --no-build-isolation\n' "$m" "$m"
+            printf '        두 플래그가 다 필요합니다. --no-cache-dir 는 예전 torch 로 빌드된\n'
+            printf '        캐시 wheel 을 안 쓰게 하고, --no-build-isolation 은 *설치된* torch 에\n'
+            printf '        대고 빌드하게 합니다. 후자가 없으면 pip 이 격리 환경에 자기 torch 를\n'
+            printf '        받아서 같은 ABI 불일치를 그대로 다시 만듭니다.\n'
             ;;
         *) warn "$m 없음"; GPU_MISSING+=("$m") ;;
     esac
@@ -126,20 +129,22 @@ if [ ${#GPU_MISSING[@]} -gt 0 ]; then
     pip install vllm==${VLLM_PIN}          # torch 를 자기 핀에 맞춰 함께 설치
     pip install "ray[default]${RAY_PIN:+==${RAY_PIN}}"
     pip install "transformers<5"           # vllm 이 올렸을 수 있으니 재핀
-    pip install flash-attn --no-build-isolation
+    pip install flash-attn --no-cache-dir --no-build-isolation
 
   또는:  INSTALL_GPU_STACK=1 bash run/setup_env.sh
 
-  flash-attn 이 소스 빌드로 넘어가 오래 걸리면 건너뛰어도 학습은 됩니다
-  (transformers 가 sdpa 로 폴백). 다만 속도가 떨어지고 수치가 미세하게 달라지니
-  비교하려는 네 팔은 반드시 같은 상태로 맞추세요.
+  flash-attn 은 건너뛸 수 없습니다. 소스 빌드가 30~60분 걸려도 해야 합니다 --
+  verl 의 dp_actor.py:43 이 `if is_cuda_available:` 아래에서 flash_attn.bert_padding
+  을 무조건 import 합니다. 옆의 elif 는 Ascend NPU 용이고 이 경로에 sdpa 폴백은
+  없습니다. 건너뛰면 워커 초기화에서 ImportError 로 죽습니다 -- 프리플라이트를
+  통과한 1~2분 뒤에.
 EOT
     if [ "${INSTALL_GPU_STACK:-0}" = "1" ] && [ "${CHECK_ONLY}" != "1" ]; then
         say "2b. GPU 스택 설치"
         pip install "vllm==${VLLM_PIN}"        || bad "vllm 설치 실패"
         pip install "ray[default]${RAY_PIN:+==${RAY_PIN}}" || bad "ray 설치 실패"
         pip install "transformers<5"           || bad "transformers 재핀 실패"
-        pip install flash-attn --no-build-isolation || warn "flash-attn 실패 — sdpa 폴백으로 진행 가능"
+        pip install flash-attn --no-cache-dir --no-build-isolation || bad "flash-attn 설치 실패 — verl 이 무조건 import 하므로 학습 불가"
         python3 -c "import torch; assert torch.cuda.is_available()" 2>/dev/null \
             && ok "설치 후 torch.cuda 정상 ($(pyver torch))" \
             || bad "설치 후 torch 가 GPU 를 못 봅니다"

@@ -159,7 +159,36 @@ env_preflight () {   # [root]  -> 0 when the training stack imports
 import ray, sys
 ray.init(num_cpus=1, ignore_reinit_error=True, log_to_driver=False)
 ray.shutdown()' 2>&1)"; then
-            return 0
+            # verl imports flash_attn unconditionally on a CUDA box --
+            # dp_actor.py:43 is `if is_cuda_available: from flash_attn...`, and
+            # the elif beside it is for Ascend NPUs, not a fallback. So a stale
+            # flash_attn_2_cuda.so does not degrade anything: it kills the run at
+            # worker init, one to two minutes in, long after this gate said OK.
+            # Only required where CUDA is actually present, so CPU checkouts and
+            # CI still pass.
+            if err="$(cd "${root}" && python3 -c '
+import sys
+try:
+    import torch
+except Exception:
+    sys.exit(0)                      # no torch here: not a training box
+if not torch.cuda.is_available():
+    sys.exit(0)
+import flash_attn.bert_padding' 2>&1)"; then
+                return 0
+            fi
+            echo "  verl and ray are fine, but flash_attn does not load:"
+            printf '%s\n' "${err}" | tail -6 | sed 's/^/    /'
+            echo
+            echo "  verl imports it unconditionally (dp_actor.py:43). It is not optional,"
+            echo "  and there is no sdpa fallback on that path. Rebuild it against the"
+            echo "  torch that is installed -- BOTH flags matter:"
+            echo "      pip uninstall -y flash-attn flash_attn"
+            echo "      pip install flash-attn --no-cache-dir --no-build-isolation"
+            echo "  --no-cache-dir skips the wheel built against the old torch;"
+            echo "  --no-build-isolation builds against the installed one rather than"
+            echo "  a torch pip downloads into a sandbox."
+            return 1
         fi
         echo "  verl imports, but ray cannot start a node:"
         printf '%s\n' "${err}" | tail -8 | sed 's/^/    /'
