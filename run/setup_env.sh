@@ -76,28 +76,23 @@ mkdir -p "${HF_TARGET}"
 # 로그의 `NCCL version 2.21.5+cuda12.4` 가 그 버전이 요구하는 torch 2.6.0+cu124
 # 와 일치한다는 것. 최신 vLLM 은 torch 2.7+ 로 올려 verl 0.4.1.x 와 어긋납니다.
 VLLM_PIN=${VLLM_PIN:-0.8.4}
-# ray floats unless you pin it, and vllm's pins do not constrain it. That is how
-# a second pod ended up with ray 2.58.0 next to vllm 0.8.4: vllm declares
-# opentelemetry-api<1.27.0, ray 2.58 calls
-#     Meter.create_histogram(explicit_bucket_boundaries_advisory=...)
-# which only exists in a much newer opentelemetry-api, its dashboard fails to
-# import, ray.init() times out, and every arm dies with "The current node timed
-# out during startup" -- naming neither ray nor opentelemetry.
+# 2.58.0 because that is what the box that has been training all along reports,
+# not because it is the newest. Pinned rather than left to float: ray's own deps
+# decide the opentelemetry version, and that has broken this stack twice.
 #
-# There is no version to guess here: the right value is whatever the box that
-# already trains is running.  On that box:
-#     python3 -c "import ray; print(ray.__version__)"
-# then set RAY_PIN to it, here or in the environment, so both boxes share a
-# stack and the runs stay comparable.
-RAY_PIN=${RAY_PIN:-}
+# Note the pin conflict this surfaces and why it is not fatal. vllm 0.8.4
+# declares opentelemetry-api<1.27.0; ray 2.58 calls
+#     Meter.create_histogram(explicit_bucket_boundaries_advisory=...)
+# which needs a much newer one. Satisfying vllm's declaration makes ray's
+# dashboard fail to import and ray.init() time out -- "The current node timed
+# out during startup", naming neither package. Satisfying ray leaves vllm's
+# declared range violated, which check_env_pins.py reports as DECLARED ONLY:
+# vllm never re-checks it, and the training box runs exactly this combination.
+# So the resolution is ray's requirement wins, and both boxes stay on the same
+# versions so their runs remain comparable.
+RAY_PIN=${RAY_PIN:-2.58.0}
 say "2. GPU 스택"
 GPU_MISSING=()
-if [ -z "${RAY_PIN}" ]; then
-    warn "RAY_PIN 이 비어 있습니다 — ray 가 떠다닙니다."
-    printf '        학습되는 박스에서: python3 -c "import ray; print(ray.__version__)"\n'
-    printf '        그 값을 RAY_PIN 으로 고정하세요. vllm %s 와 맞지 않는 ray 는\n' "${VLLM_PIN}"
-    printf '        대시보드 import 에서 죽고, 에러에 ray 도 opentelemetry 도 안 나옵니다.\n'
-fi
 for m in torch vllm ray flash_attn; do
     v=$(pyver "$m")
     if [ -n "$v" ]; then ok "$m $v"; continue; fi
