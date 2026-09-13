@@ -6,6 +6,12 @@
 #   NEW pod:   REPO=DSDSh/steer-f_2 bash run/migrate_pod.sh --import
 #   either:    bash run/migrate_pod.sh --check      # inventory only, no writes
 #
+#   Splitting work across two pods that BOTH keep running is not a migration:
+#              REPO=DSDSh/steer-f_2 bash run/migrate_pod.sh --share
+#   uploads the artefacts and the manifest and nothing else. It leaves the
+#   trained checkpoints alone, and tolerates a dirty tree, because it does not
+#   end with anyone deleting the source pod.
+#
 # WHAT ACTUALLY HAS TO MOVE
 #   Three classes, and only one of them is a real problem.
 #
@@ -41,9 +47,12 @@ cd "${ROOT}" || { echo "FATAL: cannot cd to ${ROOT}" >&2; exit 1; }
 
 MODE="${1:-}"
 case "${MODE}" in
-    --export|--import|--check) ;;
-    *) echo "usage: bash run/migrate_pod.sh --export|--import|--check" >&2; exit 2 ;;
+    --export|--share|--import|--check) ;;
+    *) echo "usage: bash run/migrate_pod.sh --export|--share|--import|--check" >&2; exit 2 ;;
 esac
+
+# shellcheck source=run/_arms.sh
+. "${ROOT}/run/_arms.sh"      # is_busy, train_log_done, run_name_for, MODEL_TAG
 
 REPO=${REPO:-}
 MODEL_TAG=${MODEL_TAG:-Qwen2.5-Math-1.5B}
@@ -99,17 +108,28 @@ inventory () {
         missing=1
     else
         ok "branch ${BRANCH}"
+        # git state is blocking for --export and --check, informational for
+        # --share: sharing does not delete the source pod, so uncommitted work
+        # cannot be lost by it, and the pod that shares is usually mid-campaign
+        # with local edits.
         local dirty; dirty="$(git status --porcelain | grep -v '^?? ' || true)"
         if [ -n "${dirty}" ]; then
-            bad "uncommitted tracked changes:"
+            if [ "${MODE}" = "--share" ]; then
+                warn "uncommitted tracked changes (not blocking a share):"
+            else
+                bad "uncommitted tracked changes:"; missing=1
+            fi
             printf '%s\n' "${dirty}" | head -10 | sed 's/^/        /'
-            missing=1
         else
             ok "no uncommitted tracked changes"
         fi
         local ahead; ahead="$(git log --oneline "@{u}..HEAD" 2>/dev/null | wc -l || echo '?')"
         if [ "${ahead}" = "0" ]; then ok "pushed to origin"
-        else bad "${ahead} commit(s) not pushed -- push before you delete the pod"; missing=1; fi
+        elif [ "${MODE}" = "--share" ]; then
+            warn "${ahead} commit(s) not pushed (not blocking a share)"
+        else
+            bad "${ahead} commit(s) not pushed -- push before you delete the pod"; missing=1
+        fi
         local untracked; untracked="$(git status --porcelain | grep -c '^?? ' || true)"
         [ "${untracked}" != "0" ] && warn "${untracked} untracked path(s); check none of them is a result"
     fi
@@ -156,8 +176,13 @@ fi
 [ -n "${HF_CLI}" ] || { echo "FATAL: neither 'hf' nor 'huggingface-cli' on PATH." >&2
                         echo "       pip install \"huggingface_hub>=0.34,<1.0\"" >&2; exit 1; }
 
-# ----------------------------------------------------------------- export
-if [ "${MODE}" = "--export" ]; then
+# --------------------------------------------------------- export / share
+# Both put the gitignored artefacts and a manifest on the Hub; only --export
+# also uploads the trained checkpoints. --share exists because splitting work
+# across two LIVE pods is not a migration: the second box needs the MTP heads
+# and nothing else, and uploading checkpoints there is at best slow and at
+# worst dangerous (see the live guard below).
+if [ "${MODE}" = "--export" ] || [ "${MODE}" = "--share" ]; then
     inventory || { say "refusing"; bad "commit and push first, or recreate the missing artefacts"; exit 1; }
 
     say "5. manifest"
@@ -205,21 +230,45 @@ PY
     ok "artefacts and manifest uploaded"
 
     say "7. trained checkpoints"
-    n_runs=0
+    if [ "${MODE}" = "--share" ]; then
+        ok "--share leaves them alone (the other pod needs the heads, not the weights)"
+        ok "to move the weights too, use --export on a pod that is not training"
+    else
+    # hf_backup.sh refuses a run whose NAME contains LIVE_TAG (_0905 by default),
+    # which was the naming the recovery chain used. The campaign's runs are
+    # steer-f-<tag>-s<N>-tree-rollout with no suffix at all, so that guard does
+    # not fire for them: a --export on a training box would upload the directory
+    # verl is writing and then "verify" it byte for byte. Judge by state, not by
+    # name -- a run is safe to upload only once its log has reached its final
+    # step and nothing is training right now.
+    training_now=0
+    if is_busy; then
+        training_now=1
+        warn "training is running -- only runs whose log reached the final step will be uploaded"
+    fi
+    n_runs=0; n_skip=0
     for d in checkpoints/STEER-F/*/; do
         [ -d "${d}" ] || continue
         run="$(basename "${d}")"
         ls -d "${d}"global_step_*/actor/huggingface >/dev/null 2>&1 || continue
+        if [ "${training_now}" = "1" ] \
+           && ! train_log_done "${ROOT}/logs/experiments" "${run}" "${STEPS:-110}"; then
+            warn "skip ${run} -- still training (log has not reached step ${STEPS:-110})"
+            n_skip=$((n_skip + 1))
+            continue
+        fi
         n_runs=$((n_runs + 1))
         echo "  -> ${run}"
         REPO="${REPO}" bash run/hf_backup.sh "${run}" || warn "backup failed for ${run}"
     done
     [ "${n_runs}" = "0" ] && ok "nothing on disk to upload" \
                              || ok "${n_runs} run(s) uploaded (local copies kept -- delete the pod, not the files)"
+    [ "${n_skip}" != "0" ] && warn "${n_skip} run(s) skipped as in-flight; re-run --export once they finish"
+    fi
 
     say "done"
     cat <<EOT
-  On the new pod:
+  On the other pod:
 
     git clone <this repo> /workspace/entropy_collapse
     cd /workspace/entropy_collapse
@@ -237,7 +286,14 @@ tmp="$(mktemp -d)"
 "${HF_CLI}" download "${REPO}" --repo-type model --include "${PREFIX}/*" \
     --local-dir "${tmp}" >/dev/null || { bad "download failed"; exit 1; }
 src="${tmp}/${PREFIX}"
-[ -f "${src}/manifest.json" ] || { bad "no manifest at ${PREFIX}/manifest.json"; exit 1; }
+if [ ! -f "${src}/manifest.json" ]; then
+    bad "no manifest at ${PREFIX}/manifest.json in ${REPO}"
+    echo "  The manifest is written by the pod that HAS the artefacts. Run there:"
+    echo "      REPO=${REPO} bash run/migrate_pod.sh --share    # artefacts only, safe while training"
+    echo "      REPO=${REPO} bash run/migrate_pod.sh --export   # artefacts + trained checkpoints"
+    echo "  then re-run this --import."
+    exit 1
+fi
 ok "manifest fetched"
 
 say "2. place and verify"

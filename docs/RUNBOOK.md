@@ -187,10 +187,22 @@ GPU 장수가 바뀌어도 α의 분포가 체계적으로 이동하지 않는�
 
 ```bash
 cd /workspace/entropy_collapse
-git add -A && git commit -m "wip" && git push     # --export는 더러운 트리를 거부한다
-bash run/migrate_pod.sh --check                   # 먼저 점검만
-REPO=DSDSh/steer-f_2 bash run/migrate_pod.sh --export
+REPO=DSDSh/steer-f_2 bash run/migrate_pod.sh --share
 ```
+
+**`--export`가 아니라 `--share`다.** 두 파드가 **동시에** 도는 건 이전이 아니라 분업이고,
+`--export`는 그 전제로 쓰이지 않았다:
+
+| | `--share` | `--export` |
+|---|---|---|
+| 올리는 것 | 매니페스트 + gitignore된 산출물 | 거기에 **학습 체크포인트 전부** |
+| 더러운 git | 경고만 (파드를 안 지우니 유실 위험이 없다) | 거부 |
+| 학습 중 안전한가 | ✅ 체크포인트를 아예 안 건드린다 | 끝난 런만 올린다(상태로 판정) |
+
+`--export`를 학습 중인 박스에서 돌리면 위험했다: `hf_backup.sh`의 라이브 가드는 런 이름에
+`_0905`가 들어갈 때만 발동하는데 캠페인 런 이름엔 접미사가 없어서, **verl이 쓰는 중인
+디렉토리를 올리고 바이트 검증까지 통과시킨다.** 지금은 이름이 아니라 **상태**로 판정한다 —
+학습이 돌고 있으면 로그가 최종 스텝에 도달한 런만 올린다.
 
 옮기는 것은 **git에 없고 GPU 시간이 드는 것**뿐이다:
 
