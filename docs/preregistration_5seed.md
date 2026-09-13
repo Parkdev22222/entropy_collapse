@@ -14,8 +14,13 @@ Everything here supersedes the statistics used in the single-seed manuscript.
 | GRPO | none (`loss_mode=vanilla`) | 1–5 |
 | STEER | local `Ω` only (`λ=0`, plain rollout) | 1–5 |
 | **STEER-F** | `A_H` as derived (`λ=.25`, tree) | 1–5 |
-| uniform | tree + damping, `A_H`'s value discarded | 1–3 |
-| permuted | tree + damping, `A_H` shuffled among siblings | 1–3 |
+| uniform | tree + damping, `A_H`'s value discarded | 1–5 |
+| permuted | tree + damping, `A_H` shuffled among siblings | 1–5 |
+
+> **개정 2026-09-13.** 원안은 uniform/permuted를 3시드로 잡았다. 실제로 실행되는
+> `run/run_campaign.sh`는 `CAMPAIGN_ARMS`(5개) × `SEEDS="2 3 4 5"`로 **5 arm 전부를
+> 5시드**씩 돌린다. 두 통제군 대조의 검정력이 올라가는 변경이고, 캠페인 결과를 보기
+> **전에** 이루어졌다. 조용히 흡수하지 않고 여기와 논문 부록에 기록한다.
 
 Qwen2.5-Math-1.5B, DAPO-Math-17k, 110 steps, `n=8`, all other hyperparameters as in
 the manuscript. **Seeds are matched across arms** (`data.seed = s` in every arm), so

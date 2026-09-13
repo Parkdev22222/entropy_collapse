@@ -40,6 +40,11 @@ Correcting the Visitation Channel in Token-Level Entropy Control for RLVR}
 % without ever printing a number nobody measured. Predicting a result and
 % typing it in "to save time" is how a predicted number reaches a submission.
 \providecommand{\PENDING}{\textcolor{red}{\textbf{[pending]}}}
+% \tocheck{...} marks a sentence whose WORDING presumes a direction the campaign
+% has not yet confirmed. It renders as ordinary text; the point is that
+%     grep -c 'tocheck' paper/steerf.tex
+% enumerates every claim to re-read against results/*.tsv once the numbers land.
+\providecommand{\tocheck}[1]{#1}
 \newcommand{\num}[1]{\ifcsname #1\endcsname\csname #1\endcsname\else\PENDING\fi}
 \IfFileExists{../results/numbers.tex}{\input{../results/numbers.tex}}{%
   \IfFileExists{results/numbers.tex}{\input{results/numbers.tex}}{}}
@@ -1181,6 +1186,163 @@ allow, so there is little headroom in scheduling more cuts; and the intervention
 extremely sparse --- about one position in eighty --- which makes the size of the
 effect in Table~\ref{tab:contrast} the surprising part rather than the small support.
 
+\subsection{Seeds, not steps}
+\label{sec:res:seeds}
+
+Every statistic above treats the seed as the unit of analysis: each run is first
+collapsed to one number by averaging its converged window, the arms are then paired
+within a seed, and the test is a one-sample $t$ on the paired differences with
+$\mathrm{df} = n - 1$. Pairing within a seed matters because a seed carries effects
+common to all five arms --- the data order, and on a split campaign the machine a run
+landed on --- and those cancel exactly in a difference. A contrast's $n$ is the
+smaller of its two arms' seed counts, which is why the table reports $n$ per row
+rather than once.
+
+The alternative statistic, a paired $t$ over the eight window steps \emph{within} one
+run, measures whether a gap is stable along a single trajectory. That is a different
+question from whether it survives re-running, and we report it only in
+Appendix~\ref{sec:appendix-within} so the two are not confused.
+
+Run-to-run spread is itself worth reporting. Across our seeds the standard deviation
+of an arm's converged-window accuracy is \num{Seedsd}, and of a paired difference
+\num{Pairedsd}. For scale, two validations of the \emph{same} weights on these $30$
+questions differ by about $.004$, so seed variation is the larger term by roughly an
+order of magnitude, and any comparison quoted at single-run precision is quoting
+noise.
+
+\subsection{Six benchmarks}
+\label{sec:res:bench}
+
+A single $30$-question benchmark cannot separate a method from a lucky draw, so each
+run's selected checkpoint is re-evaluated on six mathematics benchmarks
+(Table~\ref{tab:bench}) under the protocol of Section~\ref{sec:setup}: AIME24, AIME25
+and AMC23 at $\mathrm{avg@}32$, MATH500, Minerva and OlympiadBench at
+$\mathrm{avg@}1$.
+
+\begin{table}[t]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{2.6pt}
+\IfFileExists{../results/benchmarks_table.tex}{\input{../results/benchmarks_table.tex}}{%
+  \IfFileExists{results/benchmarks_table.tex}{\input{results/benchmarks_table.tex}}{%
+  \begin{tabular}{@{}lccccccc@{}}
+  \toprule
+  arm & AIME24 & AIME25 & AMC23 & MATH500 & Minerva & Olympiad & mean \\
+  \midrule
+  \multicolumn{8}{c}{\PENDING} \\
+  \bottomrule
+  \end{tabular}}}
+\caption{Six-benchmark evaluation of each arm's selected checkpoint, averaged over
+seeds. The rightmost column is the unweighted mean, the headline figure of the
+post-hoc evaluation.}
+\label{tab:bench}
+\end{table}
+
+The quantity fixed in advance as the headline here is not any single cell but
+\emph{direction consistency}: in how many of the six benchmarks the ordering observed
+on AIME24 is preserved. Four or better of six we declared support, three equivocal,
+two or fewer evidence against. The observed count is \num{Dirconsistency} of six for
+$\text{STEER-F} > \textsc{uniform}$, and \num{Dirconsistencyperm} of six for
+$\text{STEER-F} > \textsc{permuted}$. This is the test that distinguishes a method
+from an artifact of one question set, and it is reported whatever it returns.
+
+\subsection{How much of the design is load-bearing}
+\label{sec:res:ablate}
+
+Table~\ref{tab:followups} varies one element at a time, at a single seed. Every
+comparison in it is therefore $n = 1$: these rows describe a mechanism, and none of
+them carries an error bar or licenses an effect size.
+
+\begin{table}[t]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}llcc@{}}
+\toprule
+arm & what changes & acc@32 & maj@32 \\
+\midrule
+\multicolumn{4}{@{}l}{\emph{the damping coefficient}} \\
+$\lambda = 0.1$  & weaker  & \num{Rlamloacc}  & \num{Rlamlomaj}  \\
+$\lambda = 0.25$ & as used & \num{Rsignedacc} & \num{Rsignedmaj} \\
+$\lambda = 0.5$  & stronger& \num{Rlamhiacc}  & \num{Rlamhimaj}  \\
+\midrule
+\multicolumn{4}{@{}l}{\emph{the sampler, with the forecast switched off}} \\
+$\lambda = 0$, tree & tree only & \num{Rlamzeroacc} & \num{Rlamzeromaj} \\
+\textsc{steer}      & neither   & \num{Rsteeracc}   & \num{Rsteermaj}   \\
+\midrule
+\multicolumn{4}{@{}l}{\emph{relaxed ratio clipping} ($\epsilon_{\mathrm{hi}}{=}5$, $\epsilon_{\mathrm{lo}}{=}0.99$)} \\
+STEER-F        & --- & \num{Rxclipsignedacc} & \num{Rxclipsignedmaj} \\
+\textsc{steer} & --- & \num{Rxclipsteeracc}  & \num{Rxclipsteermaj}  \\
+\midrule
+\multicolumn{4}{@{}l}{\emph{other advantage estimators}} \\
+RLOO, STEER-F        & --- & \num{Rrloosignedacc} & \num{Rrloosignedmaj} \\
+RLOO, \textsc{steer} & --- & \num{Rrloosteeracc}  & \num{Rrloosteermaj}  \\
+OPO, STEER-F         & --- & \num{Roposignedacc}  & \num{Roposignedmaj}  \\
+OPO, \textsc{steer}  & --- & \num{Roposteeracc}   & \num{Roposteermaj}   \\
+\bottomrule
+\end{tabular}
+\caption{Follow-up ablations, seed 1 only, converged window. Each block isolates one
+element of the design.}
+\label{tab:followups}
+\end{table}
+
+\paragraph{The coefficient.} $\lambda$ scales the visitation term before the two
+channels are combined in Eq.~\eqref{eq:combine}. The value used throughout was not
+tuned on these runs, and the sweep exists to say whether the result rests on a knife
+edge. A flat response across $0.1$--$0.5$ would say the method is insensitive to it;
+a peak at $0.25$ with both neighbours below would say it is a tuned quantity and must
+be reported as one.
+
+\paragraph{The sampler.} This is the cell no other arm supplies. Tree rollouts make a
+group share prefixes, which changes the GRPO advantage estimate itself, quite apart
+from any damping. \textsc{uniform} and \textsc{permuted} both run at $\lambda = .25$
+and so cannot separate the sampler from the correction. The $\lambda = 0$ tree arm
+switches the forecast off while leaving the sampler in place, and is the direct
+answer to ``is tree rollout simply a better sampler''. Read against \textsc{steer},
+which has neither, its difference is the sampler's own contribution; read against
+STEER-F, what remains is the forecast's.
+
+\paragraph{Clipping and the advantage estimator.} The relaxed-clipping setting is
+where entropy interventions are supposed to matter most, because ratio clipping
+otherwise removes much of the update a token weight would have scaled. The RLOO and
+OPO rows test whether the construction depends on GRPO specifically: the
+sibling-prefix baseline of Eq.~\eqref{eq:ah} depends only on the group sharing a
+prefix, which those estimators also provide, so the method should transfer unchanged.
+Each is reported beside its own base-method control, so every comparison stays within
+one estimator.
+
+\subsection{Compute-matched comparison}
+\label{sec:res:compute}
+
+STEER-F costs more per step than GRPO, almost entirely in the MTP forward pass, so an
+equal-step comparison hands it more wall clock. The honest comparison holds compute
+fixed instead. We run GRPO to \num{Longsteps} steps, integrate its measured per-step
+time, and read its accuracy at the last step whose cumulative time fits inside what
+STEER-F spent reaching step $110$ --- rather than assuming a cost ratio.
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+arm & steps & wall clock & acc@32 \\
+\midrule
+STEER-F               & $110$           & \num{Wsigned}   & \num{Rsignedacc}   \\
+GRPO, step-matched    & $110$           & \num{Wgrpo}     & \num{Rgrpoacc}     \\
+GRPO, compute-matched & \num{Matchstep} & \num{Wgrpolong} & \num{Rgrpolongacc} \\
+\bottomrule
+\end{tabular}
+\caption{Equal steps versus equal compute. The matched step is read from the
+integrated per-step time of the long GRPO run, on the same hardware as its STEER-F
+reference; times measured on a different machine are not comparable and are not mixed
+in.}
+\label{tab:compute}
+\end{table}
+
+Both readings are reported. If the gain survives the compute-matched comparison it is
+a gain; if it does not, the method buys accuracy with time and should be described
+that way.
+
 \subsection{Cost}
 \label{sec:res:cost}
 
@@ -1361,5 +1523,90 @@ $O(\text{chunk} \times V)$ rather than $O(\kappa \times B \times T \times V)$.
 weights are bitwise identical to the base method's on random inputs; the
 $\lambda = 0$ early return in the combination step is what makes this hold exactly
 rather than to floating-point tolerance.
+
+\section{Pre-Registered Analysis}
+\label{sec:appendix-prereg}
+
+The analysis plan below was committed to the artifact repository before any run of
+the multi-seed campaign was launched, so that the statistics could not be chosen to
+fit the outcome. It is reproduced here in full; the file is
+\texttt{docs/preregistration\_5seed.md} in the release.
+
+\paragraph{Unit and primary endpoint.} The unit of analysis is the seed, not the
+validation step. Each run is reduced to one number --- its mean $\mathrm{acc@}32$ on
+AIME24 over steps $40$--$110$ --- and arms are paired within a seed.
+
+\paragraph{Contrasts, in the order they are reported.} Primary: $\text{STEER-F} -
+\text{GRPO}$. Secondary, in this order: $\text{STEER-F} - \textsc{steer}$,
+$\text{STEER-F} - \textsc{uniform}$, $\text{STEER-F} - \textsc{permuted}$. Secondary
+endpoints: $\mathrm{maj@}32$, uplift, and the six-benchmark mean. Effect sizes are
+reported with intervals rather than significance stars, and all five arms are
+reported whatever the outcome.
+
+\paragraph{Stopping and exclusion.} Every run goes to step $110$; none is stopped
+early for looking good or bad. A run is excluded only for mechanical failure --- out
+of memory, a crash, a corrupted checkpoint, or a step-$0$ validation score outside
+$.030$--$.055$, which would indicate a different initial checkpoint. Exclusions are
+listed with their reason. A failed run is relaunched with the same seed, never a new
+one, and no seed is added after results are seen.
+
+\paragraph{Checkpoint selection.} Two rules are computed and both reported: the
+argmax over a run's validation points, and a fixed step $110$. The six-benchmark
+evaluation uses the argmax. Selecting a maximum over twelve noisy checkpoints is
+biased upward --- in the single-seed data by $+.011$ to $+.017$ per arm --- which is
+why the primary endpoint is a window mean rather than a maximum.
+
+\paragraph{What would falsify the central claim.} Stated in advance so it cannot be
+renegotiated afterwards. If $\text{STEER-F} - \textsc{uniform}$ straddles zero across
+seeds, the forecast's \emph{value} does not matter and the apparatus explains the
+effect; that is the claim of this paper and it would be refuted. If $\text{STEER-F} -
+\textsc{permuted}$ straddles zero, the pairing between a branch and its score does
+not matter, which the derivation says it must. If aggregate entropy orders the arms
+the same way accuracy does, the dissociation argument of
+Section~\ref{sec:res:entropy} fails, since it depends on the two orderings coming
+apart. And if the mean token weight in the STEER-F arm departs from $\approx 0.999$,
+then $\AH$ is not sum-zero over sibling sets as derived and the implementation is
+wrong rather than the theory.
+
+\paragraph{Amendment, recorded.} The pre-registration assigned three seeds to
+\textsc{uniform} and \textsc{permuted} and five to the other three arms. The campaign
+as executed runs all five arms at five seeds. The change raises the power of the two
+control contrasts and was made before any result of the campaign was seen; it is
+recorded here rather than silently absorbed.
+
+\section{Within-Run Stability}
+\label{sec:appendix-within}
+
+Earlier drafts of this work paired the arms at each of the eight validation steps in
+the converged window and reported a paired $t$ over those eight points. That
+statistic answers a narrower question than the one in
+Section~\ref{sec:res:contrasts}: it asks whether a gap is stable along a single
+trajectory, not whether it reappears when the run is repeated. Its $n$ counts
+validation points, which are serially correlated within a run, so it is not an
+estimate of run-to-run uncertainty and cannot be read as one.
+
+We report it here because it is informative about a different thing --- whether a gap
+is an artifact of one lucky validation point --- and because the single-seed version
+of this manuscript quoted it. Where the two disagree, the seed-level statistic in
+Section~\ref{sec:res:seeds} governs.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}lcc@{}}
+\toprule
+contrast & $\Delta$acc@32 & paired $t_{7}$ \\
+\midrule
+STEER-F $-$ GRPO       & \num{Wsignedgrpoacc}     & \num{WTsignedgrpoacc}     \\
+STEER-F $-$ \textsc{steer}    & \num{Wsignedsteeracc}    & \num{WTsignedsteeracc}    \\
+STEER-F $-$ \textsc{uniform}  & \num{Wsigneduniformacc}  & \num{WTsigneduniformacc}  \\
+STEER-F $-$ \textsc{permuted} & \num{Wsignedpermutedacc} & \num{WTsignedpermutedacc} \\
+\bottomrule
+\end{tabular}
+\caption{Within-run stability over the eight converged-window validation points of a
+single run. Not an estimate of run-to-run variation; see
+Section~\ref{sec:res:seeds}.}
+\label{tab:within}
+\end{table}
 
 \end{document}
