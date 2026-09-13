@@ -46,6 +46,7 @@ esac
 
 REPO=${REPO:-}
 MODEL_TAG=${MODEL_TAG:-Qwen2.5-Math-1.5B}
+export MODEL_TAG          # the manifest writer reads it from the environment
 PREFIX=${PREFIX:-migration}          # path inside the Hub repo
 MANIFEST="${ROOT}/.migration_manifest.json"
 BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
@@ -57,14 +58,30 @@ ok ()  { printf '  \033[32mOK\033[0m    %s\n' "$*"; }
 warn () { printf '  \033[33mWARN\033[0m  %s\n' "$*"; }
 bad () { printf '  \033[31mFAIL\033[0m  %s\n' "$*"; }
 
-# The artefacts that are not in git and cost GPU time to rebuild.
-critical_paths () {
+# The artefacts that are not in git and cost GPU time to rebuild, split by who
+# needs them.
+#
+# run_steerf.sh:73 resolves the heads as
+#   checkpoints/mtp_heads_<tag>${SCALE:+-${SCALE}}.pt
+# and every run so far has left SCALE empty, so the file the TRAINER opens has
+# no -paper suffix (the _0905 logs show mtp_heads_Qwen2.5-Math-1.5B.pt). Listing
+# only the -paper variants, as this script first did, moved the pair that the
+# measure stage reads and left behind the pair without which no tree arm can
+# start at all. A new pod would look migrated and then die on its first arm.
+required_paths () {     # no tree arm starts without these
+    printf '%s\n' \
+        "checkpoints/mtp_heads_${MODEL_TAG}.pt" \
+        "checkpoints/mtp_calibration_${MODEL_TAG}.json"
+}
+optional_paths () {     # the measure stage only; absence is not fatal
     printf '%s\n' \
         "checkpoints/mtp_heads_${MODEL_TAG}-paper.pt" \
         "checkpoints/mtp_calibration_${MODEL_TAG}-paper.json" \
         "checkpoints/mtp_heads_control_${MODEL_TAG}.pt" \
+        "rollout_data/warmup/${MODEL_TAG}/rollouts.jsonl" \
         "rollout_data/warmup/${MODEL_TAG}-paper/rollouts.jsonl"
 }
+critical_paths () { required_paths; optional_paths; }
 
 human () { du -sh "$1" 2>/dev/null | cut -f1; }
 
@@ -92,12 +109,20 @@ inventory () {
         [ "${untracked}" != "0" ] && warn "${untracked} untracked path(s); check none of them is a result"
     fi
 
-    say "2. artefacts that are NOT in git"
+    say "2. artefacts that are NOT in git -- required by every tree arm"
     local p
     while IFS= read -r p; do
         if [ -e "${p}" ]; then ok "$(printf '%-58s %s' "${p}" "$(human "${p}")")"
         else bad "MISSING  ${p}"; missing=1; fi
-    done < <(critical_paths)
+    done < <(required_paths)
+
+    say "2b. artefacts the measure stage wants -- absence is not fatal"
+    local n_opt=0
+    while IFS= read -r p; do
+        if [ -e "${p}" ]; then ok "$(printf '%-58s %s' "${p}" "$(human "${p}")")"; n_opt=$((n_opt + 1))
+        else warn "absent   ${p}"; fi
+    done < <(optional_paths)
+    [ "${n_opt}" = "0" ] && warn "none present: the new pod can train, but STAGES=measure has nothing to read"
 
     say "3. trained checkpoints"
     local n=0
@@ -131,14 +156,13 @@ if [ "${MODE}" = "--export" ]; then
     inventory || { say "refusing"; bad "commit and push first, or recreate the missing artefacts"; exit 1; }
 
     say "5. manifest"
-    python3 - "${MANIFEST}" "${BRANCH}" > /dev/null <<'PY'
+    # The paths come in as argv rather than being rebuilt here, so the manifest
+    # can never disagree with what critical_paths() actually uploads.
+    python3 - "${MANIFEST}" "${BRANCH}" $(critical_paths) > /dev/null <<'PY'
 import hashlib, json, os, subprocess, sys, time
 manifest, branch = sys.argv[1], sys.argv[2]
 tag = os.environ.get("MODEL_TAG", "Qwen2.5-Math-1.5B")
-paths = [f"checkpoints/mtp_heads_{tag}-paper.pt",
-         f"checkpoints/mtp_calibration_{tag}-paper.json",
-         f"checkpoints/mtp_heads_control_{tag}.pt",
-         f"rollout_data/warmup/{tag}-paper/rollouts.jsonl"]
+paths = sys.argv[3:]
 entries = {}
 for p in paths:
     if not os.path.isfile(p):

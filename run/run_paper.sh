@@ -56,6 +56,7 @@ REPO=${REPO:-}
 SEEDS=${SEEDS:-"2 3 4 5"}
 STEPS=${STEPS:-110}
 LONG_STEPS=${LONG_STEPS:-200}
+FOLLOWUP_ARMS=${FOLLOWUP_ARMS:-}   # empty = every arm run_followups.sh defines
 MODEL_PATH=${MODEL_PATH:-Qwen/Qwen2.5-Math-1.5B}
 KAPPA=${STEERF_KAPPA:-2}
 GAMMA_H=${STEERF_GAMMA_H:-0.7}
@@ -200,13 +201,32 @@ fi
 # ============================================================ 5. followups
 if have followups; then
     stage "follow-up ablations (seed 1, grpo-long included)"
-    guard followups env REPO="${REPO}" WAIT=1 LONG_STEPS="${LONG_STEPS}" \
-        bash run/run_followups.sh
+    # FOLLOWUP_ARMS lets one box take a subset. Splitting the work across two
+    # pods needs this: grpo-long has to stay wherever its STEER-F reference
+    # trained, because analyze_seeds.py integrates its per-step wall clock and
+    # compares it against what STEER-F spent -- seconds measured on a different
+    # box are not the same unit.
+    if [ -n "${FOLLOWUP_ARMS}" ]; then
+        note "followup arms: ${FOLLOWUP_ARMS}"
+        guard followups env REPO="${REPO}" WAIT=1 LONG_STEPS="${LONG_STEPS}" \
+            ARMS="${FOLLOWUP_ARMS}" bash run/run_followups.sh
+    else
+        guard followups env REPO="${REPO}" WAIT=1 LONG_STEPS="${LONG_STEPS}" \
+            bash run/run_followups.sh
+    fi
 fi
 
 if have eval2; then
     stage "six-benchmark evaluation of the follow-ups"
-    guard eval2 env REPO="${REPO}" EVAL_SET=followups bash run/run_eval_all.sh
+    # run_eval_all.sh names this variable too, and defaults it to all ten arms.
+    # On a box that trained a subset, letting it default would queue evals for
+    # runs that trained on the other pod.
+    if [ -n "${FOLLOWUP_ARMS}" ]; then
+        guard eval2 env REPO="${REPO}" EVAL_SET=followups \
+            FOLLOWUP_ARMS="${FOLLOWUP_ARMS}" bash run/run_eval_all.sh
+    else
+        guard eval2 env REPO="${REPO}" EVAL_SET=followups bash run/run_eval_all.sh
+    fi
 fi
 
 # ============================================================= 6. analysis

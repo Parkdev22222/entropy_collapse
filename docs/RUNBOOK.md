@@ -138,3 +138,116 @@ arm-우선으로 돌리면 STEER-F만 5시드고 GRPO는 1시드로 남는다.
 | **`run_steerf.sh`의 `STEPS=200`** | SCALE case에 하드코딩이라 `export STEPS`가 안 닿는다. 캠페인은 `steer_plain_args()`를 trailing override로 붙여 막는다 |
 | **로그 글롭** | `train-<run>.log` + `train-<run>_*.log`만 허용해야 한다. 밑줄이 없으면 `-permuted`를 삼켜 signed를 DONE으로 오판정한다. `tests/test_run_names.py`가 고정한다 |
 | **`run_paper.sh` preflight** | `-paper` 접미사 MTP 파일은 `measure` 스테이지 전용이다. 학습 arm은 안 쓴다 |
+
+---
+
+# 두 박스로 나눠 돌리기 (A100×2 캠페인 / H100×4 나머지)
+
+캠페인은 A100 박스에 두고 나머지를 H100 박스로 넘길 때의 절차.
+
+## GPU 장수는 처치를 바꾸지 않는다 — 확인함
+
+`run_steerf.sh:192`가 `ppo_micro_batch_size_per_gpu=8`을 하드코딩하고, 같은 파일 125행이
+이유를 적어뒀다: **그게 STEER의 min–max가 도는 그룹이다.** 풀 크기가 8로 고정이므로
+GPU 장수가 바뀌어도 α의 분포가 체계적으로 이동하지 않는다.
+
+| | GPU당 mini-batch | 8짜리 마이크로배치 | **풀 크기** |
+|---|---|---|---|
+| A100 2장 | 32/2 = 16 | 2개 | **8** |
+| H100 4장 | 32/4 = 8 | 1개 | **8** |
+
+남는 차이는 "어떤 시퀀스끼리 한 풀에 묶이나"뿐이고, 롤아웃 샘플링이 실행 간 시드 고정이
+아니라서 **이미 존재하는 런-투-런 변동과 같은 층**이다. `TP_SIZE=4`는 vLLM 생성 수치만
+건드리고 min–max에는 닿지 않는다.
+
+→ **H100 박스는 `N_GPUS=4 TP_SIZE=4`를 그대로 쓴다.** `_gpu_defaults.sh`가 자동 감지하므로
+따로 지정할 것도 없다.
+
+## 예외: `grpo-long`은 A100에 남는다
+
+`scripts/analyze_seeds.py:186`의 `compute_matched_step()`이 grpo-long의
+`perf/time_per_step`을 적분해서 **STEER-F가 쓴 초**와 맞춘다. 박스가 다르면 초가 같은
+단위가 아니다. STEER-F seed-1 기준선이 A100에 있으므로 grpo-long도 거기서 돈다.
+
+나머지 9개 ablation은 전부 H100에서 도는 것끼리, 또는 자기 짝 baseline과 비교되므로
+(`xclip-signed`↔`xclip-steer`, `rloo-*`, `opo-*`) 박스가 갈려도 문제없다.
+
+## 분업표
+
+| | A100×2 | H100×4 |
+|---|---|---|
+| 지금 | campaign 20런 (~31일) | `measure` + followups 9개 + `eval2` |
+| 캠페인 후 | `grpo-long` | `eval` (체크포인트를 HF에서 받아서) |
+| 마지막 | — | 로그 합류 후 `analysis` |
+
+## 1. 이전 — A100(보내는 쪽)
+
+`--export`는 **읽기·업로드만** 한다. 지우지 않으므로 도는 캠페인에 안전하다.
+
+```bash
+cd /workspace/entropy_collapse
+git add -A && git commit -m "wip" && git push     # --export는 더러운 트리를 거부한다
+bash run/migrate_pod.sh --check                   # 먼저 점검만
+REPO=DSDSh/steer-f_2 bash run/migrate_pod.sh --export
+```
+
+옮기는 것은 **git에 없고 GPU 시간이 드는 것**뿐이다:
+
+| | |
+|---|---|
+| **필수** | `checkpoints/mtp_heads_<tag>.pt`, `mtp_calibration_<tag>.json` — 이게 없으면 tree arm이 시작조차 못 한다 |
+| 선택 | `-paper` 2종, `mtp_heads_control_<tag>.pt`, `rollouts.jsonl` — `measure` 스테이지 전용. 없으면 경고만 |
+| 안 옮김 | pip 환경, HF 모델 캐시 — 새 박스에서 다시 만든다. pip 트리를 복사하면 flash-attn이 엉뚱한 torch에 링크된다 |
+
+sha256과 바이트 크기를 매니페스트에 적고 `--import`가 대조한다.
+
+## 2. 이전 — H100(받는 쪽)
+
+```bash
+git clone https://github.com/Parkdev22222/entropy_collapse /workspace/entropy_collapse
+cd /workspace/entropy_collapse
+git checkout claude/3b-text-generation-models-thz2vl
+bash run/setup_env.sh
+REPO=DSDSh/steer-f_2 bash run/migrate_pod.sh --import
+```
+
+`--import`가 sha256까지 맞는지 확인하고 `verl + steer_f import`까지 본다. **`migration
+verified`가 뜨기 전에는 옛 박스를 지우지 마라.**
+
+> `run/`·`scripts/`는 이 브랜치, 런처(`run_steerf.sh` 등)와 학습 로그는 `origin/paper`에
+> 있다(§HANDOFF 1절). 두 쪽이 다 필요하다:
+> `git checkout origin/paper -- run/run_steerf.sh run/run_grpo.sh run/run_uniform_ablation.sh run/eval_steerf.sh run/_gpu_defaults.sh logs`
+
+## 3. H100에서 남은 실험 한 번에
+
+```bash
+tmux new -d -s paper \
+  "cd /workspace/entropy_collapse && \
+   REPO=DSDSh/steer-f_2 \
+   STAGES='preflight measure followups eval2' \
+   FOLLOWUP_ARMS='lam0-tree lam0.1 lam0.5 xclip-signed xclip-steer rloo-signed rloo-steer opo-signed opo-steer' \
+   bash run/run_paper.sh > logs/experiments/paper_h100.log 2>&1"
+```
+
+`FOLLOWUP_ARMS`가 학습 큐와 `eval2` 양쪽에 같이 전달되므로, 이 박스는 자기가 학습한 9개만
+평가한다. `grpo-long`은 빠져 있다.
+
+`eval`을 여기 넣지 않은 이유: 캠페인 체크포인트가 아직 HF에 다 올라오지 않았다.
+
+## 4. A100에서 캠페인이 끝난 뒤
+
+```bash
+FOLLOWUP_ARMS=grpo-long STAGES=followups REPO=DSDSh/steer-f_2 bash run/run_paper.sh
+```
+
+## 5. 마지막 합류 — 로그를 한 곳에 모은 뒤
+
+`analyze_seeds.py`와 `collect_results.py`는 `logs/experiments/`만 읽는다. 두 박스의 로그를
+한쪽에 모으고(git `paper` 브랜치가 제일 안전하다) 거기서:
+
+```bash
+STAGES='eval analysis' REPO=DSDSh/steer-f_2 bash run/run_paper.sh
+```
+
+⚠️ **`s/step` 비용 표에 두 박스를 섞지 마라.** 논문의 오버헤드 수치(+86%)는 같은 실행
+안의 STEER↔STEER-F 비교다. H100에서 잰 초를 그 표에 넣으면 오버헤드가 과소평가된다.
