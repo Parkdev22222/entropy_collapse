@@ -25,8 +25,10 @@
 # RESUMABLE
 #   A run whose log already reached the final step is skipped, so re-running
 #   this script after a crash, a reboot or a manual run costs nothing. The
-#   check globs train-<run>*.log, so a recovery run with a tag suffix (the
-#   _0905 chain, say) also counts as done.
+#   check reads train-<run>.log and train-<run>_*.log, so a recovery run with a
+#   tag suffix (the _0905 chain, say) also counts as done. The underscore is
+#   load-bearing: a bare train-<run>* would also match train-<run>-permuted.log
+#   and mark the signed arm done because a sibling arm finished.
 #
 # DISK
 #   SAVE_BEST_ONLY=True makes verl delete the previous best when a new one

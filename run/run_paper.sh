@@ -105,10 +105,26 @@ if have preflight; then
             echo "REFUSE: instrument_campaign.sh --apply failed" >&2; exit 2; }
         bash run/instrument_phase2.sh --apply || {
             echo "REFUSE: instrument_phase2.sh --apply failed" >&2; exit 2; }
+        # Only the measure stage reads these. The training arms use the heads
+        # without the -paper suffix (run_steerf.sh's own default), so refusing
+        # here on a box that has never run the paper warm-up would block a
+        # 31-day campaign on two files it never opens. Fatal when measure is
+        # actually queued, a warning otherwise.
+        missing=()
         for f in "${HEADS}" "${CALIB}"; do
-            [ -f "${f}" ] || { echo "REFUSE: missing ${f}" >&2; exit 2; }
+            [ -f "${f}" ] || missing+=("${f}")
         done
-        note "MTP heads and calibration present"
+        if [ "${#missing[@]}" -eq 0 ]; then
+            note "MTP heads and calibration present"
+        elif have measure; then
+            printf 'REFUSE: measure is queued but these are missing:\n' >&2
+            printf '  %s\n' "${missing[@]}" >&2
+            printf 'Run run/warmup_and_validate.sh, or drop measure from STAGES.\n' >&2
+            exit 2
+        else
+            note "measure not queued; missing (not needed by the other stages):"
+            printf '[paper]   %s\n' "${missing[@]}"
+        fi
         avail="$(df -BG --output=avail "${ROOT}" 2>/dev/null | tail -1 | tr -dc '0-9')"
         note "${avail:-?} GB free"
         [ -n "${REPO}" ] || note "REPO unset: checkpoints stay local (~3.1 GB per finished run)"
