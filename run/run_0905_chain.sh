@@ -111,6 +111,7 @@ if ! env_preflight "${STEER_ROOT}"; then
     echo "REFUSE: the training environment is broken -- nothing would train."
     exit 2
 fi
+model_guard || exit 2
 
 banner "0905 chain: signed -> steer -> uniform   steps=${STEPS} seed=${SEED}"
 df -h /workspace | tail -1

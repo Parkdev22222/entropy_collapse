@@ -144,12 +144,18 @@ if ! env_preflight "${ROOT}"; then
     echo "REFUSE: the training environment is broken -- nothing would train." >&2
     exit 2
 fi
+# run_steerf.sh defaults to a 7B model and the steer arm is the one arm that
+# calls it directly, so the run name and the network can disagree without
+# anything erroring. Refuse before a single step rather than discover it in the
+# table.
+model_guard || exit 2
 
 # ---------------------------------------------------------- shared settings
 export SAVE_BEST_ONLY=True                 # keep only the best checkpoint
 export SAVE_CONTENTS="['hf_model']"        # no optimizer / extra state
 export SAVE_AFTER=0                        # run_grpo.sh
 export SAVE_AFTER_OVERRIDE=0               # run_steerf.sh
+export MODEL_PATH                          # never let a launcher's own default win
 export VAL_DATA_DIR="${ROOT}/validation_data"
 export STEPS
 

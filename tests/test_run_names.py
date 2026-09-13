@@ -20,12 +20,14 @@ being finished -- that is the one suffix the matcher is allowed to accept.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
 import pytest
 
-ARMS_SH = Path(__file__).resolve().parents[1] / "run" / "_arms.sh"
+REPO = Path(__file__).resolve().parents[1]
+ARMS_SH = REPO / "run" / "_arms.sh"
 STEPS = 110
 DONE_LINE = "step:110 - global_seqlen/min:2388866.000 - actor/entropy:0.121\n"
 
@@ -99,3 +101,50 @@ def test_an_unfinished_log_is_not_done(tmp_path):
     (tmp_path / f"train-{signed}.log").write_text(
         "ImportError: huggingface-hub>=0.34.0,<1.0 is required\n")
     assert not done_flags(tmp_path, [signed])[signed]
+
+
+# --------------------------------------------------------------------------
+# The model the run trains must match the model its NAME claims.
+#
+# 2026-09-13: run_grpo.sh and run_uniform_ablation.sh default to 1.5B but
+# run_steerf.sh defaults to Qwen2.5-Math-7B, and the campaign's steer arm is the
+# one arm that calls run_steerf.sh directly. The pod where the campaign started
+# had that file edited to 1.5B by hand, uncommitted; a second pod cloned the
+# committed tree and its steer arm resolved model.path=Qwen/Qwen2.5-Math-7B
+# under experiment_name=steer-Qwen2.5-Math-1.5B-s5. Nothing errors: it trains
+# the wrong network and files the numbers under the right-looking name.
+def _arms(env=None):
+    """Source run/_arms.sh and return MODEL_TAG, MODEL_PATH and model_guard's rc."""
+    script = (
+        'set -u; . run/_arms.sh; '
+        'printf "%s\\n%s\\n" "${MODEL_TAG}" "${MODEL_PATH}"; '
+        'model_guard >/dev/null 2>&1; printf "%s\\n" "$?"'
+    )
+    e = dict(os.environ)
+    e.pop("MODEL_PATH", None)
+    e.pop("MODEL_TAG", None)
+    if env:
+        e.update(env)
+    out = subprocess.run(["bash", "-c", script], cwd=REPO, env=e,
+                         capture_output=True, text=True).stdout.split("\n")
+    return out[0], out[1], out[2]
+
+
+def test_model_path_defaults_to_the_tag_in_the_run_names():
+    tag, path, rc = _arms()
+    assert path.rsplit("/", 1)[-1] == tag, f"{path} does not end in {tag}"
+    assert rc == "0", "model_guard rejected its own default"
+
+
+def test_model_guard_refuses_a_model_the_run_names_do_not_claim():
+    _, _, rc = _arms({"MODEL_PATH": "Qwen/Qwen2.5-Math-7B"})
+    assert rc != "0", "a 7B model under 1.5B run names must be refused"
+
+
+def test_every_queue_exports_model_path_before_launching():
+    # Whichever launcher a queue calls, none of their own defaults may be
+    # reachable -- run_steerf.sh's is a different model.
+    for q in ("run_campaign.sh", "run_followups.sh", "run_0905_chain.sh"):
+        text = (REPO / "run" / q).read_text()
+        assert "MODEL_PATH" in text, f"{q} never mentions MODEL_PATH"
+        assert "model_guard" in text, f"{q} does not call model_guard"

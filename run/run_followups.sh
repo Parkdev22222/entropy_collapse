@@ -149,12 +149,14 @@ if ! env_preflight "${ROOT}"; then
     echo "REFUSE: the training environment is broken -- nothing would train." >&2
     exit 2
 fi
+model_guard || exit 2
 
 # ---------------------------------------------------------- shared settings
 export SAVE_BEST_ONLY=True
 export SAVE_CONTENTS="['hf_model']"
 export SAVE_AFTER=0
 export SAVE_AFTER_OVERRIDE=0
+export MODEL_PATH                # never let a launcher's own default win
 export VAL_DATA_DIR="${ROOT}/validation_data"
 
 banner "follow-ups: ${#QUEUE[@]} run(s), seed ${SEED}, steps=${STEPS}"

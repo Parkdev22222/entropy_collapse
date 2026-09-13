@@ -40,7 +40,12 @@ except ImportError:  # packaging ships with pip; if it is gone, say so rather th
 
 # Distributions whose declared pins are load-bearing for training. Each one is
 # checked only if it is installed, so this list can name optional packages.
-WATCH = ["transformers", "tokenizers", "vllm", "datasets", "accelerate", "peft"]
+# ray is here because of 2026-09-13: an unpinned `pip install wandb` moved
+# opentelemetry 1.26 -> 1.44, ray's dashboard failed to import
+# PrometheusMetricReader, ray.init() timed out, and every arm of a 20-run queue
+# died with "The current node timed out during startup" -- a message that names
+# neither opentelemetry nor pip.
+WATCH = ["transformers", "tokenizers", "vllm", "ray", "datasets", "accelerate", "peft"]
 
 GREEN, YELLOW, RED, OFF = "\033[32m", "\033[33m", "\033[31m", "\033[0m"
 

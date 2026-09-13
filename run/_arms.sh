@@ -8,6 +8,34 @@
 
 MODEL_TAG=${MODEL_TAG:-Qwen2.5-Math-1.5B}
 
+# The model lives here, beside the tag, because the two must not drift.
+#
+# 2026-09-13: they had. run_grpo.sh:83 and run_uniform_ablation.sh:81 default to
+# 1.5B, but run_steerf.sh:58 defaults to Qwen2.5-Math-7B, and the campaign's
+# steer arm is the one arm that calls run_steerf.sh directly. On the pod where
+# the campaign started, run_steerf.sh had been edited to 1.5B by hand and the
+# edit was never committed, so the default never bit; a second pod cloned from
+# the committed tree and its steer arm resolved
+#     model.path = Qwen/Qwen2.5-Math-7B
+#     experiment_name = steer-Qwen2.5-Math-1.5B-s5
+# A 7B model training under a 1.5B run name produces plausible numbers under the
+# wrong label and raises nothing. Exporting MODEL_PATH from here means no
+# launcher's own default is ever reached.
+MODEL_PATH=${MODEL_PATH:-Qwen/Qwen2.5-Math-${MODEL_TAG#Qwen2.5-Math-}}
+
+# Refuse a run whose name claims a model the run is not using. Cheap, and the
+# only thing standing between a mismatched default and a table full of numbers
+# from the wrong network.
+model_guard () {   # 0 = MODEL_PATH's basename matches MODEL_TAG
+    local got="${MODEL_PATH##*/}"
+    [ "${got}" = "${MODEL_TAG}" ] && return 0
+    echo "REFUSE: MODEL_PATH resolves to '${got}' but the run names say '${MODEL_TAG}'." >&2
+    echo "        MODEL_PATH=${MODEL_PATH}" >&2
+    echo "        A run trained on one model and logged under another is worse than" >&2
+    echo "        a crash: nothing about it looks wrong afterwards." >&2
+    return 1
+}
+
 # --- the five campaign arms -------------------------------------------------
 CAMPAIGN_ARMS=${CAMPAIGN_ARMS:-"grpo steer permuted signed uniform"}
 
@@ -119,7 +147,27 @@ env_preflight () {   # [root]  -> 0 when the training stack imports
     # verl/__init__.py:22 pulls in -- the exact line the 09-08 traceback died on.
     if err="$(cd "${root}" && PYTHONPATH="${root}:${PYTHONPATH:-}" \
                 python3 -c 'from verl import DataProto; import steer_f.tree_rollout' 2>&1)"; then
-        return 0
+        # verl importing is necessary and not sufficient. On 2026-09-13 every
+        # arm on a fresh box died with "The current node timed out during
+        # startup" while this check passed, because the broken package was
+        # opentelemetry: ray's dashboard failed to import, ray.init() timed out,
+        # and main_ppo never reached a training step. The queue then reported
+        # "the environment imports fine, so this was specific to the run" --
+        # the opposite of the truth -- and burned the rest of the queue.
+        # Starting a one-CPU ray costs a few seconds in front of a 40-hour run.
+        if err="$(cd "${root}" && python3 -c '
+import ray, sys
+ray.init(num_cpus=1, ignore_reinit_error=True, log_to_driver=False)
+ray.shutdown()' 2>&1)"; then
+            return 0
+        fi
+        echo "  verl imports, but ray cannot start a node:"
+        printf '%s\n' "${err}" | tail -8 | sed 's/^/    /'
+        if [ -f "${root}/scripts/check_env_pins.py" ]; then
+            echo
+            (cd "${root}" && python3 scripts/check_env_pins.py) || true
+        fi
+        return 1
     fi
     echo "  the training stack does not import:"
     printf '%s\n' "${err}" | tail -6 | sed 's/^/    /'
@@ -140,7 +188,7 @@ diagnose_startup_failure () {   # <log-file> <label>
     printf '    last lines of %s:\n' "$1"
     tail -4 "$1" 2>/dev/null | sed 's/^/      /'
     if env_preflight; then
-        echo "    The environment imports fine now, so this was specific to the run."
+        echo "    verl imports and ray starts now, so this looks specific to the run."
     else
         echo "    ^^ THE ENVIRONMENT IS BROKEN. Every remaining run will die the same way."
         echo "       Fix it, then re-run this queue -- finished runs are skipped."
