@@ -73,6 +73,29 @@ def _requirements(dist: str) -> list[Requirement]:
     return out
 
 
+def _enforced_at_import(holder: str) -> set[str] | None:
+    """Requirements `holder` re-checks when imported; empty set if it does not.
+
+    transformers runs dependency_versions_check at the top of its __init__, so a
+    violation of one of ITS pins really does stop `import verl` in its tracks --
+    that is the 2026-09-08 huggingface_hub failure. Nothing else in WATCH does
+    that: vllm declares its opentelemetry range and never looks again, so a
+    violation there is an untested combination rather than a dead run. Saying
+    both in the same words made this script cry wolf on 2026-09-13, when the
+    pins were violated and the stack imported and ray started anyway.
+
+    None means "could not determine", which is reported as such rather than
+    guessed either way.
+    """
+    if holder != "transformers":
+        return set()
+    try:
+        from transformers import dependency_versions_check as dvc
+        return {n.lower() for n in getattr(dvc, "pkgs_to_check_at_runtime", [])}
+    except Exception:
+        return None
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -116,10 +139,35 @@ def main(argv=None) -> int:
             print(f"  {RED}FAIL{OFF}  {holder} requires {req.name}{req.specifier} "
                   f"but {req.name}=={got} is installed")
         print()
-        print("  A declared pin is not advice: transformers re-checks its own at import")
-        print("  time, so a violation here means `import verl` raises and every training")
-        print("  run dies in its first seconds.")
-        print()
+        hard, soft, unknown = [], [], []
+        for holder, req, _ in violations:
+            enforced = _enforced_at_import(holder)
+            if enforced is None:
+                unknown.append((holder, req))
+            elif req.name.lower() in enforced:
+                hard.append((holder, req))
+            else:
+                soft.append((holder, req))
+        if hard:
+            print("  ENFORCED AT IMPORT -- these stop the stack dead:")
+            for holder, req in hard:
+                print(f"    {holder} re-checks {req.name} when it is imported, so"
+                      " `import verl` raises")
+            print("    and every training run dies in its first seconds.")
+            print()
+        if soft:
+            print("  DECLARED ONLY -- not re-checked at import:")
+            for holder, req in soft:
+                print(f"    {holder} declares {req.name}{req.specifier} and does not"
+                      " enforce it at runtime.")
+            print("    The stack may well import and train. It is an untested combination,")
+            print("    and two boxes that differ here are not running the same experiment.")
+            print()
+        if unknown:
+            print("  ENFORCEMENT UNKNOWN (the holder could not be imported here):")
+            for holder, req in unknown:
+                print(f"    {holder} -> {req.name}{req.specifier}")
+            print()
 
     # One pip line, pinning each offender to the range its holder asks for.
     # Deduplicated by package, keeping the first holder's specifier.
