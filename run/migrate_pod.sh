@@ -20,8 +20,9 @@
 #
 #   Neither, and this is the class that bites -- gitignored artefacts that
 #     cost GPU-hours to recreate:
-#       checkpoints/mtp_heads_<tag>.pt          Phase 0+1. Without it no tree
-#       checkpoints/mtp_calibration_<tag>.json  arm can start at all.
+#       checkpoints/mtp_heads_<tag>-paper.pt        Phase 0+1. Without it no
+#       checkpoints/mtp_calibration_<tag>-paper.json  tree arm starts at all --
+#                                               run_uniform_ablation.sh refuses.
 #       rollout_data/warmup/<tag>/rollouts.jsonl  the locality and recall
 #                                               measurements need it.
 #       checkpoints/STEER-F/<run>/...           the trained models.
@@ -61,22 +62,26 @@ bad () { printf '  \033[31mFAIL\033[0m  %s\n' "$*"; }
 # The artefacts that are not in git and cost GPU time to rebuild, split by who
 # needs them.
 #
-# run_steerf.sh:73 resolves the heads as
-#   checkpoints/mtp_heads_<tag>${SCALE:+-${SCALE}}.pt
-# and every run so far has left SCALE empty, so the file the TRAINER opens has
-# no -paper suffix (the _0905 logs show mtp_heads_Qwen2.5-Math-1.5B.pt). Listing
-# only the -paper variants, as this script first did, moved the pair that the
-# measure stage reads and left behind the pair without which no tree arm can
-# start at all. A new pod would look migrated and then die on its first arm.
+# Which pair is required is decided by the launcher, not by run_steerf.sh's
+# generic default. run_uniform_ablation.sh:95-96 HARDCODES the -paper pair and
+# refuses at :149 when the heads file is absent -- and that check reads only
+# STEERF_FORECAST, so it fires at lambda=0 too (lam0-tree included). That
+# launcher runs signed, uniform, permuted and six of the ten follow-ups: three
+# of the campaign's five arms and most of the ablations.
+#
+# run_steerf.sh's own default has no -paper suffix, but it only opens the file
+# when lambda != 0 (:76), and every arm it launches here runs at lambda=0. The
+# _0905 STEER log printing the un-suffixed path is therefore not evidence about
+# which pair matters: that run never opened one.
 required_paths () {     # no tree arm starts without these
     printf '%s\n' \
-        "checkpoints/mtp_heads_${MODEL_TAG}.pt" \
-        "checkpoints/mtp_calibration_${MODEL_TAG}.json"
-}
-optional_paths () {     # the measure stage only; absence is not fatal
-    printf '%s\n' \
         "checkpoints/mtp_heads_${MODEL_TAG}-paper.pt" \
-        "checkpoints/mtp_calibration_${MODEL_TAG}-paper.json" \
+        "checkpoints/mtp_calibration_${MODEL_TAG}-paper.json"
+}
+optional_paths () {     # nothing in the current queues opens these; absence is not fatal
+    printf '%s\n' \
+        "checkpoints/mtp_heads_${MODEL_TAG}.pt" \
+        "checkpoints/mtp_calibration_${MODEL_TAG}.json" \
         "checkpoints/mtp_heads_control_${MODEL_TAG}.pt" \
         "rollout_data/warmup/${MODEL_TAG}/rollouts.jsonl" \
         "rollout_data/warmup/${MODEL_TAG}-paper/rollouts.jsonl"
@@ -116,13 +121,13 @@ inventory () {
         else bad "MISSING  ${p}"; missing=1; fi
     done < <(required_paths)
 
-    say "2b. artefacts the measure stage wants -- absence is not fatal"
+    say "2b. artefacts nothing in the current queues opens -- absence is not fatal"
     local n_opt=0
     while IFS= read -r p; do
         if [ -e "${p}" ]; then ok "$(printf '%-58s %s' "${p}" "$(human "${p}")")"; n_opt=$((n_opt + 1))
         else warn "absent   ${p}"; fi
     done < <(optional_paths)
-    [ "${n_opt}" = "0" ] && warn "none present: the new pod can train, but STAGES=measure has nothing to read"
+    [ "${n_opt}" = "0" ] && warn "none present: every training arm can still run; STAGES=measure has nothing to read"
 
     say "3. trained checkpoints"
     local n=0

@@ -106,24 +106,32 @@ if have preflight; then
             echo "REFUSE: instrument_campaign.sh --apply failed" >&2; exit 2; }
         bash run/instrument_phase2.sh --apply || {
             echo "REFUSE: instrument_phase2.sh --apply failed" >&2; exit 2; }
-        # Only the measure stage reads these. The training arms use the heads
-        # without the -paper suffix (run_steerf.sh's own default), so refusing
-        # here on a box that has never run the paper warm-up would block a
-        # 31-day campaign on two files it never opens. Fatal when measure is
-        # actually queued, a warning otherwise.
+        # run_uniform_ablation.sh:95-96 hardcodes this -paper pair and refuses at
+        # :149 when the heads file is absent, at lambda=0 as well -- so every
+        # tree arm needs it: signed, uniform and permuted in the campaign, the
+        # uniform arm of the recovery chain, and six of the ten follow-ups. The
+        # measure stage reads the same pair. Only eval, eval2 and analysis can
+        # run without it, which is the box that evaluates checkpoints it pulls
+        # from the Hub.
+        needs_heads=""
+        for s in recover campaign followups measure; do
+            have "${s}" && needs_heads="${needs_heads}${s} "
+        done
         missing=()
         for f in "${HEADS}" "${CALIB}"; do
             [ -f "${f}" ] || missing+=("${f}")
         done
         if [ "${#missing[@]}" -eq 0 ]; then
             note "MTP heads and calibration present"
-        elif have measure; then
-            printf 'REFUSE: measure is queued but these are missing:\n' >&2
+        elif [ -n "${needs_heads}" ]; then
+            printf 'REFUSE: these stages open the MTP heads: %s\n' "${needs_heads}" >&2
+            printf 'missing:\n' >&2
             printf '  %s\n' "${missing[@]}" >&2
-            printf 'Run run/warmup_and_validate.sh, or drop measure from STAGES.\n' >&2
+            printf 'Bring them from the other pod (run/migrate_pod.sh --import),\n' >&2
+            printf 'or rebuild with run/warmup_and_validate.sh.\n' >&2
             exit 2
         else
-            note "measure not queued; missing (not needed by the other stages):"
+            note "no stage here opens the MTP heads; missing:"
             printf '[paper]   %s\n' "${missing[@]}"
         fi
         avail="$(df -BG --output=avail "${ROOT}" 2>/dev/null | tail -1 | tr -dc '0-9')"

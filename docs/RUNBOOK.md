@@ -195,8 +195,8 @@ REPO=DSDSh/steer-f_2 bash run/migrate_pod.sh --export
 
 | | |
 |---|---|
-| **필수** | `checkpoints/mtp_heads_<tag>.pt`, `mtp_calibration_<tag>.json` — 이게 없으면 tree arm이 시작조차 못 한다 |
-| 선택 | `-paper` 2종, `mtp_heads_control_<tag>.pt`, `rollouts.jsonl` — `measure` 스테이지 전용. 없으면 경고만 |
+| **필수** | `checkpoints/mtp_heads_<tag>-paper.pt`, `mtp_calibration_<tag>-paper.json` — `run_uniform_ablation.sh:95`이 이 경로를 하드코딩하고 :149가 없으면 REFUSE한다. **λ=0이어도** 거부하므로 signed/uniform/permuted와 tree followups 6개가 전부 막힌다 |
+| 선택 | 접미사 없는 2종, `mtp_heads_control_<tag>.pt`, `rollouts.jsonl` — 지금 큐 중 아무도 안 연다 |
 | 안 옮김 | pip 환경, HF 모델 캐시 — 새 박스에서 다시 만든다. pip 트리를 복사하면 flash-attn이 엉뚱한 torch에 링크된다 |
 
 sha256과 바이트 크기를 매니페스트에 적고 `--import`가 대조한다.
@@ -207,16 +207,32 @@ sha256과 바이트 크기를 매니페스트에 적고 `--import`가 대조한�
 git clone https://github.com/Parkdev22222/entropy_collapse /workspace/entropy_collapse
 cd /workspace/entropy_collapse
 git checkout claude/3b-text-generation-models-thz2vl
-bash run/setup_env.sh
-REPO=DSDSh/steer-f_2 bash run/migrate_pod.sh --import
+
+bash run/bootstrap_pod.sh                 # 두 브랜치를 합쳐 실행 가능한 트리를 만든다
+bash run/setup_env.sh                     # vllm / ray / flash-attn / 핀
+REPO=DSDSh/steer-f_2 bash run/migrate_pod.sh --import      # MTP 헤드
 ```
+
+**`bootstrap_pod.sh`가 왜 필요한가.** 이 브랜치에는 `verl/`·`datasets/`·`logs/`·
+`requirements.txt`가 **없다**(§HANDOFF 1절의 분할). 그냥 클론하면 `import verl`이
+`ModuleNotFoundError`로 죽고 학습이 한 줄도 안 돈다. 2026-09-13에 새 H100 박스가 정확히
+이 증상을 냈다.
+
+`DRY=1 bash run/bootstrap_pod.sh`로 무엇을 가져올지 먼저 볼 수 있다.
+
+> ⚠️ **`git checkout origin/paper -- run` 을 통째로 치지 마라.** 두 브랜치가 모두
+> `run/setup_env.sh`를 갖고 있어서, 도너의 옛 버전이 이 브랜치 것을 덮고 **hub 핀 검사를
+> 잃는다** — 지금까지 런을 두 번 죽인 그 실패에 대한 방어다. `bootstrap_pod.sh`는
+> **HEAD가 추적하는 파일은 절대 안 덮는다**(차집합만 가져온다). 수동으로 하려면 파일을
+> 하나씩 지정해야 한다.
+
+> ⚠️ **`git apply patches/steerf_tree_rollout.patch` 를 치지 마라.** `origin/paper`의
+> `verl/`에 이미 적용돼 있다(`steerf_tree_depths` 4군데). `setup_env.sh`는 "적용됨"과
+> "패치 파일 있음"을 구별하지 못해서 이걸 `NEED`에 넣는데, 실행하면 충돌한다.
+> `bootstrap_pod.sh`가 끝에서 어느 쪽인지 알려준다.
 
 `--import`가 sha256까지 맞는지 확인하고 `verl + steer_f import`까지 본다. **`migration
 verified`가 뜨기 전에는 옛 박스를 지우지 마라.**
-
-> `run/`·`scripts/`는 이 브랜치, 런처(`run_steerf.sh` 등)와 학습 로그는 `origin/paper`에
-> 있다(§HANDOFF 1절). 두 쪽이 다 필요하다:
-> `git checkout origin/paper -- run/run_steerf.sh run/run_grpo.sh run/run_uniform_ablation.sh run/eval_steerf.sh run/_gpu_defaults.sh logs`
 
 ## 3. H100에서 남은 실험 한 번에
 
