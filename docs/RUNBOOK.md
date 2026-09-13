@@ -187,8 +187,20 @@ GPU 장수가 바뀌어도 α의 분포가 체계적으로 이동하지 않는�
 
 ```bash
 cd /workspace/entropy_collapse
+hf auth login                                        # 이 파드에서 따로 해야 한다
 REPO=DSDSh/steer-f_2 bash run/migrate_pod.sh --share
 ```
+
+**파드마다 따로 로그인해야 한다.** 한쪽에서 `hf auth login` 해도 다른 쪽은 모른다.
+그리고 **올리는 쪽 토큰은 write 권한이 있어야 한다** — fine-grained 토큰이면 그 레포가
+Write로 명시돼 있어야 하고, read 전용이면 업로드가 401로 죽는다.
+
+토큰은 **로그인 시점의 `HF_HOME` 아래**에 저장된다. `setup_env.sh`가 `HF_HOME`을 바꾸라고
+권하므로, 로그인한 뒤에 다른 `HF_HOME`을 export하면 **토큰이 사라진 게 아니라 안 보이게**
+된다. 스크립트 0절이 지금 어떤 `HF_HOME`이 걸려 있고 토큰 파일이 거기 있는지 찍어준다.
+
+⚠️ 토큰을 `--token` 같은 인자로 주지 마라 — `~/.bash_history`와 `ps aux`에 남는다.
+대화형 프롬프트에 붙여넣는다.
 
 **`--export`가 아니라 `--share`다.** 두 파드가 **동시에** 도는 건 이전이 아니라 분업이고,
 `--export`는 그 전제로 쓰이지 않았다:

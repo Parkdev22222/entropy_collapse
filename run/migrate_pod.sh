@@ -176,6 +176,66 @@ fi
 [ -n "${HF_CLI}" ] || { echo "FATAL: neither 'hf' nor 'huggingface-cli' on PATH." >&2
                         echo "       pip install \"huggingface_hub>=0.34,<1.0\"" >&2; exit 1; }
 
+# ------------------------------------------------------------- hf auth
+# A token is first needed at the upload, which runs AFTER the inventory and
+# after the manifest is written -- so an unauthenticated pod used to get all
+# the way there and then die on a create_repo traceback. Check it in two
+# seconds instead, and report HF_HOME while doing so: `hf auth login` writes
+# the token under whichever HF_HOME was set at the time, and setup_env.sh
+# suggests exporting a different one, so a login can be hidden rather than
+# missing. Each pod authenticates separately; logging in on one does not log
+# in the other.
+#
+# Exit codes from the probe: 0 usable, 1 no/invalid token, 2 hub not
+# importable, 3 token is read-only.
+hf_auth_probe () {
+    python3 - <<'PY' 2>&1
+import os, sys
+try:
+    from huggingface_hub import HfApi
+except Exception as exc:
+    print(f"huggingface_hub is not importable: {exc}"); sys.exit(2)
+try:
+    from huggingface_hub.constants import HF_TOKEN_PATH as tp
+except Exception:
+    tp = None
+print(f"HF_HOME={os.environ.get('HF_HOME', '(unset)')}")
+if isinstance(tp, str):
+    print(f"token file={tp} present={os.path.isfile(tp)}")
+try:
+    me = HfApi().whoami()
+except Exception as exc:
+    print(f"{type(exc).__name__}: {exc}"); sys.exit(1)
+role = (((me.get("auth") or {}).get("accessToken") or {}).get("role")) or "?"
+print(f"user={me.get('name','?')} token role={role}")
+sys.exit(3 if role == "read" else 0)
+PY
+}
+
+AUTH_OUT="$(hf_auth_probe)"; AUTH_RC=$?
+say "0. Hub 인증"
+printf '%s\n' "${AUTH_OUT}" | sed 's/^/        /'
+case "${AUTH_RC}" in
+    0) ok "token present and not read-only" ;;
+    2) warn "cannot check (huggingface_hub not importable) -- continuing" ;;
+    *)
+        if [ "${AUTH_RC}" = "3" ]; then
+            bad "this token is READ-ONLY; uploading needs write"
+        else
+            bad "no usable token on THIS pod"
+        fi
+        echo "  Each pod authenticates separately -- a login on the other box does not carry over."
+        echo "  Log in here, with a token that has WRITE access to ${REPO}:"
+        echo "      hf auth login            # paste the token at the prompt, do not pass it as an argument"
+        echo "  If you already logged in, check HF_HOME above: the token lives under whichever"
+        echo "  HF_HOME was set at login time, so exporting a different one hides it."
+        case "${MODE}" in
+            --import) warn "continuing: a public repo can be read without a token" ;;
+            *)        exit 1 ;;
+        esac
+        ;;
+esac
+
 # --------------------------------------------------------- export / share
 # Both put the gitignored artefacts and a manifest on the Hub; only --export
 # also uploads the trained checkpoints. --share exists because splitting work
@@ -223,7 +283,11 @@ PY
         [ -f "${p}" ] || continue
         echo "  -> ${p}"
         "${HF_CLI}" upload "${REPO}" "${p}" "${PREFIX}/${p}" --repo-type model \
-            --commit-message "migration: ${p}" >/dev/null || { bad "upload failed: ${p}"; exit 1; }
+            --commit-message "migration: ${p}" >/dev/null || {
+                bad "upload failed: ${p}"
+                echo "  A 401/403 here with a token present means the token cannot WRITE to"
+                echo "  ${REPO}. A fine-grained token needs that repo listed with Write access."
+                exit 1; }
     done < <(critical_paths)
     "${HF_CLI}" upload "${REPO}" "${MANIFEST}" "${PREFIX}/manifest.json" --repo-type model \
         --commit-message "migration manifest" >/dev/null || { bad "manifest upload failed"; exit 1; }
