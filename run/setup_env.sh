@@ -22,6 +22,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STEER_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 CHECK_ONLY=${CHECK_ONLY:-0}
 FAIL=0
+INSTALLED=0      # 5b: 설치가 실제로 일어났을 때만 핀을 재검사합니다
+PIN_RC=9         # 3절이 안 돌았을 때의 기본값
 NEED=()
 
 say()  { printf '\n\033[1m== %s\033[0m\n' "$*"; }
@@ -197,12 +199,45 @@ if [ ${#NEED[@]} -gt 0 ]; then
         for cmd in "${NEED[@]}"; do
             # export 안내와 주석이 달린 선택 항목은 자동 실행하지 않습니다.
             case "$cmd" in export*|*'#'*) continue;; esac
-            case "$cmd" in pip\ install*) echo "  \$ $cmd"; eval "$cmd" || bad "실패: $cmd";; esac
+            case "$cmd" in pip\ install*) echo "  \$ $cmd"; eval "$cmd" && INSTALLED=1 || bad "실패: $cmd";; esac
         done
     fi
 else
     say "5. 설치할 것 없음"
     ok "모든 의존성 충족"
+fi
+
+# ------------------------------------------------------------- 5b. 재검사
+# 3절은 설치 *전* 상태를 봅니다. pip 는 요청한 패키지의 의존성을 만족시키려고
+# 이미 깔린 것을 조용히 올리므로, 5절이 방금 실행한 명령이 3절에서 통과한 핀을
+# 깨뜨릴 수 있습니다 — 그리고 실제로 그랬습니다.
+#
+# 2026-09-13, 새 H100 박스: 이 스크립트가 `pip install wandb` 를 권했고(당시
+# run/_check_deps.py 가 wandb 를 필수로 나열했습니다), 그 설치가
+# opentelemetry 1.26 -> 1.44, protobuf 4.25 -> 7.36 을 끌어올려 vllm 0.8.4 의
+# 선언 핀을 깼습니다. 3절은 그 직전에 "핀 전부 충족" 을 찍은 뒤였고, 재검사가
+# 없어서 아무도 모른 채 지나갔습니다.
+#
+# 그래서 "검사 -> 설치" 를 "검사 -> 설치 -> 재검사" 로 만듭니다. 설치가 실제로
+# 일어났을 때만 돌므로 깨끗한 환경에서는 출력이 늘지 않습니다.
+if [ "${INSTALLED}" = "1" ] && [ -f "${STEER_ROOT}/scripts/check_env_pins.py" ]; then
+    say "5b. 설치 후 핀 재검사"
+    PIN_OUT2="$(python3 "${STEER_ROOT}/scripts/check_env_pins.py" 2>&1)"; PIN_RC2=$?
+    case "${PIN_RC2}" in
+        0) ok "설치 후에도 핀 충족" ;;
+        1) printf '%s\n' "${PIN_OUT2}" | sed 's/^/  /'
+           if [ "${PIN_RC:-9}" = "0" ]; then
+               bad "방금 실행한 설치가 핀을 깼습니다 — 설치 전에는 통과했습니다"
+           else
+               bad "핀 위반이 남아 있습니다"
+           fi
+           FIXCMD2="$(printf '%s\n' "${PIN_OUT2}" | sed -n 's/^ *fix: //p' | tail -1)"
+           if [ -n "${FIXCMD2}" ]; then
+               echo "  되돌리려면:"
+               echo "    ${FIXCMD2}"
+           fi ;;
+        *) warn "핀 재검사 불가: $(printf '%s' "${PIN_OUT2}" | tail -1)" ;;
+    esac
 fi
 
 # ---------------------------------------------------------------- 6. 검증

@@ -135,6 +135,7 @@ arm-우선으로 돌리면 STEER-F만 5시드고 GRPO는 1시드로 남는다.
 | | |
 |---|---|
 | **hub 핀** | 재시작마다 되돌아간다. 1단계가 유일한 방어. 두 번 당했다 |
+| **`pip install wandb` 금지** | vllm 0.8.4의 opentelemetry 핀(`<1.27.0`)을 깨고 protobuf를 4.25→7.36으로 올린다. 2026-09-13 H100 박스에서 실제로 그랬다. 그리고 **어차피 안 쓴다** — 큐가 도는 세 경로가 전부 tensorboard다(`run_grpo.sh:207`, `run_uniform_ablation.sh:170`, `_arms.sh:102`). `setup_env.sh` 5b절이 이제 설치 후 핀을 다시 검사해서 이런 걸 잡는다 |
 | **`run_steerf.sh`의 `STEPS=200`** | SCALE case에 하드코딩이라 `export STEPS`가 안 닿는다. 캠페인은 `steer_plain_args()`를 trailing override로 붙여 막는다 |
 | **로그 글롭** | `train-<run>.log` + `train-<run>_*.log`만 허용해야 한다. 밑줄이 없으면 `-permuted`를 삼켜 signed를 DONE으로 오판정한다. `tests/test_run_names.py`가 고정한다 |
 | **`run_paper.sh` preflight** | `-paper` 접미사 MTP 파일은 `measure` 스테이지 전용이다. 학습 arm은 안 쓴다 |
