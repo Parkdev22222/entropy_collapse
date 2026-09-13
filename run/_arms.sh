@@ -163,6 +163,20 @@ ray.shutdown()' 2>&1)"; then
         fi
         echo "  verl imports, but ray cannot start a node:"
         printf '%s\n' "${err}" | tail -8 | sed 's/^/    /'
+        # "The current node timed out during startup" names nothing. What
+        # actually failed is in ray's own session logs -- on 2026-09-13 it was
+        # first an opentelemetry ImportError and then, after that was rolled
+        # back, a TypeError from ray calling a newer opentelemetry API than
+        # vllm's pins allow. Neither string appears in the exception above.
+        local rl
+        for rl in /tmp/ray/session_latest/logs/dashboard.log \
+                  /tmp/ray/session_latest/logs/gcs_server.err \
+                  /tmp/ray/session_latest/logs/raylet.err; do
+            [ -s "${rl}" ] || continue
+            echo
+            echo "  ${rl} (tail):"
+            tail -12 "${rl}" | sed 's/^/    /'
+        done
         if [ -f "${root}/scripts/check_env_pins.py" ]; then
             echo
             (cd "${root}" && python3 scripts/check_env_pins.py) || true

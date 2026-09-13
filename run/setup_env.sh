@@ -76,8 +76,28 @@ mkdir -p "${HF_TARGET}"
 # 로그의 `NCCL version 2.21.5+cuda12.4` 가 그 버전이 요구하는 torch 2.6.0+cu124
 # 와 일치한다는 것. 최신 vLLM 은 torch 2.7+ 로 올려 verl 0.4.1.x 와 어긋납니다.
 VLLM_PIN=${VLLM_PIN:-0.8.4}
+# ray floats unless you pin it, and vllm's pins do not constrain it. That is how
+# a second pod ended up with ray 2.58.0 next to vllm 0.8.4: vllm declares
+# opentelemetry-api<1.27.0, ray 2.58 calls
+#     Meter.create_histogram(explicit_bucket_boundaries_advisory=...)
+# which only exists in a much newer opentelemetry-api, its dashboard fails to
+# import, ray.init() times out, and every arm dies with "The current node timed
+# out during startup" -- naming neither ray nor opentelemetry.
+#
+# There is no version to guess here: the right value is whatever the box that
+# already trains is running.  On that box:
+#     python3 -c "import ray; print(ray.__version__)"
+# then set RAY_PIN to it, here or in the environment, so both boxes share a
+# stack and the runs stay comparable.
+RAY_PIN=${RAY_PIN:-}
 say "2. GPU 스택"
 GPU_MISSING=()
+if [ -z "${RAY_PIN}" ]; then
+    warn "RAY_PIN 이 비어 있습니다 — ray 가 떠다닙니다."
+    printf '        학습되는 박스에서: python3 -c "import ray; print(ray.__version__)"\n'
+    printf '        그 값을 RAY_PIN 으로 고정하세요. vllm %s 와 맞지 않는 ray 는\n' "${VLLM_PIN}"
+    printf '        대시보드 import 에서 죽고, 에러에 ray 도 opentelemetry 도 안 나옵니다.\n'
+fi
 for m in torch vllm ray flash_attn; do
     v=$(pyver "$m")
     if [ -n "$v" ]; then ok "$m $v"; continue; fi
@@ -109,7 +129,7 @@ if [ ${#GPU_MISSING[@]} -gt 0 ]; then
   아래 순서로 설치하세요. 순서를 바꾸면 깨집니다.
 
     pip install vllm==${VLLM_PIN}          # torch 를 자기 핀에 맞춰 함께 설치
-    pip install "ray[default]"
+    pip install "ray[default]${RAY_PIN:+==${RAY_PIN}}"
     pip install "transformers<5"           # vllm 이 올렸을 수 있으니 재핀
     pip install flash-attn --no-build-isolation
 
@@ -122,7 +142,7 @@ EOT
     if [ "${INSTALL_GPU_STACK:-0}" = "1" ] && [ "${CHECK_ONLY}" != "1" ]; then
         say "2b. GPU 스택 설치"
         pip install "vllm==${VLLM_PIN}"        || bad "vllm 설치 실패"
-        pip install "ray[default]"             || bad "ray 설치 실패"
+        pip install "ray[default]${RAY_PIN:+==${RAY_PIN}}" || bad "ray 설치 실패"
         pip install "transformers<5"           || bad "transformers 재핀 실패"
         pip install flash-attn --no-build-isolation || warn "flash-attn 실패 — sdpa 폴백으로 진행 가능"
         python3 -c "import torch; assert torch.cuda.is_available()" 2>/dev/null \

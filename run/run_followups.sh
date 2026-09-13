@@ -178,6 +178,14 @@ for a in "${QUEUE[@]}"; do
     fi
 
     banner "${a}  ->  ${rn}   (lam=${lam}, ${avail:-?} GB free)"
+    # A run whose ray.init() died leaves gcs_server, raylet and a
+    # /tmp/ray session behind, and the next run inherits the wreck and dies
+    # in the same place. run_0905_chain.sh:126 has always done this; the
+    # queues did not, which is why one broken start took the whole queue
+    # down with it. Safe here: the queue already refuses to begin while
+    # another trainer is running.
+    ray stop --force >/dev/null 2>&1 || true
+    sleep 5
     [ -n "${extra_part}" ] && echo "  extra overrides: ${extra_part}"
     start=$(date +%s)
 
