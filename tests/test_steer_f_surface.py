@@ -103,3 +103,46 @@ def test_this_branch_steer_f_does_not_satisfy_the_donor_verl():
             assert f"def {name}" not in here, (
                 f"{path}:{name} now exists on this branch too -- revisit "
                 "bootstrap_pod.sh's RUNTIME_RE override")
+
+
+def make_call_site(root: Path, *, call: str, in_queue: bool) -> None:
+    """A steer_f whose function takes (a, b), and a script that calls it."""
+    make_tree(root, defines="def forecast_h_togo():\n    pass\n")
+    (root / "steer_f" / "entropy_forecast.py").write_text(
+        "def sibling_support():\n    pass\n\n"
+        "def entropy_advantage(h_togo_vals, group_index, mask, baseline='sibling'):\n"
+        "    pass\n")
+    scripts = root / "scripts"
+    scripts.mkdir(exist_ok=True)
+    scripts.joinpath("measure_thing.py").write_text(
+        "from steer_f.entropy_forecast import entropy_advantage\n" + call + "\n")
+    runs = root / "run"
+    runs.mkdir(exist_ok=True)
+    runs.joinpath("queue.sh").write_text(
+        "python3 scripts/measure_thing.py\n" if in_queue else "echo nothing\n")
+
+
+def test_wrong_keyword_in_a_queued_script_is_fatal(tmp_path):
+    """The measure-support failure: the import succeeds, the call does not."""
+    make_call_site(tmp_path, call="entropy_advantage(h, response_ids=r, group_size=8)",
+                   in_queue=True)
+    rc, out = run(tmp_path)
+    assert rc == 1
+    assert "response_ids" in out and "measure_thing.py" in out
+
+
+def test_wrong_keyword_outside_the_queues_is_a_warning(tmp_path):
+    """phase1_validate.py is this branch's own tool. Say so; do not refuse."""
+    make_call_site(tmp_path, call="entropy_advantage(h, response_ids=r, group_size=8)",
+                   in_queue=False)
+    rc, out = run(tmp_path)
+    assert rc == 0
+    assert "no queue runs it" in out
+
+
+def test_matching_call_passes(tmp_path):
+    make_call_site(tmp_path, call="entropy_advantage(h, gi, m, baseline='sibling')",
+                   in_queue=True)
+    rc, out = run(tmp_path)
+    assert rc == 0, out
+    assert "calls it compatibly" in out

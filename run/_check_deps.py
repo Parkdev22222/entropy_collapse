@@ -35,6 +35,14 @@ SPEC = [
     ("math_verify",           "parse",          "math_verify"),
     ("latex2sympy2_extended", "__name__",       "latex2sympy2_extended"),
     ("tensordict",            "TensorDict",     "tensordict<=0.6.2"),
+    # The reward scorer. verl imports these lazily, the first time it scores a
+    # generation -- which is step-0 validation, several minutes into a run and
+    # long after every gate has said OK. On 2026-09-14 three H100 arms died
+    # there in a row on a missing word2number:
+    #   verl/utils/reward_score/qwen_math_eval_toolkit/parser.py:7
+    #     from word2number import w2n
+    ("word2number",           "w2n",            "word2number"),
+    ("sympy",                 "simplify",       "sympy"),
 ]
 
 # Present-is-fine, absent-is-fine: reported, never turned into a pip command.

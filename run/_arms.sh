@@ -158,6 +158,25 @@ env_preflight () {   # [root]  -> 0 when the training stack imports
                 python3 run/_check_steer_f.py "${root}"); then
             return 1
         fi
+        # The reward scorer is imported lazily, the first time verl scores a
+        # generation -- step-0 validation, several minutes in. A missing
+        # word2number there killed three H100 arms in a row on 2026-09-14, each
+        # after a full model load and a full generation pass. Importing it here
+        # costs a second and moves that failure ahead of the queue.
+        if ! err="$(cd "${root}" && PYTHONPATH="${root}:${PYTHONPATH:-}" python3 -c '
+import importlib, importlib.util, sys
+if importlib.util.find_spec("verl.utils.reward_score") is None:
+    sys.exit(0)                      # no trainer in this checkout
+importlib.import_module("verl.utils.reward_score.multi_datasets_eval")' 2>&1)"; then
+            echo "  verl and steer_f import, but the reward scorer does not:"
+            printf '%s\n' "${err}" | tail -6 | sed 's/^/    /'
+            echo
+            echo "  verl reaches this only at step-0 validation, minutes into a run,"
+            echo "  so it does not look like an environment problem in the log."
+            echo "  Install what the traceback names. Most likely:"
+            echo "      pip install word2number sympy"
+            return 1
+        fi
         # verl importing is necessary and not sufficient. On 2026-09-13 every
         # arm on a fresh box died with "The current node timed out during
         # startup" while this check passed, because the broken package was

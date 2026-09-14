@@ -75,6 +75,82 @@ def defined_names(mod_path: pathlib.Path) -> set[str]:
     return names
 
 
+def steer_f_signatures(sf_root: pathlib.Path) -> dict:
+    """{function name: (positional names, kw-only names, n required, **kwargs?)}
+    read from steer_f's own sources. Classes map to None and are skipped."""
+    sigs: dict = {}
+    for path in sorted(sf_root.glob("*.py")):
+        try:
+            tree = ast.parse(path.read_text(errors="replace"))
+        except (OSError, SyntaxError):
+            continue
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef):
+                sigs[node.name] = None
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                a = node.args
+                pos = [x.arg for x in a.posonlyargs + a.args]
+                sigs[node.name] = (pos, [x.arg for x in a.kwonlyargs],
+                                   len(pos) - len(a.defaults), a.kwarg is not None)
+    return sigs
+
+
+def queue_scripts(root: pathlib.Path) -> set[str]:
+    """Scripts the queues in run/ actually invoke. A mismatch in one of those
+    fails a stage; a mismatch anywhere else is worth saying but not refusing."""
+    import re
+    names: set[str] = set()
+    for sh in (root / "run").glob("*.sh"):
+        names.update(re.findall(r"scripts/[A-Za-z0-9_]+\.py", sh.read_text(errors="replace")))
+    return names
+
+
+def check_call_sites(root: pathlib.Path, sf_root: pathlib.Path) -> list[str]:
+    """Names existing is not enough: the two lineages also disagree on
+    SIGNATURES. measure_ah_support.py imported entropy_advantage successfully
+    and then died on `unexpected keyword argument 'response_ids'`, because the
+    donor's takes (h_togo_vals, group_index, mask, responses=...) and returns a
+    tensor where this branch's takes response_ids=/group_size= and returns a
+    2-tuple. Returns the fatal problems; warnings are printed as it goes."""
+    sigs = steer_f_signatures(sf_root)
+    queued, fatal = queue_scripts(root), []
+    for path in sorted((root / "scripts").glob("*.py")):
+        try:
+            tree = ast.parse(path.read_text(errors="replace"))
+        except (OSError, SyntaxError):
+            continue
+        imported = {a.name for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)
+                    and n.module and n.module.split(".")[0] == "steer_f"
+                    for a in n.names}
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id in imported):
+                continue
+            sig = sigs.get(node.func.id)
+            if sig is None:
+                continue
+            pos, kwonly, n_req, has_kwargs = sig
+            used = [k.arg for k in node.keywords if k.arg]
+            unknown = [k for k in used if k not in pos + kwonly and not has_kwargs]
+            rel = path.relative_to(root).as_posix()
+            level = fatal if rel in queued else None
+            if unknown:
+                msg = (f"{rel}: {node.func.id}(...) passes {unknown}, but this "
+                       f"steer_f takes {pos}")
+            elif len(node.args) + len(used) < n_req and not any(
+                    k.arg is None for k in node.keywords):
+                msg = (f"{rel}: {node.func.id}(...) gets "
+                       f"{len(node.args) + len(used)} argument(s), this steer_f "
+                       f"requires {n_req}")
+            else:
+                continue
+            if level is None:
+                print(f"  {YELLOW}WARN{OFF}  {msg} (no queue runs it)", file=sys.stderr)
+            else:
+                fatal.append(msg)
+    return fatal
+
+
 def main() -> int:
     root = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
     verl_root, sf_root = root / "verl", root / "steer_f"
@@ -116,6 +192,21 @@ def main() -> int:
     if not missing:
         print(f"  {GREEN}OK{OFF}    steer_f has all {checked} symbol(s) verl imports "
               f"({how})", file=sys.stderr)
+        bad_calls = check_call_sites(root, sf_root) if (root / "scripts").is_dir() else []
+        if bad_calls:
+            print(f"  {RED}FAIL{OFF}  a script a queue runs calls steer_f with the "
+                  f"other lineage's signature:", file=sys.stderr)
+            for msg in bad_calls:
+                print(f"          {msg}", file=sys.stderr)
+            print("""
+        Importing the name worked; calling it will not. Take the donor's copy
+        of that script -- it ships one that matches its own steer_f.
+
+        fix:  bash run/bootstrap_pod.sh
+""", file=sys.stderr)
+            return 1
+        print(f"  {GREEN}OK{OFF}    every queue-run script calls it compatibly",
+              file=sys.stderr)
         return 0
 
     print(f"  {RED}FAIL{OFF}  steer_f is missing {len(missing)} symbol(s) that verl "

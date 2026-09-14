@@ -66,7 +66,15 @@ SKIP_RE='^(archive/|experiments_state|results/\.ipynb_checkpoints/|logs/experime
 
 # Paths the donor's verl imports by name. These come from the donor even when
 # HEAD tracks a file of the same name -- see THE ONE EXCEPTION above.
-RUNTIME_RE=${RUNTIME_RE:-'^steer_f/'}
+# scripts/measure_ah_support.py is here for the same reason one level up: it
+# calls entropy_advantage, and the two lineages disagree on that function's
+# SIGNATURE, not merely on which names exist. This branch's copy passes
+# response_ids=/group_size=/response_mask= and unpacks a 2-tuple; the donor's
+# takes (h_togo_vals, group_index, mask, responses=...) and returns a tensor. A
+# name-level check cannot see that, and did not: run_paper.sh's measure-support
+# stage died on `TypeError: unexpected keyword argument 'response_ids'` with
+# steer_f already correct. The donor ships a matching copy, so take that.
+RUNTIME_RE=${RUNTIME_RE:-'^(steer_f/|scripts/measure_ah_support\.py$)'}
 
 say () { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 ok ()  { printf '  \033[32mOK\033[0m    %s\n' "$*"; }
