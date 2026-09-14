@@ -135,6 +135,7 @@ arm-우선으로 돌리면 STEER-F만 5시드고 GRPO는 1시드로 남는다.
 | | |
 |---|---|
 | **hub 핀** | 재시작마다 되돌아간다. 1단계가 유일한 방어. 두 번 당했다 |
+| **`Cuda failure 401` / NCCL unhandled cuda error** | NCCL 버그가 아니다. `401 = CUDA_ERROR_ILLEGAL_STATE` — **컨텍스트를 못 만드는 상태의 GPU**를 만난 것이다. 먼저 볼 것 ①죽은 런이 남긴 `ray::`·vLLM 프로세스가 VRAM을 잡고 있나 (`nvidia-smi`) ②`/dev/shm`이 작나 (`df -h /dev/shm`, NCCL이 노드 내 전송에 쓴다). 정리: `ray stop --force; pkill -f 'main_ppo\|ray::\|raylet'; sleep 10` 후 `nvidia-smi`가 0 MiB인지 확인. 진짜 이유는 `NCCL_DEBUG=INFO`로 |
 | **flash-attn 은 선택이 아니다** | `verl/workers/actor/dp_actor.py:43`이 `if is_cuda_available:` 아래에서 `flash_attn.bert_padding`을 **무조건** import한다(옆의 `elif`는 Ascend NPU용, sdpa 폴백 아님). torch가 바뀌면 `.so`가 ABI 불일치로 죽고 **워커 초기화에서** 런이 끝난다 — 아래 §flash-attn 참조 |
 | **`run_steerf.sh`의 모델 기본값이 7B** | `run_grpo.sh`·`run_uniform_ablation.sh`는 1.5B인데 `run_steerf.sh:58`만 `Qwen2.5-Math-7B`다. 캠페인의 steer arm이 그걸 직접 부른다. 캠페인이 시작된 파드에선 그 파일이 손으로 1.5B로 고쳐져 있었고 **커밋되지 않았다** — 새 파드가 커밋된 트리를 받자 steer arm이 `steer-...-1.5B-s5` 이름으로 **7B를 학습**하려 했다. 지금은 `_arms.sh`가 `MODEL_PATH`를 export하고 `model_guard`가 이름과 모델이 다르면 REFUSE한다 |
 | **ray 핀 / opentelemetry 줄다리기** | `ray 2.58.0` + `vllm 0.8.4`가 정답이다 — 학습 중인 박스가 그 조합이다. otel을 vllm 선언(`<1.27`)에 맞추면 **ray 대시보드가 import에서 죽고** `ray.init()`이 타임아웃한다(에러에 ray도 opentelemetry도 안 나온다). ray에 맞추면 vllm 선언이 깨지는데, **vllm은 그걸 재검사하지 않는다** — `check_env_pins.py`가 `DECLARED ONLY`로 분류하는 쪽이고 실제로 학습된다. **ray 쪽이 이긴다.** `RAY_PIN=2.58.0`으로 고정해 두 박스를 같은 스택으로 유지할 것 |

@@ -186,6 +186,9 @@ for a in "${QUEUE[@]}"; do
     # another trainer is running.
     ray stop --force >/dev/null 2>&1 || true
     sleep 5
+    # ray is down; VRAM is not necessarily back yet, and NCCL fails at init
+    # rather than waiting for it.
+    await_gpus || true
     [ -n "${extra_part}" ] && echo "  extra overrides: ${extra_part}"
     start=$(date +%s)
 

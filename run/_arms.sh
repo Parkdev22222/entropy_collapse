@@ -175,6 +175,25 @@ except Exception:
 if not torch.cuda.is_available():
     sys.exit(0)
 import flash_attn.bert_padding' 2>&1)"; then
+                # Everything imports. Two things that are not import problems but
+                # do stop a multi-GPU run at NCCL init, reported rather than
+                # enforced because neither is ours to decide.
+                local shm_kb
+                shm_kb="$(df -k /dev/shm 2>/dev/null | awk 'NR==2{print $2}')"
+                if [ -n "${shm_kb}" ] && [ "${shm_kb}" -lt 1048576 ]; then
+                    echo "  WARNING: /dev/shm is $((shm_kb / 1024)) MB."
+                    echo "    NCCL uses shared memory for intra-node transport and fails"
+                    echo "    obscurely when it is small -- 'Cuda failure 401' at init is one"
+                    echo "    way it shows up. A pod with a larger --shm-size is the fix;"
+                    echo "    NCCL_SHM_DISABLE=1 is the workaround, at a cost in throughput."
+                fi
+                if ! gpus_free; then
+                    echo "  WARNING: something already holds VRAM on this box:"
+                    gpu_holders | head -5 | sed 's/^/    /'
+                    echo "    A run that died leaves CUDA contexts behind, and the next"
+                    echo "    NCCL init can fail on them. ray stop --force, then check"
+                    echo "    nvidia-smi returns to 0 MiB before starting a queue."
+                fi
                 return 0
             fi
             echo "  verl and ray are fine, but flash_attn does not load:"
@@ -271,6 +290,55 @@ busy_pids () {
     done
 }
 is_busy () { [ -n "$(busy_pids)" ]; }
+
+# --- are the GPUs actually usable? -------------------------------------------
+# is_busy only matches main_ppo on the command line. A run that died leaves
+# ray::WorkerDict and vLLM engine processes holding CUDA contexts, none of which
+# match, so the queue reports an idle box and starts -- and NCCL then fails at
+# init with
+#     Cuda failure 401 'the operation cannot be performed in the present state'
+# which names neither the leftover process nor the GPU. Checking what the run
+# actually needs (a GPU it can make a context on) rather than only what the
+# queue happens to grep for.
+#
+# Never kills anything: the holder may be someone else's job, and this is the
+# box the campaign shares.
+gpu_holders () {   # prints "pid used_memory" per process holding VRAM, ours excluded
+    command -v nvidia-smi >/dev/null 2>&1 || return 0
+    local anc p line pid
+    anc=" "; p=$$
+    while [ "${p}" != "1" ] && [ -r "/proc/${p}/status" ]; do
+        anc="${anc}${p} "
+        p="$(awk '/^PPid:/{print $2}' "/proc/${p}/status" 2>/dev/null)"
+        [ -n "${p}" ] || break
+    done
+    nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader 2>/dev/null \
+    | while IFS=, read -r pid rest; do
+        pid="$(printf '%s' "${pid}" | tr -dc '0-9')"
+        [ -n "${pid}" ] || continue
+        case "${anc}" in *" ${pid} "*) continue ;; esac
+        printf '%s %s\n' "${pid}" "$(printf '%s' "${rest}" | sed 's/^ *//')"
+    done
+}
+
+gpus_free () { [ -z "$(gpu_holders)" ]; }
+
+# Wait for VRAM to come back after a run exits, then say so either way. Warning
+# rather than refusing: a holder we did not start is not ours to wait out
+# forever, and a queue that stops on it stops for hours unattended.
+await_gpus () {   # [seconds]
+    local left="${1:-${GPU_WAIT:-60}}"
+    command -v nvidia-smi >/dev/null 2>&1 || return 0
+    while [ "${left}" -gt 0 ] && ! gpus_free; do sleep 5; left=$((left - 5)); done
+    gpus_free && return 0
+    echo "[gpu] VRAM is still held after waiting; starting anyway:"
+    gpu_holders | head -5 | while read -r pid mem; do
+        printf '[gpu]   pid %-8s %-10s %s\n' "${pid}" "${mem}" \
+            "$(tr '\0' ' ' < "/proc/${pid}/cmdline" 2>/dev/null | cut -c1-60)"
+    done
+    echo "[gpu] If NCCL then fails with 'Cuda failure 401', that is why."
+    return 1
+}
 
 # Is one of the other queues holding its lock with a live process?
 lock_holder () {   # <lock-dir>  -> prints the live pid, or nothing

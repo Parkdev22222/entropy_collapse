@@ -182,6 +182,9 @@ for item in "${QUEUE[@]}"; do
     # another trainer is running.
     ray stop --force >/dev/null 2>&1 || true
     sleep 5
+    # ray is down; VRAM is not necessarily back yet, and NCCL fails at init
+    # rather than waiting for it.
+    await_gpus || true
 
     # Only run_steerf.sh writes the trainer's output to stdout. run_grpo.sh
     # and run_uniform_ablation.sh both redirect their child into exactly
