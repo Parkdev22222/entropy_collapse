@@ -101,6 +101,17 @@ tmux new -d -s campaign \
 ## 5. 감시
 
 ```bash
+bash run/run_status.sh          # 돌고 있나 / 몇 장 쓰나 / 어디까지 갔나 / 죽었으면 왜
+WATCH=1 bash run/run_status.sh  # 60초마다 갱신
+```
+
+읽기 전용이다 — 아무것도 안 죽이고 안 지운다. `train_log_done`·`is_busy`·
+`diagnose_startup_failure`를 큐와 **같은 함수로** 쓰므로 "끝났다"의 정의가 어긋날 수 없다.
+2절의 토폴로지 줄이 arm마다 다른 GPU 장수를 잡아낸다.
+
+원본 로그가 필요하면:
+
+```bash
 tail -f logs/experiments/campaign.log
 grep -E '^\[campaign\].*exit' logs/experiments/campaign.log     # arm별 종료 코드
 ```
@@ -137,6 +148,7 @@ arm-우선으로 돌리면 STEER-F만 5시드고 GRPO는 1시드로 남는다.
 | **★ `steer_f/`는 도너 것이어야 한다** | 두 브랜치는 **공통 조상이 없고** 양쪽 다 `steer_f/`를 갖는다. 같은 패키지의 두 버전이 아니라 **두 계보**이고, `origin/paper`의 `verl`은 그쪽 `steer_f`를 이름으로 부른다(`dp_actor.py:407` → `forecast_h_togo` 외 7개). 이 브랜치 것을 쓰면 **모든 tree·steer arm이 워커 초기화에서 죽는다.** 두 계보가 바이트까지 같은 파일은 `tree_rollout.py` 하나뿐인데 하필 그게 모든 게이트가 import하던 파일이라, 게이트는 통과하고 런만 죽었다. `bash run/bootstrap_pod.sh`가 이제 덮어쓰고, `python3 run/_check_steer_f.py`가 `verl` 소스의 import 문과 대조한다. 손으로는 `git checkout origin/paper -- steer_f` |
 | **보상 채점기 의존성** | `word2number`가 없으면 **step-0 검증에서** 죽는다 — 모델 다 올리고 생성까지 끝난 뒤다. `verl/utils/reward_score/__init__.py:58`이 지연 import를 하고 그 끝에 `qwen_math_eval_toolkit/parser.py:7 → from word2number import w2n`가 있다. 로그만 보면 환경 문제로 안 보인다(런이 한참 돌다 죽는다). `pip install word2number sympy`. `_check_deps.py`가 이제 둘 다 요구하고, `env_preflight`이 그 모듈을 **큐 시작 전에** import해본다 |
 | **심볼이 있다고 부를 수 있는 건 아니다** | 두 계보는 이름뿐 아니라 **시그니처**도 다르다. `measure_ah_support.py`가 `entropy_advantage`를 import하는 데는 성공하고 `TypeError: unexpected keyword argument 'response_ids'`로 죽었다 — 도너 쪽은 `(h_togo_vals, group_index, mask, responses=…)`를 받고 텐서를 돌려주는데 이 브랜치 쪽은 `response_ids=`/`group_size=`를 받고 2-튜플을 준다. `bootstrap_pod.sh`가 이 파일도 도너 것으로 덮고, `_check_steer_f.py`가 큐가 부르는 스크립트의 **호출부까지** 대조한다 |
+| **`run_uniform_ablation.sh`는 `_gpu_defaults.sh`를 안 본다** | :83-84가 `N_GPUS=${N_GPUS:-2}`를 하드코딩하고 **export**한다. 자식 `run_steerf.sh`의 감지도 같이 막힌다. 4장 박스에서 tree arm 6개가 2장, steer arm 3개가 4장으로 갈렸다 — 같은 표 안에서. 수치는 안 바뀐다(`ppo_micro_batch_size_per_gpu=8`이 min–max 풀이고 장수와 무관)지만 **arm 간 불일치**가 문제다. `_arms.sh`의 `gpu_topology`가 한 곳에서 정하고 `topology_guard`가 거부한다. `bash run/run_status.sh` 2절이 로그에서 잡아낸다 |
 | **hub 핀** | 재시작마다 되돌아간다. 1단계가 유일한 방어. 두 번 당했다 |
 | **`Cuda failure 401` / NCCL unhandled cuda error** | NCCL 버그가 아니다. `401 = CUDA_ERROR_ILLEGAL_STATE`. **로그에서 먼저 `nvls`를 찾아라** — `grep -n "nvls\|NCCL WARN" logs/experiments/train-*.log \| tail -20`. `transport/nvls.cc:158`이 있으면 NVLink SHARP(멀티캐스트)이고, 컨테이너가 멀티캐스트를 못 쓰면 정확히 거기서 401이 난다 → **`NCCL_NVLS_ENABLE=0`으로 기동**. H100+NVSwitch에서만 나는 경로라 A100×2는 애초에 안 탄다 — 같은 NCCL 2.21.5가 한쪽에서만 죽는 이유가 이것이다. `nvls`가 없을 때만 ①죽은 런이 남긴 `ray::`·vLLM 프로세스가 VRAM을 잡고 있나 (`nvidia-smi`) ②`/dev/shm`이 작나 (`df -h /dev/shm`)를 본다. 정리: `ray stop --force; pkill -f 'main_ppo\|ray::\|raylet'; sleep 10`. 진짜 이유는 `NCCL_DEBUG=INFO`로 |
 | **flash-attn 은 선택이 아니다** | `verl/workers/actor/dp_actor.py:43`이 `if is_cuda_available:` 아래에서 `flash_attn.bert_padding`을 **무조건** import한다(옆의 `elif`는 Ascend NPU용, sdpa 폴백 아님). torch가 바뀌면 `.so`가 ABI 불일치로 죽고 **워커 초기화에서** 런이 끝난다 — 아래 §flash-attn 참조 |
@@ -170,8 +182,17 @@ GPU 장수가 바뀌어도 α의 분포가 체계적으로 이동하지 않는�
 아니라서 **이미 존재하는 런-투-런 변동과 같은 층**이다. `TP_SIZE=4`는 vLLM 생성 수치만
 건드리고 min–max에는 닿지 않는다.
 
-→ **H100 박스는 `N_GPUS=4 TP_SIZE=4`를 그대로 쓴다.** `_gpu_defaults.sh`가 자동 감지하므로
-따로 지정할 것도 없다.
+→ **H100 박스는 `N_GPUS=4 TP_SIZE=4`를 쓴다.**
+
+> ⚠️ **"자동 감지하므로 따로 지정할 것 없다"고 여기 적혀 있었는데 틀렸다.**
+> `run_steerf.sh:48`과 `run_grpo.sh:69`는 `_gpu_defaults.sh`를 source하지만
+> **`run_uniform_ablation.sh:83-84`는 안 한다** — `N_GPUS=${N_GPUS:-2}`를 하드코딩하고
+> 그걸 **export**해서, 자식으로 부르는 `run_steerf.sh`의 감지까지 막는다.
+> 그래서 2026-09-14 H100에서 followups **9개 중 6개(tree arm)가 2장**, 3개가 4장으로
+> 돌았다. 하필 `xclip-signed`(2장)와 `xclip-steer`(4장)처럼 **직접 짝지어 비교하는
+> 쌍**이 갈렸다. 지금은 `_arms.sh`의 `gpu_topology`가 한 곳에서 정하고 큐가 export하며
+> `topology_guard`가 확인한다. 기동 명령에도 남겨둔다 — 나중에 "이 박스가 왜 이
+> 토폴로지인가"에 명령줄이 답한다.
 
 ## 예외: `grpo-long`은 A100에 남는다
 
@@ -272,7 +293,7 @@ verified`가 뜨기 전에는 옛 박스를 지우지 마라.**
 
 ```bash
 tmux new -d -s paper \
-  "cd /workspace/entropy_collapse && NCCL_NVLS_ENABLE=0 \
+  "cd /workspace/entropy_collapse && NCCL_NVLS_ENABLE=0 N_GPUS=4 TP_SIZE=4 \
    ROLE=followups REPO=DSDSh/steer-f_2 \
    bash run/run_paper.sh > logs/experiments/paper_h100.log 2>&1"
 ```

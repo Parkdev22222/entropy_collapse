@@ -76,7 +76,7 @@ uniform만 4시드가 되고 `STEER-F − uniform` 대조가 n=4로 묶인다.
 
 ```bash
 tmux new -d -s paper \
-  "cd /workspace/entropy_collapse && NCCL_NVLS_ENABLE=0 \
+  "cd /workspace/entropy_collapse && NCCL_NVLS_ENABLE=0 N_GPUS=4 TP_SIZE=4 \
    ROLE=followups REPO=DSDSh/steer-f_2 \
    bash run/run_paper.sh > logs/experiments/paper_h100.log 2>&1"
 ```
@@ -85,6 +85,8 @@ tmux new -d -s paper \
 폴백한다. 이게 없으면 FSDP의 첫 브로드캐스트가 `transport/nvls.cc:158`에서
 `Cuda failure 401`로 죽는다(2026-09-14에 followups 9개 arm 전부 여기서 죽었다).
 처리량만 줄고 수치는 안 바뀌며, NVSwitch가 없는 A100×2가 쓰는 전송에 오히려 가까워진다.
+
+`N_GPUS=4 TP_SIZE=4`가 없으면 tree arm 6개가 **2장으로** 돈다 — `run_uniform_ablation.sh:83`이 그 값을 하드코딩하고 export해서 자식의 자동 감지까지 막기 때문이다. `topology_guard`가 붙었지만 명령줄에도 남긴다.
 
 `ROLE=followups`가 `STAGES='preflight measure followups eval2'`와 9개 arm을 동시에 건다.
 **`ROLE` 없이 띄우면 기본 `STAGES`가 "전부"라 캠페인까지 돈다.**
@@ -148,6 +150,7 @@ results/numbers.tex          ← \providecommand 매크로
 ## 5. 진행 확인
 
 ```bash
+bash run/run_status.sh                           # 한 줄 점검 (읽기 전용)
 tail -f logs/experiments/campaign.log            # A100
 tail -f logs/experiments/paper_h100.log          # H100
 grep -E '^\[campaign\].*exit' logs/experiments/campaign.log     # arm별 종료 코드

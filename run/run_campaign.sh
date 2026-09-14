@@ -149,6 +149,11 @@ fi
 # anything erroring. Refuse before a single step rather than discover it in the
 # table.
 model_guard || exit 2
+# Same idea one level out: run_uniform_ablation.sh:83-84 hardcodes N_GPUS=2 and
+# EXPORTS it, so the tree arms silently take two cards on a four-card box while
+# the arms that go through run_steerf.sh take four. Settling it here means no
+# launcher default is ever reached and every arm in this queue matches.
+topology_guard || exit 2
 
 # ---------------------------------------------------------- shared settings
 export SAVE_BEST_ONLY=True                 # keep only the best checkpoint
@@ -156,6 +161,7 @@ export SAVE_CONTENTS="['hf_model']"        # no optimizer / extra state
 export SAVE_AFTER=0                        # run_grpo.sh
 export SAVE_AFTER_OVERRIDE=0               # run_steerf.sh
 export MODEL_PATH                          # never let a launcher's own default win
+export N_GPUS TP_SIZE                       # settled by topology_guard, above
 export VAL_DATA_DIR="${ROOT}/validation_data"
 export STEPS
 

@@ -36,6 +36,68 @@ model_guard () {   # 0 = MODEL_PATH's basename matches MODEL_TAG
     return 1
 }
 
+# --- GPU topology, decided once ---------------------------------------------
+# Same pattern as MODEL_PATH + model_guard above, and for the same reason: a
+# launcher default that nobody chose, reached by some arms and not others.
+#
+#   origin/paper:run/run_uniform_ablation.sh:83-84
+#       export N_GPUS=${N_GPUS:-2}
+#       export TP_SIZE=${TP_SIZE:-2}
+#
+# That file does NOT source _gpu_defaults.sh, while run_steerf.sh:48 and
+# run_grpo.sh:69 do -- and it EXPORTS its 2/2, so the detection inside the
+# run_steerf.sh it calls as a child never runs either. On the 4-GPU H100 that
+# put six of the nine follow-up arms on two cards and three on four, inside one
+# table, with xclip-signed and xclip-steer -- a pair compared directly against
+# each other -- landing on different topologies. Nobody decided that; the A100
+# only looks consistent because it has two cards to begin with.
+#
+# It does not change the treatment: run_steerf.sh:192 pins
+# ppo_micro_batch_size_per_gpu=8, and that micro-batch IS STEER's min-max pool,
+# so the pool is 8 sequences whether mini-batch 32 is split two ways or four.
+# TP_SIZE moves vLLM's generation numerics only, in the same layer as the
+# run-to-run sampling variation that already exists. What must not differ is one
+# arm against another in the same table.
+gpu_topology () {   # exports N_GPUS / TP_SIZE; an explicit value always wins
+    if [ -z "${N_GPUS:-}" ]; then
+        N_GPUS=$(python3 -c "import torch;print(torch.cuda.device_count())" 2>/dev/null || echo 0)
+        # Empty or non-numeric counts as one card, never as unset: an empty
+        # N_GPUS reaches the launchers' 8-GPU fallback and dies in verl's
+        # resource-pool check. Same rule as _gpu_defaults.sh, kept identical.
+        case "${N_GPUS}" in ''|0|*[!0-9]*) N_GPUS=1 ;; esac
+    fi
+    if [ -z "${TP_SIZE:-}" ]; then
+        TP_SIZE=1
+        for _t in 4 2; do
+            if [ $((N_GPUS % _t)) -eq 0 ] && [ "${N_GPUS}" -ge "${_t}" ]; then
+                TP_SIZE=${_t}; break
+            fi
+        done
+        unset _t
+    fi
+    export N_GPUS TP_SIZE
+}
+
+topology_guard () {   # 0 = every arm in this queue will get the same topology
+    gpu_topology
+    local have
+    have="$(python3 -c "import torch;print(torch.cuda.device_count())" 2>/dev/null || echo '?')"
+    if [ "${N_GPUS}" -lt 1 ] 2>/dev/null || [ -z "${TP_SIZE}" ]; then
+        echo "REFUSE: could not settle a GPU topology (N_GPUS='${N_GPUS}' TP_SIZE='${TP_SIZE}')." >&2
+        return 1
+    fi
+    if [ $((N_GPUS % TP_SIZE)) -ne 0 ]; then
+        echo "REFUSE: TP_SIZE=${TP_SIZE} does not divide N_GPUS=${N_GPUS}." >&2
+        return 1
+    fi
+    echo "[topology] N_GPUS=${N_GPUS} TP_SIZE=${TP_SIZE} (this box reports ${have} GPU(s))"
+    if [ "${have}" != "?" ] && [ "${have}" != "0" ] && [ "${have}" != "${N_GPUS}" ]; then
+        echo "[topology]   NOTE: not every card is in use. That is fine if you meant it,"
+        echo "[topology]   but it is the SAME for every arm, which is the part that matters."
+    fi
+    return 0
+}
+
 # --- the five campaign arms -------------------------------------------------
 CAMPAIGN_ARMS=${CAMPAIGN_ARMS:-"grpo steer permuted signed uniform"}
 
