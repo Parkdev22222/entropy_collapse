@@ -76,9 +76,15 @@ uniform만 4시드가 되고 `STEER-F − uniform` 대조가 n=4로 묶인다.
 
 ```bash
 tmux new -d -s paper \
-  "cd /workspace/entropy_collapse && ROLE=followups REPO=DSDSh/steer-f_2 \
+  "cd /workspace/entropy_collapse && NCCL_NVLS_ENABLE=0 \
+   ROLE=followups REPO=DSDSh/steer-f_2 \
    bash run/run_paper.sh > logs/experiments/paper_h100.log 2>&1"
 ```
+
+`NCCL_NVLS_ENABLE=0`은 H100 전용이다 — NVLink SHARP(멀티캐스트)를 끄고 일반 NVLink로
+폴백한다. 이게 없으면 FSDP의 첫 브로드캐스트가 `transport/nvls.cc:158`에서
+`Cuda failure 401`로 죽는다(2026-09-14에 followups 9개 arm 전부 여기서 죽었다).
+처리량만 줄고 수치는 안 바뀌며, NVSwitch가 없는 A100×2가 쓰는 전송에 오히려 가까워진다.
 
 `ROLE=followups`가 `STAGES='preflight measure followups eval2'`와 9개 arm을 동시에 건다.
 **`ROLE` 없이 띄우면 기본 `STAGES`가 "전부"라 캠페인까지 돈다.**
