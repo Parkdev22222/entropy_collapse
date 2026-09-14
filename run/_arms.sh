@@ -21,7 +21,52 @@ MODEL_TAG=${MODEL_TAG:-Qwen2.5-Math-1.5B}
 # A 7B model training under a 1.5B run name produces plausible numbers under the
 # wrong label and raises nothing. Exporting MODEL_PATH from here means no
 # launcher's own default is ever reached.
-MODEL_PATH=${MODEL_PATH:-Qwen/Qwen2.5-Math-${MODEL_TAG#Qwen2.5-Math-}}
+#
+# 2026-09-14: that derivation assumed one family. backbone_profile() below now
+# owns the pairing, so a known tag fills in its own path, validation set and
+# selection key together, and an unknown tag must supply them rather than
+# silently resolving to "Qwen/Qwen2.5-Math-Llama-3.1-8B".
+backbone_profile () {   # <tag> -> sets MODEL_PATH / VAL_PARQUET / BEST_METRIC_KEY
+    # Everything a backbone changes, in one place. They travel together because
+    # they cannot disagree: the run name says the tag, the trainer loads the
+    # path, the checkpoint is chosen by the key, and the key only exists if the
+    # validation parquet is the matching one.
+    #
+    # VAL_PARQUET differs on purpose. AIME24 is 30 problems, so
+    # SE = std@32/sqrt(30) ~ 2.7 points; a backbone that scores near zero there
+    # puts every arm inside one standard error AND makes save_best_only pick a
+    # checkpoint by noise. MATH500 is 500 problems with no replicas, so its key
+    # is mean@1 and its standard error is about four times smaller. That buys a
+    # usable measurement on the non-mathematics backbones at the cost of a
+    # per-backbone protocol difference, which the paper has to state rather
+    # than bury.
+    local tag="${1:-${MODEL_TAG}}"
+    case "${tag}" in
+        Qwen2.5-Math-1.5B|Qwen2.5-Math-7B)
+            MODEL_PATH=${MODEL_PATH:-Qwen/${tag}}
+            VAL_PARQUET=${VAL_PARQUET:-datasets/aime24.parquet}
+            BEST_METRIC_KEY=${BEST_METRIC_KEY:-val-core/aime_2024_dapo_boxed/acc/mean@32} ;;
+        Llama-3.1-8B)
+            MODEL_PATH=${MODEL_PATH:-meta-llama/Llama-3.1-8B}
+            VAL_PARQUET=${VAL_PARQUET:-datasets/math500.parquet}
+            BEST_METRIC_KEY=${BEST_METRIC_KEY:-val-core/math500/acc/mean@1} ;;
+        Mistral-7B-v0.3)
+            MODEL_PATH=${MODEL_PATH:-mistralai/Mistral-7B-v0.3}
+            VAL_PARQUET=${VAL_PARQUET:-datasets/math500.parquet}
+            BEST_METRIC_KEY=${BEST_METRIC_KEY:-val-core/math500/acc/mean@1} ;;
+        *)
+            # An unknown tag is not an error, but it cannot be guessed either.
+            if [ -z "${MODEL_PATH:-}" ] || [ -z "${VAL_PARQUET:-}" ] \
+               || [ -z "${BEST_METRIC_KEY:-}" ]; then
+                echo "REFUSE: MODEL_TAG='${tag}' is not a known backbone." >&2
+                echo "        Give MODEL_PATH, VAL_PARQUET and BEST_METRIC_KEY with it," >&2
+                echo "        or add it to backbone_profile() in run/_arms.sh." >&2
+                return 1
+            fi ;;
+    esac
+    export MODEL_PATH VAL_PARQUET BEST_METRIC_KEY
+}
+backbone_profile "${MODEL_TAG}" || true
 
 # Refuse a run whose name claims a model the run is not using. Cheap, and the
 # only thing standing between a mismatched default and a table full of numbers
@@ -34,6 +79,43 @@ model_guard () {   # 0 = MODEL_PATH's basename matches MODEL_TAG
     echo "        A run trained on one model and logged under another is worse than" >&2
     echo "        a crash: nothing about it looks wrong afterwards." >&2
     return 1
+}
+
+# --- the MTP heads belong to ONE model ---------------------------------------
+# run_uniform_ablation.sh:95-96 hardcodes
+#     mtp_heads_Qwen2.5-Math-1.5B-paper.pt
+# without consulting the model tag, while run_steerf.sh:73 derives it correctly
+# from ${model_tag}. The STEER-F arm goes through run_uniform_ablation.sh, so on
+# any backbone but the 1.5B it reaches for the 1.5B heads -- and the guard at
+# :149 only asks whether the FILE EXISTS. It does exist, on every box that ever
+# trained the 1.5B. So the check passes and a forecaster built for a 1536-wide
+# model is handed to a 3584-wide one. That is the MODEL_PATH accident of
+# 2026-09-13 again: a launcher default nobody chose, reaching a run that should
+# never have seen it.
+#
+# The queue exports STEERF_HEADS/STEERF_CALIB so the hardcoded default is never
+# reached, and this refuses if what they point at belongs to another model.
+heads_guard () {   # 0 = the heads on STEERF_HEADS belong to MODEL_TAG
+    [ -n "${STEERF_HEADS:-}" ] || { echo "REFUSE: STEERF_HEADS is unset." >&2; return 1; }
+    if [ ! -f "${STEERF_HEADS}" ]; then
+        echo "REFUSE: no MTP heads at ${STEERF_HEADS}" >&2
+        echo "        A new backbone needs its own: collect_warmup_rollouts.sh" >&2
+        echo "        then warmup_and_validate.sh for ${MODEL_TAG}, first." >&2
+        return 1
+    fi
+    # The cheap check first: it needs nothing, and it catches the actual
+    # failure, because the file is named after the model it was trained on.
+    case "${STEERF_HEADS##*/}" in
+        *"${MODEL_TAG}"*) ;;
+        *)  echo "REFUSE: ${STEERF_HEADS##*/} is not ${MODEL_TAG}'s forecaster." >&2
+            echo "        Heads are per-model. Another model's is not a" >&2
+            echo "        degraded run, it is a different method." >&2
+            return 1 ;;
+    esac
+    # Then the real one, where the environment allows it: the name can be right
+    # and the tensor still wrong.
+    python3 "${ROOT:-.}/run/_check_heads.py" "${STEERF_HEADS}" "${MODEL_PATH}" || return 1
+    return 0
 }
 
 # --- GPU topology, decided once ---------------------------------------------

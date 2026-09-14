@@ -97,10 +97,13 @@ case "${ROLE}" in
         [ -n "${STAGES:-}" ] && { echo "FATAL: set ROLE or STAGES, not both" >&2; exit 2; }
         STAGES="preflight measure followups eval2"
         FOLLOWUP_ARMS=${FOLLOWUP_ARMS:-"lam0-tree lam0.1 lam0.5 xclip-signed xclip-steer rloo-signed rloo-steer opo-signed opo-steer"} ;;
+    backbones)
+        [ -n "${STAGES:-}" ] && { echo "FATAL: set ROLE or STAGES, not both" >&2; exit 2; }
+        STAGES="preflight backbones" ;;
     final)
         [ -n "${STAGES:-}" ] && { echo "FATAL: set ROLE or STAGES, not both" >&2; exit 2; }
         STAGES="eval analysis" ;;
-    *)  echo "FATAL: unknown ROLE '${ROLE}' (campaign | followups | final)" >&2; exit 2 ;;
+    *)  echo "FATAL: unknown ROLE '${ROLE}' (campaign | followups | backbones | final)" >&2; exit 2 ;;
 esac
 STAGES=${STAGES:-"preflight recover campaign measure eval followups eval2 analysis"}
 
@@ -280,6 +283,15 @@ if have eval2; then
 fi
 
 # ============================================================= 6. analysis
+# The second, third and fourth backbone: GRPO / STEER / STEER-F on each. Not in
+# the default STAGES -- it is a separate campaign on a separate box, and adding
+# it to "everything" is how one pod started training somebody else's queue.
+if have backbones; then
+    banner "backbones (headline contrast on other models)"
+    guard backbones env REPO="${REPO}" \
+        ${BACKBONES:+BACKBONES="${BACKBONES}"} bash run/run_backbones.sh
+fi
+
 if have analysis; then
     stage "analysis"
     guard analysis-seeds python3 scripts/analyze_seeds.py \

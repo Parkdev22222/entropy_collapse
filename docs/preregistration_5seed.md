@@ -123,3 +123,51 @@ launching. All three are additive and none changes a gradient:
 
 A bit-equivalence test must pass before any change to the training path (for example
 a masked MTP forward) is allowed into the campaign.
+
+---
+
+## 8. The backbone rows (added 2026-09-14, before any backbone run)
+
+Three further backbones — Qwen2.5-Math-7B, Llama-3.1-8B, Mistral-7B-v0.3 — each
+carry **three arms** (GRPO / STEER / STEER-F) at **seed 1**. The five-arm
+decomposition is not repeated: it answers whether the gain comes from the
+apparatus or from the forecast's value, and that is a question about the method,
+settled once on the primary backbone. A second backbone answers something
+narrower.
+
+### Primary statistic, fixed now
+
+**The sign of `STEER-F − GRPO`, within a backbone, on that backbone's own
+validation set, over the same converged window (step 40–110).** The reported
+result is **how many of the four backbones share that sign** — a count out of 4,
+not an average.
+
+### What is not computed
+
+- **No column averages, and no comparison of absolute accuracy across
+  backbones.** The rows differ in scale, in family, in whether mathematics was
+  specialized for, and in which benchmark selects the checkpoint. An average
+  down that column would be a number with no referent.
+- **No claim about effect size from a single backbone row.** One seed per cell
+  carries the same uncertainty as one seed on the primary backbone
+  (paired-difference SD ≈ .0088). No individual row is decisive.
+
+### Validation set, fixed now
+
+| backbone | validates and selects on | why |
+|---|---|---|
+| Qwen2.5-Math-1.5B / -7B | AIME24, `acc/mean@32` | as the main campaign |
+| Llama-3.1-8B, Mistral-7B-v0.3 | **MATH500**, `acc/mean@1` | AIME24 is 30 problems, `SE ≈ .027`; a backbone scoring near zero puts all three arms inside one SE **and** makes `save_best_only` draw the checkpoint from noise. MATH500 is 500 problems, ≈4× tighter |
+
+This is decided before the runs, not after seeing which benchmark is kinder.
+`run/_arms.sh:backbone_profile()` carries the pairing so it cannot be changed
+per-run without changing the code.
+
+### What would falsify the generality claim
+
+A backbone on which the sign **reverses** (`STEER-F < GRPO`) is evidence against
+the account, not noise to be averaged away: our claim is that the visitation
+channel matters wherever the rollout distribution has branch points that differ
+in what they lead to, which is a property of the task rather than of the
+pre-training corpus. A **split** result (2 of 4) is reported as a limit on
+generality.

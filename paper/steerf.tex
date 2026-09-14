@@ -896,12 +896,56 @@ copy of its error.
 
 \subsection{Model, data, and optimization}
 
-All runs fine-tune the same base model on the same data with the same optimizer
-settings, and differ only in the intervention. We use a $1.5$B-parameter
-mathematics-specialized model, train on a $17$k-problem competition-mathematics
-set, and validate on AIME 2024 ($30$ problems) with $32$ samples per problem.
-With a training batch of $512$ prompts, $110$ optimization steps correspond to
-about $3.2$ epochs.
+Within a backbone, all runs fine-tune the same base model on the same data with the
+same optimizer settings, and differ only in the intervention. Our primary backbone
+is a $1.5$B-parameter mathematics-specialized model; the full five-arm
+decomposition and every ablation are run there. Three further backbones
+(Table~\ref{tab:backbones}) carry the headline three-way contrast only, which is
+what a second model can answer: not \emph{how} the effect decomposes---that is a
+question about the method, and it is settled once---but whether its \emph{sign}
+survives a change of scale and of pre-training family. All runs train on the same
+$17$k-problem competition-mathematics set. With a training batch of $512$ prompts,
+$110$ optimization steps correspond to about $3.2$ epochs.
+
+\begin{table}[t]
+\centering\small
+\begin{tabular}{llcl}
+\toprule
+Backbone & Family & Math-spec. & Validation \\
+\midrule
+$1.5$B  & Qwen2.5-Math & yes & AIME 2024 \\
+$7$B    & Qwen2.5-Math & yes & AIME 2024 \\
+$8$B    & Llama 3.1    & no  & MATH500 \\
+$7$B    & Mistral      & no  & MATH500 \\
+\bottomrule
+\end{tabular}
+\caption{Backbones. The validation set differs by backbone, deliberately;
+Section~\ref{sec:valset} says why, and the analysis never compares absolute
+accuracy across rows.}
+\label{tab:backbones}
+\end{table}
+
+\subsection{Validation set, and why it is not the same everywhere}
+\label{sec:valset}
+
+The mathematics-specialized backbones validate on AIME 2024 ($30$ problems, $32$
+samples each). AIME 2024 is small: with a per-problem accuracy spread of about
+$\num{0.145}$, the standard error of its mean is $\num{0.145}/\sqrt{30} \approx
+\num{0.027}$, or $2.7$ accuracy points. For a backbone that scores near zero on it,
+every arm lies inside one standard error, so the benchmark cannot separate them.
+
+The sharper problem is not the reported number but the \emph{selection}: we choose
+each run's checkpoint by its best validation accuracy, so a benchmark that cannot
+distinguish arms also cannot distinguish checkpoints, and the selection becomes a
+draw from noise. The non-mathematics backbones therefore validate and select on
+MATH500 ($500$ problems, one sample each), whose standard error is roughly four
+times smaller.
+
+This buys a measurable comparison at the cost of a protocol that is not identical
+across backbones. We state it here rather than in a footnote because it constrains
+what may be read off the results: every contrast we report is \emph{within} a
+backbone, and no claim compares absolute accuracy between rows of
+Table~\ref{tab:backbones}.
 
 Optimization uses GRPO with $n = 8$ responses per prompt, a constant learning rate
 of $1\mathrm{e}{-6}$ with no warm-up (so that the schedule is independent of the
@@ -1343,6 +1387,53 @@ Both readings are reported. If the gain survives the compute-matched comparison 
 a gain; if it does not, the method buys accuracy with time and should be described
 that way.
 
+\subsection{Does the sign survive a change of backbone?}
+\label{sec:backbones}
+
+Everything above is one model. A reviewer's first question is whether the effect is
+a property of the method or of that model, and the honest form of the answer is
+narrow: on three further backbones we run only GRPO, the base method, and ours, and
+we ask whether the \emph{ordering} holds. Absolute accuracies are not comparable
+across rows---the backbones differ in scale, in pre-training family, in whether
+mathematics was specialized for, and (Section~\ref{sec:valset}) in which benchmark
+selects the checkpoint---so the table reports each backbone's own three numbers and
+the within-backbone differences, and nothing is averaged down a column.
+
+\begin{table}[t]
+\centering\small
+\begin{tabular}{lccc|cc}
+\toprule
+& GRPO & base & ours & $\Delta_{\text{GRPO}}$ & $\Delta_{\text{base}}$ \\
+\midrule
+$1.5$B Qwen-Math & \num{} & \num{} & \num{} & \num{} & \num{} \\
+$7$B Qwen-Math   & \num{} & \num{} & \num{} & \num{} & \num{} \\
+$8$B Llama       & \num{} & \num{} & \num{} & \num{} & \num{} \\
+$7$B Mistral     & \num{} & \num{} & \num{} & \num{} & \num{} \\
+\bottomrule
+\end{tabular}
+\caption{The headline contrast on four backbones, seed $1$, converged window.
+The two rightmost columns are within-backbone differences; columns are not
+averaged, because the rows are not on a common scale.}
+\label{tab:backbones-results}
+\end{table}
+
+Two questions are separable here, and the design answers them one at a time. The
+$7$B model shares its tokenizer, architecture and pre-training corpus with the
+$1.5$B, so a difference between those two rows is about \emph{scale}. The Llama and
+Mistral backbones share none of that, so a difference there is about \emph{family},
+and in particular about whether the effect needs a base policy that is already sharp
+on mathematics. Our account predicts that the visitation channel matters wherever
+the rollout distribution has branch points that differ in what they lead to, which
+is a property of the task rather than of the pre-training corpus; a backbone on which
+the sign reverses would be evidence against that account, not merely a weaker result.
+
+The statistic we report is the sign of $\Delta_{\text{GRPO}}$, and how many of the
+four backbones share it. With one seed per cell, a single backbone's difference
+carries about the same uncertainty as a single seed on the primary backbone
+(Section~\ref{sec:res:seeds}), so no individual row is decisive; the claim rests on
+agreement across rows. We report the count, \num{} of $4$, and treat a split
+result as a limit on generality rather than as noise to be averaged away.
+
 \subsection{Cost}
 \label{sec:res:cost}
 
@@ -1434,10 +1525,16 @@ correlation with branch diversity; we have not measured their \emph{product} at 
 sibling-divergence positions in a live rollout. Until that measurement exists,
 Table~\ref{tab:anticorr} is a prediction rather than an observation.
 
-\paragraph{Scale.}
-All experiments use a single $1.5$B model. The relative size of the two channels
-plausibly depends on how sharp the base policy already is, and we have no evidence
-about larger models.
+\paragraph{Scope of the backbone evidence.}
+The full decomposition---the five arms, the ablations, the mechanism
+diagnostics---rests on one $1.5$B model. The three further backbones
+(Section~\ref{sec:backbones}) carry the three-way contrast at one seed each, which
+establishes the sign and not its size, and they stop at $7$--$8$B: we have no
+evidence about models an order of magnitude larger, where the base policy is
+sharper and the relative size of the two channels may differ. The non-mathematics
+backbones are also selected on a different benchmark from the mathematics ones
+(Section~\ref{sec:valset}); that is what makes their rows measurable, and it is
+also why no claim in this paper compares accuracy across backbones.
 
 \section*{Ethics Statement}
 
