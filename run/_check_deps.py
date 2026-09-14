@@ -16,6 +16,7 @@ stdout (one line, shell-quoted); diagnostics go to stderr so the caller can
 capture just the list.
 """
 import importlib
+import pathlib
 import sys
 
 SPEC = [
@@ -41,7 +42,11 @@ SPEC = [
     # there in a row on a missing word2number:
     #   verl/utils/reward_score/qwen_math_eval_toolkit/parser.py:7
     #     from word2number import w2n
-    ("word2number",           "w2n",            "word2number"),
+    # word2number.w2n, not word2number: the package's __init__ is empty and
+    # binds no submodule, so `hasattr(word2number, "w2n")` is False on a
+    # perfectly good install. verl imports the submodule
+    # (`from word2number import w2n`), so that is what to check.
+    ("word2number.w2n",       "word_to_num",    "word2number"),
     ("sympy",                 "simplify",       "sympy"),
 ]
 
@@ -73,10 +78,20 @@ def main():
         if hasattr(m, attr):
             print(f"  {GREEN}OK{OFF}    {mod}", file=sys.stderr)
             continue
-        where = getattr(m, "__file__", None) or getattr(m, "__path__", "?")
-        print(f"  {RED}FAIL{OFF}  {mod}: .{attr} 가 없습니다 — 진짜 패키지가 아닙니다", file=sys.stderr)
+        where = str(getattr(m, "__file__", None) or getattr(m, "__path__", "?"))
+        # Only accuse the repo when the module actually resolves inside it.
+        # This message used to be unconditional, and told a box with a correct
+        # word2number in dist-packages that the repo was shadowing it -- while
+        # printing the dist-packages path one line above, contradicting itself.
+        shadowed = where.startswith(str(pathlib.Path(__file__).resolve().parents[1]))
+        print(f"  {RED}FAIL{OFF}  {mod}: .{attr} 가 없습니다", file=sys.stderr)
         print(f"        {mod} -> {where}", file=sys.stderr)
-        print(f"        레포의 {mod}/ 디렉터리가 PYTHONPATH 를 통해 가리고 있습니다.", file=sys.stderr)
+        if shadowed:
+            print(f"        레포의 {mod.split('.')[0]}/ 디렉터리가 PYTHONPATH 를 통해 "
+                  f"진짜 패키지를 가리고 있습니다.", file=sys.stderr)
+        else:
+            print(f"        레포 밖에서 온 모듈입니다 — 설치가 덜 됐거나, 이 검사가 "
+                  f"기대하는 심볼 이름이 틀렸습니다.", file=sys.stderr)
         need.append(pkg)
 
     for mod, attr, _pkg, why in OPTIONAL:
