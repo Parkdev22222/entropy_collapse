@@ -287,6 +287,17 @@ sys.exit(bad)
 PY
 [ $? -ne 0 ] && FAIL=1
 
+# `import steer_f.tree_rollout` 위의 검사로는 부족하다. 이 레포는 히스토리가
+# 서로 없는 두 브랜치에 걸쳐 있고 양쪽 다 steer_f/ 를 갖는데, 두 계보에서
+# 바이트까지 같은 파일이 하필 tree_rollout.py 하나다. 그래서 위 검사는
+# **verl 에 아무것도 못 넘겨주는 steer_f 위에서도 통과한다**(2026-09-14 H100:
+# dp_actor.py:407 의 forecast_h_togo 를 포함해 7개 심볼 부재). verl 이 실제로
+# import 하는 이름을 verl 소스에서 읽어 대조한다.
+# (5절이 이미 지나갔으므로 NEED 에 넣지 않는다 — 고치는 명령은 검사기가 직접 찍는다.)
+if ! python3 "${STEER_ROOT}/run/_check_steer_f.py" "${STEER_ROOT}"; then
+    FAIL=1
+fi
+
 # ---------------------------------------------------------------- 7. 레포 상태
 say "7. /workspace 쪽 (파드 재시작에도 살아남는 것)"
 cd "${STEER_ROOT}" || exit 1

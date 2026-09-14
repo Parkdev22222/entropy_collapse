@@ -31,6 +31,26 @@
 #
 #   Nothing this branch owns is ever touched, which makes the script safe to
 #   re-run and impossible to get wrong by hand.
+#
+# THE ONE EXCEPTION: steer_f/
+#   That rule was too simple, and it cost the H100 box two days. Both branches
+#   carry a steer_f/, and the two are not two versions of one package -- the
+#   branches have UNRELATED git histories and each grew its own. Only the
+#   donor's steer_f matches the donor's verl, which calls into it by name:
+#
+#       verl/workers/actor/dp_actor.py:407
+#           from steer_f.verl_integration import forecast_h_togo
+#
+#   forecast_h_togo does not exist in this branch's steer_f. Neither do
+#   compute_a_h, sibling_support, oracle_h_togo, token_weight_distribution or
+#   first_divergence -- seven symbols in all -- and the additive rule above
+#   quietly kept every one of them out. A box bootstrapped that way trains
+#   nothing: the arms die inside worker init, long after every gate said OK.
+#
+#   So steer_f/ is taken from the donor even where HEAD tracks the same path,
+#   and run/_check_steer_f.py verifies the result against verl's own import
+#   statements. RUNTIME_RE below is the list; keep it to paths the donor's
+#   verl imports, not to anything this branch merely also happens to have.
 # ---------------------------------------------------------------------------
 set -uo pipefail
 
@@ -43,6 +63,10 @@ DRY=${DRY:-0}
 # Donor paths that are history rather than inputs. Everything else the donor has
 # and HEAD lacks is taken.
 SKIP_RE='^(archive/|experiments_state|results/\.ipynb_checkpoints/|logs/experiments_smoke/)'
+
+# Paths the donor's verl imports by name. These come from the donor even when
+# HEAD tracks a file of the same name -- see THE ONE EXCEPTION above.
+RUNTIME_RE=${RUNTIME_RE:-'^steer_f/'}
 
 say () { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 ok ()  { printf '  \033[32mOK\033[0m    %s\n' "$*"; }
@@ -71,6 +95,16 @@ mapfile -t TAKE < <(
     | grep -Ev "${SKIP_RE}" || true
 )
 
+# Paths both branches carry that the donor must still win: its verl calls into
+# them. comm -12 is the intersection, filtered to RUNTIME_RE.
+mapfile -t OVERRIDE < <(
+    comm -12 \
+        <(git ls-tree -r --name-only "${PAPER_REF}" | sort) \
+        <(git ls-tree -r --name-only HEAD           | sort) \
+    | grep -E "${RUNTIME_RE}" || true
+)
+TAKE+=("${OVERRIDE[@]}")
+
 if [ "${#TAKE[@]}" -eq 0 ]; then
     ok "nothing to take -- this tree already has everything ${PAPER_REF} carries"
     exit 0
@@ -85,6 +119,13 @@ say "3. paths HEAD owns, left untouched"
 for p in run/setup_env.sh run/_check_deps.py run/run_steerf_linear.sh run/run_tree_2x2.sh; do
     git ls-tree -r --name-only HEAD -- "${p}" | grep -q . && ok "${p}"
 done
+
+if [ "${#OVERRIDE[@]}" -gt 0 ]; then
+    say "3b. paths HEAD owns that the donor OVERWRITES (its verl imports them)"
+    printf '  %s\n' "${OVERRIDE[@]}"
+    echo "  This branch's steer_f is a different lineage, not an older version."
+    echo "  Keeping it here is what makes an arm die inside worker init."
+fi
 
 if [ "${DRY}" = "1" ]; then
     say "DRY=1, nothing taken"
@@ -117,6 +158,13 @@ if grep -q steerf_tree_depths "${spmd}" 2>/dev/null; then
     ok "tree-rollout patch already in ${PAPER_REF}'s verl -- do NOT git apply it again"
 else
     warn "tree rollout not patched: git apply patches/steerf_tree_rollout.patch"
+fi
+
+if PYTHONPATH="${ROOT}:${PYTHONPATH:-}" python3 run/_check_steer_f.py "${ROOT}"; then
+    :
+else
+    bad "steer_f does not satisfy verl -- the arms would die at worker init"
+    rc=1
 fi
 
 say "next"

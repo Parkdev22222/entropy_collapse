@@ -38,11 +38,24 @@ docs/HANDOFF.md 와 docs/session_plan_2026-09.md 를 읽고 이어서 하자.
 | **실제 런처** | ❌ **없음** | ✅ `run_steerf.sh`, `run_grpo.sh`, `run_uniform_ablation.sh`, `eval_steerf.sh`, `run_steerf_extreme.sh`, `warmup_and_validate.sh`, `_gpu_defaults.sh` |
 | **학습 로그** | ❌ `logs/`가 비어 있다 | ✅ `logs/experiments/train-*.log` |
 | 분석·논문 | ✅ `scripts/analyze_seeds.py`, `paper/steerf.tex`, `results/*.tsv` | ❌ |
-| `steer_f/`, `verl/`, `tests/` | ✅ | ✅ |
+| **`steer_f/`** | ⚠️ 있지만 **다른 계보**다 — `verl`이 부르는 7개 심볼이 없다 | ✅ **이쪽이 런타임이다** |
+| `verl/` | ❌ `verl/trainer/` 껍데기뿐 | ✅ 전체 |
+| `tests/` | ✅ (이 브랜치의 `steer_f`를 검사한다) | ✅ (도너 것을 검사한다) |
 
 pod의 작업 디렉토리는 두 쪽을 `git checkout <ref> -- run/...`로 섞어놓은 상태다.
-새 환경을 만들 때는 **`origin/paper`를 베이스로 클론한 뒤 이 브랜치에서 `run/`·`scripts/`·`paper/`를
-체크아웃**하는 순서가 맞다. 로그 분석만 할 거면 `origin/paper`만으로 충분하다.
+새 환경은 `bash run/bootstrap_pod.sh`가 만든다 — 손으로 섞지 마라.
+
+> ⚠️ **두 브랜치는 공통 조상이 없다**(`git merge-base` 가 빈손으로 돌아온다). 그래서
+> 양쪽의 `steer_f/`는 같은 패키지의 두 버전이 아니라 **두 계보**다. 도너의 `verl`은
+> 도너의 `steer_f`를 이름으로 부른다 — `dp_actor.py:407`의 `forecast_h_togo`를 비롯해
+> `compute_a_h`·`sibling_support`·`oracle_h_togo`·`token_weight_distribution`·
+> `first_divergence`, 그리고 다른 모듈에 있는 `compute_token_weights_steerf`까지 7개가
+> 이 브랜치 `steer_f`에 **없다**. 학습 박스에서는 **`steer_f/`가 `origin/paper` 것이어야
+> 한다**. 두 계보가 바이트까지 같은 파일은 `tree_rollout.py` 하나뿐이고, 하필 그게
+> 모든 게이트가 import하던 파일이었다 — 그래서 게이트는 학습이 불가능한 박스에서
+> 통과했다. 지금은 `run/_check_steer_f.py`가 `verl` 소스의 import 문을 읽어 대조한다.
+
+로그 분석만 할 거면 `origin/paper`만으로 충분하다.
 
 ### 돌고 있는 것 (2026-09-09 기준)
 

@@ -147,6 +147,17 @@ env_preflight () {   # [root]  -> 0 when the training stack imports
     # verl/__init__.py:22 pulls in -- the exact line the 09-08 traceback died on.
     if err="$(cd "${root}" && PYTHONPATH="${root}:${PYTHONPATH:-}" \
                 python3 -c 'from verl import DataProto; import steer_f.tree_rollout' 2>&1)"; then
+        # `import steer_f.tree_rollout` was the wrong thing to check. Both
+        # branches of this repo carry a steer_f/, their histories are unrelated,
+        # and tree_rollout.py is the ONE file that happens to be byte-identical
+        # between them -- so this gate passed on a box whose steer_f could not
+        # serve verl at all (7 symbols missing, among them the forecast_h_togo
+        # that dp_actor.py:407 imports). The arms died inside worker init with
+        # the gate still saying OK. Check verl's actual import statements.
+        if ! (cd "${root}" && PYTHONPATH="${root}:${PYTHONPATH:-}" \
+                python3 run/_check_steer_f.py "${root}"); then
+            return 1
+        fi
         # verl importing is necessary and not sufficient. On 2026-09-13 every
         # arm on a fresh box died with "The current node timed out during
         # startup" while this check passed, because the broken package was
