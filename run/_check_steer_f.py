@@ -198,12 +198,13 @@ def main() -> int:
                   f"other lineage's signature:", file=sys.stderr)
             for msg in bad_calls:
                 print(f"          {msg}", file=sys.stderr)
-            print("""
-        Importing the name worked; calling it will not. Take the donor's copy
-        of that script -- it ships one that matches its own steer_f.
-
-        fix:  bash run/bootstrap_pod.sh
-""", file=sys.stderr)
+            files = sorted({m.split(":", 1)[0] for m in bad_calls})
+            print("\n        Importing the name worked; calling it will not. Take the "
+                  "donor's copy\n        of each script -- it ships ones that match its "
+                  "own steer_f.\n\n        fix:  git checkout origin/paper -- "
+                  + " ".join(files)
+                  + "\n        (or bash run/bootstrap_pod.sh, which derives the whole "
+                    "set)\n", file=sys.stderr)
             return 1
         print(f"  {GREEN}OK{OFF}    every queue-run script calls it compatibly",
               file=sys.stderr)

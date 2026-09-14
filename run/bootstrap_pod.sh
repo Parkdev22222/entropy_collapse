@@ -66,15 +66,36 @@ SKIP_RE='^(archive/|experiments_state|results/\.ipynb_checkpoints/|logs/experime
 
 # Paths the donor's verl imports by name. These come from the donor even when
 # HEAD tracks a file of the same name -- see THE ONE EXCEPTION above.
-# scripts/measure_ah_support.py is here for the same reason one level up: it
-# calls entropy_advantage, and the two lineages disagree on that function's
-# SIGNATURE, not merely on which names exist. This branch's copy passes
-# response_ids=/group_size=/response_mask= and unpacks a 2-tuple; the donor's
-# takes (h_togo_vals, group_index, mask, responses=...) and returns a tensor. A
-# name-level check cannot see that, and did not: run_paper.sh's measure-support
-# stage died on `TypeError: unexpected keyword argument 'response_ids'` with
-# steer_f already correct. The donor ships a matching copy, so take that.
-RUNTIME_RE=${RUNTIME_RE:-'^(steer_f/|scripts/measure_ah_support\.py$)'}
+RUNTIME_RE=${RUNTIME_RE:-'^steer_f/'}
+
+# And the scripts that CALL into it. The two lineages disagree on signatures,
+# not only on which names exist: this branch's entropy_advantage takes
+# response_ids=/group_size= and returns a 2-tuple, the donor's takes
+# (h_togo_vals, group_index, mask, responses=...) and returns a tensor. So a
+# script written against one lineage raises TypeError under the other with
+# every import still resolving -- measure_ah_support.py did exactly that, and
+# phase1_validate.py had four such call sites waiting behind it.
+#
+# Which scripts those are is DERIVED, not listed: any scripts/*.py that both
+# branches carry and that mentions steer_f belongs to the package's lineage, so
+# the donor's copy is the right one on a box running the donor's steer_f. A
+# list here would go stale the next time someone adds a script; this does not.
+runtime_scripts () {
+    local f
+    while read -r f; do
+        case "${f}" in scripts/*.py) ;; *) continue ;; esac
+        # No pipe into grep -q here, deliberately. Under `set -o pipefail`,
+        # grep -q exits on the first match, git takes SIGPIPE, and the PIPELINE
+        # reports git's failure -- so a match reads as "no match", and only for
+        # files big enough that git had not finished writing. That silently
+        # dropped phase1_sibling_spread.py from this list and nothing else.
+        case "$(git show "HEAD:${f}" 2>/dev/null)" in
+            *steer_f*) printf '%s\n' "${f}" ;;
+        esac
+    done < <(comm -12 \
+        <(git ls-tree -r --name-only "${PAPER_REF}" | sort) \
+        <(git ls-tree -r --name-only HEAD           | sort))
+}
 
 say () { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 ok ()  { printf '  \033[32mOK\033[0m    %s\n' "$*"; }
@@ -106,10 +127,13 @@ mapfile -t TAKE < <(
 # Paths both branches carry that the donor must still win: its verl calls into
 # them. comm -12 is the intersection, filtered to RUNTIME_RE.
 mapfile -t OVERRIDE < <(
-    comm -12 \
-        <(git ls-tree -r --name-only "${PAPER_REF}" | sort) \
-        <(git ls-tree -r --name-only HEAD           | sort) \
-    | grep -E "${RUNTIME_RE}" || true
+    {
+        comm -12 \
+            <(git ls-tree -r --name-only "${PAPER_REF}" | sort) \
+            <(git ls-tree -r --name-only HEAD           | sort) \
+        | grep -E "${RUNTIME_RE}" || true
+        runtime_scripts
+    } | sort -u
 )
 TAKE+=("${OVERRIDE[@]}")
 
@@ -132,7 +156,8 @@ if [ "${#OVERRIDE[@]}" -gt 0 ]; then
     say "3b. paths HEAD owns that the donor OVERWRITES (its verl imports them)"
     printf '  %s\n' "${OVERRIDE[@]}"
     echo "  This branch's steer_f is a different lineage, not an older version."
-    echo "  Keeping it here is what makes an arm die inside worker init."
+    echo "  Keeping it here is what makes an arm die inside worker init, and the"
+    echo "  scripts above call it with the other lineage's signatures."
 fi
 
 if [ "${DRY}" = "1" ]; then
