@@ -158,6 +158,33 @@ REPO=DSDSh/steer-f_2 DELETE=1 bash run/hf_backup.sh <끝난-런>   # 검증 후 
 필요 없어서 즉시 회수된다. 도는 런은 세 검사가 알아서 막으므로 런 이름을 고를 때
 무엇이 도는지 몰라도 된다.
 
+## 로그를 git에 올리기
+
+로그가 **실험 기록 그 자체**다. 원고의 모든 수치가 여기서 재계산된다
+(`scripts/analyze_seeds.py`, `scripts/seed1_table.py --git-ref origin/paper`).
+박스가 회수되면 커밋 안 된 로그는 같이 사라진다 — GRPO seed-1이 그렇게 사라져서
+지금 `docs/seed1_grpo_transcript.json`에 붙여넣기 기록으로만 남아 있다.
+
+```bash
+cd /workspace/entropy_collapse
+bash run/publish_logs.sh                  # 무엇이 올라갈지만 보여준다
+bash run/publish_logs.sh --push           # 커밋 + 푸시 (기본 브랜치: paper)
+bash run/publish_logs.sh --push --done-only   # 완주한 런만
+bash run/publish_logs.sh --push --queue-logs  # 큐 드라이버 로그도
+```
+
+`git add logs && git commit`을 직접 치면 안 되는 이유가 셋이다:
+
+| | |
+|---|---|
+| **학습 트리를 다른 브랜치로 체크아웃하면 안 된다** | 도는 트레이너가 `run/`과 `steer_f/`를 워킹 트리에서 읽는다. 브랜치를 바꾸면 **런 도중에 코드가 바뀐다.** 스크립트는 `git worktree`를 쓰므로 학습 트리를 건드리지 않는다 |
+| **도는 런의 로그는 아직 쓰이는 중이다** | 커밋하면 반쪽짜리가 기록으로 굳는다. 트레이너가 붙어 있는 런은 건너뛴다(`--force`로 우회) |
+| **`validation_data/`는 gitignore에 없다** | 런당 ~150 MB인데 무시 목록에 없어서 `git add -A`면 영구히 히스토리에 들어간다. 스크립트는 **명시한 파일만** 스테이징한다 |
+
+완주 못 한 로그도 **기본으로 올린다** — 크래시한 런의 로그가 왜 크래시했는지의 증거이고
+`diagnose_run_failure`가 그걸 읽는다. 표에는 `~`로 표시된다. A100과 H100이 같은 브랜치에
+올려도 된다: 커밋 메시지가 박스를 적고, 파일 집합이 겹치지 않으며, 푸시가 rebase한다.
+
 ## 알려진 함정
 
 | | |

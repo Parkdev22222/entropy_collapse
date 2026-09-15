@@ -81,18 +81,16 @@ shift
 # never reaches LOG_DIR, and a run that died mid-save leaves a stale directory
 # with no process and no final step. Any one of them firing is enough to stop.
 live_reason () {   # <run> -> prints why the run is unsafe to read, or nothing
-    local run="$1" pid cmd fresh
+    local run="$1" pid fresh
 
     # 1. a trainer whose command line carries this run name. Our own process
     #    tree is already excluded by busy_pids (see _arms.sh), so a match here
     #    is someone else's live job -- or ours, which is worse.
-    if command -v busy_pids >/dev/null 2>&1; then
-        for pid in $(busy_pids); do
-            cmd="$(tr '\0' ' ' < "/proc/${pid}/cmdline" 2>/dev/null || true)"
-            case "${cmd}" in
-                *"${run}"*) echo "pid ${pid} is training it right now"; return 0 ;;
-            esac
-        done
+    if command -v trainer_pid_for >/dev/null 2>&1; then
+        pid="$(trainer_pid_for "${run}" | head -1)"
+        if [ -n "${pid}" ]; then
+            echo "pid ${pid} is training it right now"; return 0
+        fi
     fi
 
     # 2. a checkpoint directory touched in the last FRESH_MIN minutes. This is

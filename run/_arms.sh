@@ -554,6 +554,20 @@ busy_pids () {
 }
 is_busy () { [ -n "$(busy_pids)" ]; }
 
+# Is THIS run the one being trained right now? busy_pids answers "is anything
+# training"; two things need the narrower question -- hf_backup.sh (reading a
+# checkpoint mid-write gives a corrupt backup that still passes verification)
+# and publish_logs.sh (committing a log that is still being appended to freezes
+# a partial record into git). One definition so they cannot disagree.
+trainer_pid_for () {   # <run-name> -> pids whose command line carries it
+    local pid cmd
+    for pid in $(busy_pids); do
+        cmd="$(tr '\0' ' ' < "/proc/${pid}/cmdline" 2>/dev/null || true)"
+        case "${cmd}" in *"$1"*) echo "${pid}" ;; esac
+    done
+}
+run_is_live () { [ -n "$(trainer_pid_for "$1")" ]; }
+
 # --- are the GPUs actually usable? -------------------------------------------
 # is_busy only matches main_ppo on the command line. A run that died leaves
 # ray::WorkerDict and vLLM engine processes holding CUDA contexts, none of which
