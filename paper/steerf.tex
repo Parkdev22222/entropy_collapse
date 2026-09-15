@@ -39,7 +39,12 @@ Correcting the Visitation Channel in Token-Level Entropy Control for RLVR}
 % when it has not, so this file can be compiled at any point in the campaign
 % without ever printing a number nobody measured. Predicting a result and
 % typing it in "to save time" is how a predicted number reaches a submission.
-\providecommand{\PENDING}{\textcolor{red}{\textbf{[pending]}}}
+% "[pending]" is nine characters where the number it stands for is five
+% (".1495"), so every table was being typeset to the width of the placeholder
+% rather than of the data -- Table 12 overran the column by 102pt. A short
+% marker keeps the draft's layout equal to the final one. Still red and bold:
+% no unmeasured number is ever typeset as a number.
+\providecommand{\PENDING}{\textcolor{red}{\textbf{--}}}
 % \tocheck{...} marks a sentence whose WORDING presumes a direction the campaign
 % has not yet confirmed. It renders as ordinary text; the point is that
 %     grep -c 'tocheck' paper/steerf.tex
@@ -909,7 +914,8 @@ $110$ optimization steps correspond to about $3.2$ epochs.
 
 \begin{table}[t]
 \centering\small
-\begin{tabular}{llcl}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}llcl@{}}
 \toprule
 Backbone & Family & Math-spec. & Validation \\
 \midrule
@@ -929,9 +935,9 @@ accuracy across rows.}
 \label{sec:valset}
 
 The mathematics-specialized backbones validate on AIME 2024 ($30$ problems, $32$
-samples each). AIME 2024 is small: with a per-problem accuracy spread of about
-$\num{0.145}$, the standard error of its mean is $\num{0.145}/\sqrt{30} \approx
-\num{0.027}$, or $2.7$ accuracy points. For a backbone that scores near zero on it,
+samples each). AIME 2024 is small: with a per-problem accuracy spread of
+$\num{STDaime}$ measured across our runs, the standard error of its mean is
+$\num{STDaime}/\sqrt{30} \approx \num{SEaime}$. For a backbone that scores near zero on it,
 every arm lies inside one standard error, so the benchmark cannot separate them.
 
 The sharper problem is not the reported number but the \emph{selection}: we choose
@@ -1422,16 +1428,27 @@ mathematics was specialized for, and (Section~\ref{sec:valset}) in which benchma
 selects the checkpoint---so the table reports each backbone's own three numbers and
 the within-backbone differences, and nothing is averaged down a column.
 
+% Every cell is NAMED. \num takes a macro name and falls back to \PENDING when
+% it is not defined, so an empty argument -- which is what these cells used to
+% hold -- can never be filled by anything: the backbone runs could all finish
+% and this table would stay red, indistinguishable from a table still waiting.
+% The names follow the convention analyze_seeds.py already emits (R<arm><metric>
+% for a level, C<a><b><metric> for a contrast) with a backbone prefix.
 \begin{table}[t]
-\centering\small
-\begin{tabular}{lccc|cc}
+\centering\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}lccc|cc@{}}
 \toprule
-& GRPO & base & ours & $\Delta_{\text{GRPO}}$ & $\Delta_{\text{base}}$ \\
+& GRPO & base & ours & $\Delta$GRPO & $\Delta$base \\
 \midrule
-$1.5$B Qwen-Math & \num{} & \num{} & \num{} & \num{} & \num{} \\
-$7$B Qwen-Math   & \num{} & \num{} & \num{} & \num{} & \num{} \\
-$8$B Llama       & \num{} & \num{} & \num{} & \num{} & \num{} \\
-$7$B Mistral     & \num{} & \num{} & \num{} & \num{} & \num{} \\
+$1.5$B Qwen-Math & \num{Rgrpoacc} & \num{Rsteeracc} & \num{Rsignedacc}
+                 & \num{Csignedgrpoacc} & \num{Csignedsteeracc} \\
+$7$B Qwen-Math   & \num{Bqwenbiggrpoacc} & \num{Bqwenbigsteeracc} & \num{Bqwenbigsignedacc}
+                 & \num{Bqwenbigsignedgrpoacc} & \num{Bqwenbigsignedsteeracc} \\
+$8$B Llama       & \num{Bllamagrpoacc} & \num{Bllamasteeracc} & \num{Bllamasignedacc}
+                 & \num{Bllamasignedgrpoacc} & \num{Bllamasignedsteeracc} \\
+$7$B Mistral     & \num{Bmistralgrpoacc} & \num{Bmistralsteeracc} & \num{Bmistralsignedacc}
+                 & \num{Bmistralsignedgrpoacc} & \num{Bmistralsignedsteeracc} \\
 \bottomrule
 \end{tabular}
 \caption{The headline contrast on four backbones, seed $1$, converged window.
@@ -1454,7 +1471,7 @@ The statistic we report is the sign of $\Delta_{\text{GRPO}}$, and how many of t
 four backbones share it. With one seed per cell, a single backbone's difference
 carries about the same uncertainty as a single seed on the primary backbone
 (Section~\ref{sec:res:seeds}), so no individual row is decisive; the claim rests on
-agreement across rows. We report the count, \num{} of $4$, and treat a split
+agreement across rows. We report the count, \num{Bsigncount} of $4$, and treat a split
 result as a limit on generality rather than as noise to be averaged away.
 
 \subsection{Cost}
@@ -1474,7 +1491,7 @@ We report window means rather than the best checkpoint, and the difference is no
 cosmetic. Selecting the maximum over the twelve validation points inflates every arm
 by a similar amount: $+.013$ for \textsc{steer}, $+.011$ for \textsc{uniform},
 $+.016$ for \textsc{permuted} and $+.017$ for STEER-F, relative to the window mean.
-Since a single AIME24 measurement carries a standard error of $.029$ across
+Since a single AIME24 measurement carries a standard error of $\num{SEaime}$ across
 problems, a maximum over a dozen noisy points is a biased statistic whose bias grows
 with the number of checkpoints compared. The arm ordering happens to be the same
 under both rules here, but we regard the window mean as the defensible one and use
@@ -1497,7 +1514,7 @@ construction: it does not slow entropy collapse, it redirects it.
 
 \paragraph{A single validation benchmark, and what our $t$-statistics do not cover.}
 Every claim rests on AIME 2024, which has $30$ problems. A single measurement of one
-arm carries an across-problem standard error of $.029$, so the gaps in
+arm carries an across-problem standard error of $\num{SEaime}$, so the gaps in
 Table~\ref{tab:contrast} are a fraction of one problem in absolute terms. The paired
 $t$ we report is computed over the eight validation steps of one run: it establishes
 that a gap is stable across the converged window, and nothing more. The statistic
