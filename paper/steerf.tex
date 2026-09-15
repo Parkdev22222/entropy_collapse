@@ -1038,14 +1038,23 @@ distinction could matter, the length-corrected product as well.
 \section{Results}
 \label{sec:results}
 
-All numbers below come from the runs described in Section~\ref{sec:setup}: one seed,
-one benchmark, 110 optimization steps per arm, and the same initial checkpoint. We
-report our own measurements only; no figure in this section is taken from prior
-work.
+All numbers below come from the runs described in Section~\ref{sec:setup}: one
+benchmark, $110$ optimization steps per arm, and the same initial checkpoint, whose
+step-$0$ accuracy is identical across arms. Every figure is recomputed from a
+training log released with this paper. We report our own measurements only; no
+figure in this section is taken from prior work.
 
-% NOTE: every row except GRPO is recomputed from the committed training logs.
-% The GRPO row is from the same experiment campaign but its log is not yet in the
-% repository; see the Limitations section.
+The campaign is not finished. Each arm below rests on \num{Nsigned} seed, and where
+an arm has more we hold it out of the tables rather than average arms over different
+seed sets --- a reader subtracting two rows of Table~\ref{tab:plateau} would
+otherwise get a different number from Table~\ref{tab:contrast}. Those extra runs are
+not wasted: Section~\ref{sec:res:seeds} uses them for the one thing a single seed
+cannot give, a direct measurement of how far the same configuration moves when it is
+run again.
+
+% NOTE: every row is recomputed from a committed training log by
+% scripts/analyze_seeds.py, which writes results/numbers.tex. The GRPO log was
+% the last one outstanding and landed on 2026-09-15.
 
 \subsection{Validation trajectory}
 \label{sec:res:curve}
@@ -1106,7 +1115,8 @@ GRPO             & \num{Ngrpo}     & \num{Rgrpoacc}     & \num{Rgrpomaj}     & \
 \bottomrule
 \end{tabular}
 \caption{Means over the converged window (steps $40$--$110$, eight validation points
-per run), averaged over $n$ seeds. \emph{uplift} is $\mathrm{maj@}32 - \mathrm{acc@}32$. Entropy is the token-mean quantity discussed in
+per run), averaged over the $n$ seeds \emph{common to all five arms} so that the rows
+here and the contrasts in Table~\ref{tab:contrast} are drawn from the same runs. \emph{uplift} is $\mathrm{maj@}32 - \mathrm{acc@}32$. Entropy is the token-mean quantity discussed in
 Section~\ref{sec:setup}, i.e.\ $\Htraj$ divided by mean length.}
 \label{tab:plateau}
 \end{table}
@@ -1247,12 +1257,25 @@ run, measures whether a gap is stable along a single trajectory. That is a diffe
 question from whether it survives re-running, and we report it only in
 Appendix~\ref{sec:appendix-within} so the two are not confused.
 
-Run-to-run spread is itself worth reporting. Across our seeds the standard deviation
-of an arm's converged-window accuracy is \num{Seedsd}, and of a paired difference
-\num{Pairedsd}. For scale, two validations of the \emph{same} weights on these $30$
-questions differ by about $.004$, so seed variation is the larger term by roughly an
-order of magnitude, and any comparison quoted at single-run precision is quoting
-noise.
+Run-to-run spread is itself worth reporting, and with one seed per arm it is the
+number that decides how much the rest of this section is worth. We can measure it
+directly for one arm: GRPO has finished \num{Nallgrpo} seeds, and its converged-window
+accuracy moves from \num{Logrpoacc} to \num{Higrpoacc} between them --- a spread of
+\num{Sgrpoacc}, against a headline STEER-F\,$-$\,GRPO gap of \num{Csignedgrpoacc}.
+On majority vote the spread is \num{Sgrpomaj} against \num{Csignedgrpomaj}. The
+second STEER-F run of Appendix~\ref{sec:appendix-within} gives an independent estimate
+of the same quantity and agrees with it.
+
+Two things follow, and they point in opposite directions. The gap is larger than the
+spread on both metrics, and on majority vote by more than a factor of two. But it is
+the \emph{same order} as the spread, which is precisely the regime in which a single
+seed cannot decide the question: the comparison we are making is between one draw
+from each arm, and the arm we can observe twice moved by more than half the effect we
+are claiming. For scale at the other end, two validations of the \emph{same} weights
+on these $30$ questions differ by about $.004$, so seed variation is the larger term
+by roughly an order of magnitude and any comparison quoted at single-run precision is
+quoting noise. We therefore state the ordering and the mechanism as what this
+experiment establishes, and the effect size as what the remaining seeds are for.
 
 \subsection{Six benchmarks}
 \label{sec:res:bench}
@@ -1486,17 +1509,22 @@ We state this rather than substitute a number we cannot compute. A multi-benchma
 evaluation, and logging per-problem scores so the paired error can be estimated, are
 the two things that would settle it.
 
-\paragraph{One row of our tables is not yet reproducible from the artifact.}
-The GRPO row comes from the same experiment campaign, hardware and protocol as the
-others, but its training log is not in the repository we will release, whereas every
-other row is recomputed from a committed log. It should be treated as the one number
-a reader cannot yet check.
-
-\paragraph{A single seed.}
-All arms use one data seed. The standard error we quote is an across-problem
-quantity and does not bound run-to-run variation, which for these runs is
-uncontrolled because rollout sampling is not seeded across processes. A re-run of
-the same configuration is a second draw, not a restoration.
+\paragraph{A single seed, and a gap the same order as the noise on it.}
+Every arm rests on one data seed, so no contrast in this paper carries a
+seed-level test. This is the limitation that bounds all the others. We can now put a
+number on it rather than an argument: the one arm we have run twice, GRPO, moved
+\num{Sgrpoacc} in converged-window accuracy between its two seeds, against a headline
+gap of \num{Csignedgrpoacc}. The gap is the larger of the two, and on majority vote
+by more than a factor of two, but not by the margin that would let a single draw from
+each arm settle it. The across-problem standard error we quote elsewhere is a
+different quantity and does not bound this one. Rollout sampling is not seeded across
+processes, so a re-run of the same configuration is a second draw rather than a
+restoration --- which is what makes the repeat measurable, and what makes it
+necessary. The pre-registered five-seed campaign in
+Appendix~\ref{sec:appendix-prereg} is designed to settle the effect size; what this
+paper establishes without it is the ordering of the arms and the mechanism that
+produces it, since the three controls sit at zero while only the arm carrying $\AH$
+moves.
 
 \paragraph{The effective horizon is one step.}
 The calibration in Eq.~\eqref{eq:a3} suppresses heads beyond the first, so

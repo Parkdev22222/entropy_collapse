@@ -17,7 +17,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from analyze_seeds import parse_log, plateau          # noqa: E402
-from seed1_table import extract_from_git, step_zero_acc  # noqa: E402
+from seed1_table import step_zero_acc  # noqa: E402
+from analyze_seeds import extract_from_git  # noqa: E402
 
 TAG = "Qwen2.5-Math-1.5B"
 # The values this repository's committed logs produce over steps 40-110. They
@@ -191,3 +192,80 @@ def test_the_grpo_log_is_now_on_the_branch_and_matches_the_transcript(logs):
     d = json.loads((ROOT / "docs" / "seed1_grpo_transcript.json").read_text())
     win = [d["val"][str(s)] for s in range(40, 111, 10)]
     assert round(sum(v["acc"] for v in win) / len(win), 4) == round(agg["acc"], 4)
+
+
+# ------------------------------------------- which run an arm/seed resolves to
+def test_a_recovery_log_does_not_silently_replace_the_original(tmp_path):
+    """seed 1 has two logs for three arms; the choice moved the headline.
+
+    analyze_seeds.find_log used to return the LAST candidate, so
+    train-<run>_0905.log won over train-<run>.log. The signed arm's plateau
+    accuracy then read .1392 instead of .1495 and STEER-F - GRPO shrank from
+    +.0145 to +.0056, with nothing in any output saying a different run had
+    been substituted. The rule is now fixed and outcome-independent: among logs
+    that finished, the bare name wins.
+    """
+    out = tmp_path / "out"
+    logs = tmp_path / "logs"
+    logs.mkdir()
+
+    def write(name, acc):
+        body = []
+        for step in range(1, 111):
+            line = f"step:{step} - global_seqlen: 1"
+            if step % 10 == 0:
+                line += (f" - val-core/aime_2024_dapo_boxed/acc/mean@32:{acc}"
+                         f" - val-core/aime_2024_dapo_boxed/acc/maj@32/mean:{acc}")
+            body.append(line)
+        (logs / name).write_text("\n".join(body) + "\n")
+
+    run = f"steer-f-{TAG}-s1-tree-rollout"
+    write(f"train-{run}.log", "0.500")        # the original
+    write(f"train-{run}_0905.log", "0.100")   # the re-launch
+    write(f"train-grpo-{TAG}-s1.log", "0.400")
+
+    r = subprocess.run([sys.executable, str(ROOT / "scripts" / "analyze_seeds.py"),
+                        "--logs", str(logs), "--out", str(out)],
+                       capture_output=True, text=True, cwd=str(ROOT))
+    assert r.returncode == 0, r.stderr
+    rows = (out / "per_seed.tsv").read_text().splitlines()
+    signed = [l for l in rows if l.startswith("signed\t")][0].split("\t")
+    assert signed[2].startswith("0.5000"), f"took the re-launch: {signed}"
+    assert f"train-{run}.log" in signed[-1]
+
+
+def test_a_relaunch_is_used_when_the_original_never_finished(tmp_path):
+    """Rule 2: an original that died is not a run, and the re-launch is."""
+    out = tmp_path / "out"
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    run = f"steer-f-{TAG}-s1-tree-rollout"
+    (logs / f"train-{run}.log").write_text("step:3 - global_seqlen: 1\n")
+    body = []
+    for step in range(1, 111):
+        line = f"step:{step} - global_seqlen: 1"
+        if step % 10 == 0:
+            line += (" - val-core/aime_2024_dapo_boxed/acc/mean@32:0.200"
+                     " - val-core/aime_2024_dapo_boxed/acc/maj@32/mean:0.300")
+        body.append(line)
+    (logs / f"train-{run}_0905.log").write_text("\n".join(body) + "\n")
+
+    r = subprocess.run([sys.executable, str(ROOT / "scripts" / "analyze_seeds.py"),
+                        "--logs", str(logs), "--out", str(out)],
+                       capture_output=True, text=True, cwd=str(ROOT))
+    assert r.returncode == 0, r.stderr
+    signed = [l for l in (out / "per_seed.tsv").read_text().splitlines()
+              if l.startswith("signed\t")][0]
+    assert "_0905.log" in signed, signed
+
+
+def test_arm_means_use_only_the_seeds_every_arm_has():
+    """Table 1 and Table 2 must be drawn from the same runs.
+
+    GRPO finished seed 2 while the rest are on seed 1; averaging arms over
+    different seed sets makes a reader who subtracts two rows of the means
+    table get a different number from the contrast table.
+    """
+    body = (ROOT / "scripts" / "analyze_seeds.py").read_text()
+    assert "set.intersection" in body
+    assert "--unbalanced" in body

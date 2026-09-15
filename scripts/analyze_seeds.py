@@ -39,6 +39,8 @@ import json
 import math
 import re
 import statistics
+import subprocess
+import tempfile
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -62,6 +64,27 @@ CONTRASTS = [("signed", "grpo"), ("signed", "steer"), ("signed", "uniform"),
              ("signed", "permuted"), ("steer", "grpo"), ("uniform", "steer")]
 
 STEP_RE = re.compile(r"step:(\d+) - global_seqlen")
+
+
+def extract_from_git(ref: str, log_dir: str, dest: Path) -> int:
+    """Copy every train-*.log at <ref>:<log_dir> into dest. Returns the count.
+
+    The training logs live on the `paper` branch and the tooling lives here, so
+    without this the script only runs on a pod that happens to have both.
+    """
+    names = subprocess.run(["git", "ls-tree", "-r", "--name-only", ref, log_dir],
+                           capture_output=True, text=True).stdout.split()
+    n = 0
+    for name in names:
+        if not (name.endswith(".log") and Path(name).name.startswith("train-")):
+            continue
+        blob = subprocess.run(["git", "show", f"{ref}:{name}"],
+                              capture_output=True)
+        if blob.returncode:
+            continue
+        (dest / Path(name).name).write_bytes(blob.stdout)
+        n += 1
+    return n
 
 
 def parse_log(path: Path) -> dict[int, dict[str, float]]:
@@ -229,15 +252,36 @@ def main(argv=None) -> int:
     ap.add_argument("--model-tag", default="Qwen2.5-Math-1.5B")
     ap.add_argument("--plateau", default="40:110", help="lo:hi step window")
     ap.add_argument("--steps", type=int, default=110)
+    ap.add_argument("--unbalanced", dest="balanced", action="store_false",
+                    help="average each arm over every seed it has, even when "
+                         "the arms have different seeds (the tables then stop "
+                         "agreeing with the contrasts)")
+    ap.add_argument("--long-steps", type=int, default=200,
+                    help="final step of the compute-matched grpo-long control")
+    ap.add_argument("--git-ref", default=None,
+                    help="read the logs out of this ref instead of the working "
+                         "tree (they live on `paper`)")
     ap.add_argument("--tex-macros", default=None,
                     help="also emit \\newcommand macros the manuscript can \\input "
                          "(default: <out>/numbers.tex)")
     args = ap.parse_args(argv)
 
     lo, hi = (int(v) for v in args.plateau.split(":"))
-    log_dir = Path(args.logs)
+    tmp = None
+    if args.git_ref:
+        tmp = tempfile.TemporaryDirectory()
+        n = extract_from_git(args.git_ref, args.logs, Path(tmp.name))
+        print(f"[analyze] {n} training log(s) from {args.git_ref}:{args.logs}")
+        log_dir = Path(tmp.name)
+    else:
+        log_dir = Path(args.logs)
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    def steps_for_arm(arm: str) -> int:
+        # grpo-long is the compute-matched control and runs past the crossing;
+        # run/_arms.sh:218 owns the same exception for the queues.
+        return args.long_steps if arm == "grpo-long" else args.steps
 
     def run_name(arm: str, seed: int) -> str:
         t = args.model_tag
@@ -250,20 +294,50 @@ def main(argv=None) -> int:
             "grpo-long": f"grpo-{t}-s{seed}-long",
         }[arm]
 
-    def find_log(rn: str) -> Path | None:
-        # train-<run>.log, or the recovery chain's train-<run>_<tag>.log. The
-        # bare "train-<run>*" glob would match sibling arms -- signed is a
+    def reached(path: Path, want: int) -> bool:
+        return any(s >= want for s in parse_log(path))
+
+    def find_log(rn: str, want: int) -> Path | None:
+        """The run this arm/seed is, when more than one log carries the name.
+
+        Seed 1 has two logs for three arms: the original, and a `_0905`
+        re-launch made after the huggingface-hub break of 2026-09-08 killed a
+        chain mid-flight. Both completed. Picking whichever reads better is
+        cherry-picking, so the rule is fixed and independent of the outcome:
+
+          1. among logs that reached the final step, take the BARE name --
+             the original run;
+          2. if the original never finished and a re-launch did, that
+             re-launch IS the run;
+          3. if none finished, report the bare one and let plateau() say how
+             little is there.
+
+        The re-launches are a second draw of the same configuration, and they
+        are reported as that, in the within-run stability appendix.
+
+        This used to return the LAST candidate, which silently preferred
+        `_0905` over the original: the signed arm's plateau accuracy read
+        .1392 instead of .1495 and the headline contrast shrank by two thirds,
+        with nothing anywhere saying a different run had been substituted.
+        """
+        bare = log_dir / f"train-{rn}.log"
+        tagged = sorted(log_dir.glob(f"train-{rn}_*.log"))
+        # A bare "train-<run>*" glob would match sibling arms -- signed is a
         # prefix of permuted (see run/_arms.sh).
-        cands = [log_dir / f"train-{rn}.log", *sorted(log_dir.glob(f"train-{rn}_*.log"))]
-        live = [c for c in cands if c.is_file()]
-        return live[-1] if live else None
+        cands = [c for c in [bare, *tagged] if c.is_file()]
+        if not cands:
+            return None
+        done = [c for c in cands if reached(c, want)]
+        if done:
+            return bare if bare in done else done[0]
+        return bare if bare.is_file() else cands[0]
 
     # ------------------------------------------------------------ per seed
     per_seed: dict[str, dict[int, dict[str, float]]] = defaultdict(dict)
     missing = []
     for arm in MAIN_ARMS:
         for seed in range(1, 6):
-            f = find_log(run_name(arm, seed))
+            f = find_log(run_name(arm, seed), steps_for_arm(arm))
             if f is None:
                 missing.append(f"{arm} s{seed}")
                 continue
@@ -277,6 +351,23 @@ def main(argv=None) -> int:
 
     if not per_seed:
         sys.exit(f"[analyze] no parsable training log under {log_dir}")
+
+    # Seeds every main arm has. The arm means and the contrasts must be drawn
+    # from the SAME set, or a reader who subtracts two rows of Table 1 gets a
+    # different number from the contrast table and has no way to know why. With
+    # the campaign mid-flight that is a live hazard: GRPO finished seed 2 while
+    # every other arm is still on seed 1, so an unbalanced mean would move GRPO
+    # alone and shrink the headline gap by a third for no reason a reviewer
+    # could see. The extra seeds are not discarded -- per_seed.tsv keeps them,
+    # and they are what the manuscript quotes for run-to-run spread.
+    common = set.intersection(*[set(per_seed.get(a, {})) for a in MAIN_ARMS]) \
+        if all(per_seed.get(a) for a in MAIN_ARMS) else set()
+    if args.balanced and common:
+        def seeds_of(arm):
+            return sorted(common)
+    else:
+        def seeds_of(arm):
+            return sorted(per_seed.get(arm, {}))
 
     cols = ["acc", "maj", "uplift", "entropy", "resp_len", "s_per_step",
             "s_per_val_step", "branch_frac", "tw_mean", "n_val_points"]
@@ -294,7 +385,7 @@ def main(argv=None) -> int:
     with (out_dir / "arm_means.tsv").open("w") as fh:
         fh.write("arm\tn_seeds\t" + "\t".join(f"{c}\t{c}_se" for c in cols[:-1]) + "\n")
         for arm in MAIN_ARMS:
-            rows = list(per_seed.get(arm, {}).values())
+            rows = [per_seed[arm][s_] for s_ in seeds_of(arm) if s_ in per_seed.get(arm, {})]
             if not rows:
                 continue
             cells = [arm, str(len(rows))]
@@ -333,8 +424,8 @@ def main(argv=None) -> int:
         fh.write("seed\tsteerf_steps\tsteerf_seconds\tgrpo_long_step\t"
                  "grpo_long_seconds\tsteerf_acc\tgrpo_long_acc\tdiff\n")
         for seed in sorted(per_seed.get("signed", {})):
-            f_long = find_log(run_name("grpo-long", seed))
-            f_sig = find_log(run_name("signed", seed))
+            f_long = find_log(run_name("grpo-long", seed), args.long_steps)
+            f_sig = find_log(run_name("signed", seed), args.steps)
             if f_long is None or f_sig is None:
                 continue
             sig_steps = parse_log(f_sig)
@@ -360,7 +451,7 @@ def main(argv=None) -> int:
         fh.write("% Table: arm means over seeds (plateau steps "
                  f"{lo}-{hi}, unit = seed)\n")
         for arm in MAIN_ARMS:
-            rows = list(per_seed.get(arm, {}).values())
+            rows = [per_seed[arm][s_] for s_ in seeds_of(arm) if s_ in per_seed.get(arm, {})]
             if not rows:
                 continue
             def ms(c):
@@ -413,8 +504,19 @@ def main(argv=None) -> int:
         fh.write(mac("Plateaulo", lo, "{:d}"))
         fh.write(mac("Plateauhi", hi, "{:d}"))
         for arm in MAIN_ARMS:
-            rows = list(per_seed.get(arm, {}).values())
+            rows = [per_seed[arm][s_] for s_ in seeds_of(arm) if s_ in per_seed.get(arm, {})]
             fh.write(mac(f"N{arm}", len(rows), "{:d}"))
+            # how many that arm actually has, balanced or not
+            fh.write(mac(f"Nall{arm}", len(per_seed.get(arm, {})), "{:d}"))
+            # Run-to-run spread of ONE arm across ALL its seeds. This is the
+            # only direct measurement of how much a seed moves a number, and
+            # the manuscript compares the headline gap against it -- a gap the
+            # size of the spread is not yet a result.
+            for c in ("acc", "maj"):
+                v = [r[c] for r in per_seed.get(arm, {}).values() if c in r]
+                fh.write(mac(f"S{arm}{c}", (max(v) - min(v)) if len(v) > 1 else None))
+                fh.write(mac(f"Lo{arm}{c}", min(v) if len(v) > 1 else None))
+                fh.write(mac(f"Hi{arm}{c}", max(v) if len(v) > 1 else None))
             for c in ("acc", "maj", "uplift", "entropy"):
                 v = [r[c] for r in rows if c in r]
                 fh.write(mac(f"R{arm}{c}", (sum(v) / len(v)) if v else None))

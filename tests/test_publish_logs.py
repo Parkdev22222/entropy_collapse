@@ -313,3 +313,51 @@ def test_the_refusal_names_the_recovery_command(box):
     body = (ROOT / "run" / "publish_logs.sh").read_text()
     assert "reset --hard HEAD, then re-run this." in body
     assert "pull --rebase origin ${BRANCH} &&" in body
+
+
+def test_a_dead_stub_cannot_overwrite_a_finished_run(box, tmp_path):
+    """The H100 publish of 2026-09-15.
+
+    Both boxes had a train-grpo-<tag>-s2.log: one a finished 110-step run, the
+    other an 8 KB carcass of a start that died in seconds. The second publisher
+    overwrote the first, and the branch tip -- which is what every analysis
+    reads -- silently became the stub.
+    """
+    pod, origin, logs = box
+    make_log(logs, f"grpo-{TAG}-s2", 110)
+    assert run_publish(pod, logs, "--push").returncode == 0
+
+    other = tmp_path / "pod2"
+    subprocess.run(["git", "clone", str(origin), str(other)], check=True, capture_output=True)
+    for k, v in (("user.email", "t@t"), ("user.name", "t")):
+        sh(["git", "config", k, v], other)
+    shutil.copytree(ROOT / "run", other / "run")
+    sh(["git", "checkout", "-q", "-b", "work"], other)
+    logs2 = other / "logs" / "experiments"
+    logs2.mkdir(parents=True, exist_ok=True)
+    make_log(logs2, f"grpo-{TAG}-s2", 3)          # the carcass
+    make_log(logs2, f"steer-{TAG}-s1-xclip", 110)  # and something genuinely new
+
+    p = sh(["bash", SCRIPT, "--push"], other, LOG_DIR=str(logs2))
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert "NOT overwritten" in p.stdout
+    assert f"train-grpo-{TAG}-s2.log ours=3 theirs=110" in p.stdout
+
+    kept = sh(["git", "show", f"paper:logs/experiments/train-grpo-{TAG}-s2.log"],
+              origin).stdout
+    assert "step:110" in kept, "the finished run must survive"
+    tree = sh(["git", "ls-tree", "-r", "--name-only", "paper"], origin).stdout
+    assert f"logs/experiments/train-steer-{TAG}-s1-xclip.log" in tree, \
+        "the genuinely new log still goes up"
+
+
+def test_force_overwrites_a_longer_log_when_asked(box, tmp_path):
+    pod, origin, logs = box
+    make_log(logs, f"grpo-{TAG}-s2", 110)
+    run_publish(pod, logs, "--push")
+    make_log(logs, f"grpo-{TAG}-s2", 3)
+    p = run_publish(pod, logs, "--push", "--force")
+    assert p.returncode == 0, p.stdout + p.stderr
+    kept = sh(["git", "show", f"paper:logs/experiments/train-grpo-{TAG}-s2.log"],
+              origin).stdout
+    assert "step:110" not in kept

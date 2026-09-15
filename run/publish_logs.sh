@@ -282,12 +282,44 @@ git -C "${WORKTREE}" rebase -q "origin/${BRANCH}" || {
     exit 1
 }
 
+# How far a log got, so two boxes holding the same run name cannot destroy
+# each other's work. On 2026-09-15 the H100 publish replaced four A100 logs
+# with its own dead stubs of the same name -- including a finished 1 MB GRPO
+# seed-2 run, overwritten by an 8 KB carcass from a start that failed in
+# seconds. Nothing was lost (git keeps the old blob) but the branch tip, which
+# is what every analysis reads, was wrong and said nothing about it.
+last_step_in () {   # <file> -> the highest optimisation step it recorded
+    grep -o 'step:[0-9]* - global_seqlen' "$1" 2>/dev/null \
+        | grep -o '[0-9]\+' | sort -n | tail -1
+}
+
 mkdir -p "${WORKTREE}/logs/experiments"
-staged=()
+staged=(); clobber=()
 for f in "${take[@]}"; do
-    cp "${f}" "${WORKTREE}/logs/experiments/$(basename "${f}")"
+    dest="${WORKTREE}/logs/experiments/$(basename "${f}")"
+    if [ -f "${dest}" ]; then
+        mine="$(last_step_in "${f}")";  mine=${mine:-0}
+        theirs="$(last_step_in "${dest}")"; theirs=${theirs:-0}
+        if [ "${theirs}" -gt "${mine}" ] && [ "${FORCE}" != "1" ]; then
+            clobber+=("$(basename "${f}") ours=${mine} theirs=${theirs}")
+            continue
+        fi
+    fi
+    cp "${f}" "${dest}"
     staged+=("logs/experiments/$(basename "${f}")")
 done
+if [ ${#clobber[@]} -gt 0 ]; then
+    echo
+    echo " NOT overwritten -- the branch already has a run that got further:"
+    for c in "${clobber[@]}"; do printf '   %s\n' "${c}"; done
+    echo " Yours are almost certainly carcasses of a start that failed here."
+    echo " --force overwrites anyway."
+fi
+if [ ${#staged[@]} -eq 0 ]; then
+    echo
+    echo "nothing to stage -- every file is already there, or newer there."
+    exit 0
+fi
 git -C "${WORKTREE}" add -- "${staged[@]}" || exit 1
 
 if git -C "${WORKTREE}" diff --cached --quiet; then

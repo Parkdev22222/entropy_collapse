@@ -40,7 +40,8 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from analyze_seeds import paired, parse_log, plateau  # noqa: E402
+from analyze_seeds import (extract_from_git, paired, parse_log,  # noqa: E402
+                           plateau)
 
 # Seed-1 arms, in the order the document reports them. GRPO comes first because
 # every contrast is drawn against it.
@@ -79,27 +80,6 @@ def step_zero_acc(path: Path) -> float | None:
 def per_step(path: Path, lo: int, hi: int) -> dict[int, dict[str, float]]:
     return {s: r for s, r in parse_log(path).items()
             if lo <= s <= hi and "acc" in r}
-
-
-def extract_from_git(ref: str, log_dir: str, dest: Path) -> int:
-    """Copy every train-*.log at <ref>:<log_dir> into dest. Returns the count.
-
-    The training logs live on the `paper` branch and the tooling lives here, so
-    without this the script only runs on a pod that happens to have both.
-    """
-    names = subprocess.run(["git", "ls-tree", "-r", "--name-only", ref, log_dir],
-                           capture_output=True, text=True).stdout.split()
-    n = 0
-    for name in names:
-        if not (name.endswith(".log") and Path(name).name.startswith("train-")):
-            continue
-        blob = subprocess.run(["git", "show", f"{ref}:{name}"],
-                              capture_output=True)
-        if blob.returncode:
-            continue
-        (dest / Path(name).name).write_bytes(blob.stdout)
-        n += 1
-    return n
 
 
 def fmt(v, spec="{:.4f}", strip_zero=True):
