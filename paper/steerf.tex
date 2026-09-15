@@ -51,8 +51,20 @@ Correcting the Visitation Channel in Token-Level Entropy Control for RLVR}
 % enumerates every claim to re-read against results/*.tsv once the numbers land.
 \providecommand{\tocheck}[1]{#1}
 \newcommand{\num}[1]{\ifcsname #1\endcsname\csname #1\endcsname\else\PENDING\fi}
-\IfFileExists{../results/numbers.tex}{\input{../results/numbers.tex}}{%
-  \IfFileExists{results/numbers.tex}{\input{results/numbers.tex}}{}}
+% Built from paper/ or from the repository root, so try both.
+\newcommand{\loadnumbers}[1]{%
+  \IfFileExists{../results/#1}{\input{../results/#1}}{%
+    \IfFileExists{results/#1}{\input{results/#1}}{}}}
+\loadnumbers{numbers.tex}
+% One file per backbone, written by
+%   scripts/analyze_seeds.py --model-tag <tag> --macro-prefix B<name> \
+%       --tex-macros results/numbers-<name>.tex
+% Without these lines the prefixed macros are never read and Table 12 stays red
+% however long the backbone runs take -- the cells are named and produced, and
+% simply never loaded.
+\loadnumbers{numbers-qwenbig.tex}
+\loadnumbers{numbers-llama.tex}
+\loadnumbers{numbers-mistral.tex}
 
 \begin{document}
 \maketitle
