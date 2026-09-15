@@ -1715,6 +1715,14 @@ is an artifact of one lucky validation point --- and because the single-seed ver
 of this manuscript quoted it. Where the two disagree, the seed-level statistic in
 Section~\ref{sec:res:seeds} governs.
 
+The contrast between the two is the point. Table~\ref{tab:within} separates every
+$\AH$ comparison at $t_7$ between $\num{WTsignedpermutedacc}$ and
+$\num{WTsigneduniformacc}$, which reads as decisive and is not: the same gap sits at
+the same order as the run-to-run spread we measure in
+Section~\ref{sec:res:seeds}. A statistic can be this confident about a trajectory
+and say nothing about a re-run, which is exactly why we moved it out of the main
+text.
+
 \begin{table}[h]
 \centering
 \small
@@ -1728,9 +1736,12 @@ STEER-F $-$ \textsc{uniform}  & \num{Wsigneduniformacc}  & \num{WTsigneduniforma
 STEER-F $-$ \textsc{permuted} & \num{Wsignedpermutedacc} & \num{WTsignedpermutedacc} \\
 \bottomrule
 \end{tabular}
-\caption{Within-run stability over the eight converged-window validation points of a
-single run. Not an estimate of run-to-run variation; see
-Section~\ref{sec:res:seeds}.}
+\caption{Within-run stability over the eight converged-window validation points of
+seed~$\num{Wseed}$. The points are consecutive validations of one run and are
+therefore serially correlated, so $\mathrm{df}=7$ is generous and these $t$ values
+are not an estimate of run-to-run variation; see Section~\ref{sec:res:seeds} for
+that. Majority-vote versions of the same four rows separate at
+$\num{WTsignedsteermaj}$ to $\num{WTsigneduniformmaj}$.}
 \label{tab:within}
 \end{table}
 

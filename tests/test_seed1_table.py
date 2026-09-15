@@ -7,6 +7,7 @@ and the one arm whose log is not in git quietly acquired the same standing as
 the five that are. These tests pin all three.
 """
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -269,3 +270,54 @@ def test_arm_means_use_only_the_seeds_every_arm_has():
     body = (ROOT / "scripts" / "analyze_seeds.py").read_text()
     assert "set.intersection" in body
     assert "--unbalanced" in body
+
+
+def test_the_within_run_appendix_gets_its_own_seed_and_stays_on_it(tmp_path):
+    """Appendix D reports one run's eight points, and must name which run.
+
+    The campaign is still filling in, so the seed it uses has to be chosen by a
+    rule rather than by whatever happens to be present -- otherwise the
+    appendix silently changes run between drafts. The rule is the lowest seed
+    both arms have.
+    """
+    out = tmp_path / "out"
+    logs = tmp_path / "logs"
+    logs.mkdir()
+
+    def write(run, per_step):
+        body = []
+        for step in range(1, 111):
+            line = f"step:{step} - global_seqlen: 1"
+            if step % 10 == 0:
+                a = per_step(step)
+                line += (f" - val-core/aime_2024_dapo_boxed/acc/mean@32:{a:.3f}"
+                         f" - val-core/aime_2024_dapo_boxed/acc/maj@32/mean:{a:.3f}")
+            body.append(line)
+        (logs / f"train-{run}.log").write_text("\n".join(body) + "\n")
+
+    for seed, base in ((1, 0.10), (2, 0.30)):
+        write(f"grpo-{TAG}-s{seed}", lambda s, b=base: b)
+        write(f"steer-f-{TAG}-s{seed}-tree-rollout", lambda s, b=base: b + 0.02)
+
+    r = subprocess.run([sys.executable, str(ROOT / "scripts" / "analyze_seeds.py"),
+                        "--logs", str(logs), "--out", str(out)],
+                       capture_output=True, text=True, cwd=str(ROOT))
+    assert r.returncode == 0, r.stderr
+    macros = dict(re.findall(r"\\providecommand\{\\([A-Za-z]+)\}\{([^}]*)\}",
+                             (out / "numbers.tex").read_text()))
+    assert macros["Wseed"] == "1", "the lowest shared seed, not the newest"
+    assert macros["Wsignedgrpoacc"] == "+.0200"
+    assert macros["WNsignedgrpoacc"] == "8", "eight converged-window points"
+    # constant difference -> zero spread -> an infinite t, not a crash
+    assert "WTsignedgrpoacc" in macros
+
+
+def test_appendix_d_has_no_pending_slot_left():
+    """The eight slots the logs can already answer."""
+    numbers = (ROOT / "results" / "numbers.tex").read_text()
+    macros = dict(re.findall(r"\\providecommand\{\\([A-Za-z]+)\}\{([^}]*)\}", numbers))
+    for arm in ("grpo", "steer", "uniform", "permuted"):
+        for pre in ("W", "WT"):
+            k = f"{pre}signed{arm}acc"
+            assert k in macros, f"{k} is not emitted"
+            assert macros[k] != "\\PENDING", f"{k} is still pending"

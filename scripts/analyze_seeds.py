@@ -334,6 +334,10 @@ def main(argv=None) -> int:
 
     # ------------------------------------------------------------ per seed
     per_seed: dict[str, dict[int, dict[str, float]]] = defaultdict(dict)
+    # The same runs kept step by step. The seed-level statistics collapse each
+    # run to one number, which is right for the question the paper asks, but
+    # the within-run appendix needs the eight points back.
+    per_step: dict[str, dict[int, dict[int, dict[str, float]]]] = defaultdict(dict)
     missing = []
     for arm in MAIN_ARMS:
         for seed in range(1, 6):
@@ -341,13 +345,43 @@ def main(argv=None) -> int:
             if f is None:
                 missing.append(f"{arm} s{seed}")
                 continue
-            agg = plateau(parse_log(f), lo, hi)
+            steps = parse_log(f)
+            agg = plateau(steps, lo, hi)
             if agg:
                 agg["log"] = f.name
                 agg["stack"] = offloaded(f)
                 per_seed[arm][seed] = agg
+                per_step[arm][seed] = {k: v for k, v in steps.items()
+                                       if lo <= k <= hi and "acc" in v}
             else:
                 missing.append(f"{arm} s{seed} (no validation point in {lo}-{hi})")
+
+    # ------------------------------------------------- within-run stability
+    # A paired t over the validation points of ONE run. It asks whether a gap
+    # holds along a single trajectory, which is a different and narrower
+    # question than whether it survives re-running -- the points are
+    # consecutive validations of one run and are not independent, so df = 7 is
+    # generous. The manuscript reports it in an appendix, explicitly not as an
+    # estimate of run-to-run uncertainty, and only because earlier drafts
+    # quoted it. The seed to use is the lowest one both arms have, so the
+    # choice does not move as the campaign fills in.
+    within: dict[str, dict[str, float]] = {}
+    within_seed = None
+    for a, b in CONTRASTS:
+        shared = sorted(set(per_step.get(a, {})) & set(per_step.get(b, {})))
+        if not shared:
+            continue
+        seed = shared[0]
+        within_seed = seed if within_seed is None else min(within_seed, seed)
+        sa, sb = per_step[a][seed], per_step[b][seed]
+        pts = sorted(set(sa) & set(sb))
+        if len(pts) < 2:
+            continue
+        for metric in ("acc", "maj"):
+            d = [sa[t][metric] - sb[t][metric] for t in pts
+                 if metric in sa[t] and metric in sb[t]]
+            if len(d) >= 2:
+                within[f"{a}{b}{metric}"] = paired(d)
 
     if not per_seed:
         sys.exit(f"[analyze] no parsable training log under {log_dir}")
@@ -526,6 +560,12 @@ def main(argv=None) -> int:
             fh.write(mac(f"R{arm}len", (sum(v) / len(v)) if v else None, "{:.0f}"))
             v = [r["s_per_step"] for r in rows if "s_per_step" in r]
             fh.write(mac(f"R{arm}cost", (sum(v) / len(v)) if v else None, "{:.0f}"))
+        fh.write(mac("Wseed", within_seed, "{:d}") if within_seed
+                 else mac("Wseed", None))
+        for key, st in sorted(within.items()):
+            fh.write(mac(f"W{key}", st["mean"], "{:+.4f}"))
+            fh.write(mac(f"WT{key}", st["t"], "{:+.2f}"))
+            fh.write(mac(f"WN{key}", st["n"], "{:d}"))
         seen = set()
         for name, metric, st in contrast_rows:
             a, b = name.split(" - ")
