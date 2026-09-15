@@ -361,3 +361,100 @@ def test_force_overwrites_a_longer_log_when_asked(box, tmp_path):
     kept = sh(["git", "show", f"paper:logs/experiments/train-grpo-{TAG}-s2.log"],
               origin).stdout
     assert "step:110" not in kept
+
+
+# ------------------------------------------------ learning from the other box
+def peer_box(origin, tmp_path, name="pod2"):
+    other = tmp_path / name
+    subprocess.run(["git", "clone", str(origin), str(other)], check=True, capture_output=True)
+    for k, v in (("user.email", "t@t"), ("user.name", "t")):
+        sh(["git", "config", k, v], other)
+    shutil.copytree(ROOT / "run", other / "run")
+    sh(["git", "checkout", "-q", "-b", "work"], other)
+    # A real second box has been running for weeks on its own branch and has
+    # only its OWN logs on disk; a fresh clone of the log branch would already
+    # carry the peer's, which is not the situation --pull exists for.
+    logs = other / "logs" / "experiments"
+    if logs.is_dir():
+        shutil.rmtree(logs)
+    logs.mkdir(parents=True)
+    return other, logs
+
+
+def test_pull_teaches_a_box_what_the_other_finished(box, tmp_path):
+    """Two boxes sharing a campaign disagree about what is left.
+
+    Each queue reads logs/experiments on its own box, so on 2026-09-15 the
+    A100 listed all ten follow-up arms as remaining while the H100 had already
+    finished two. Starting that queue would have re-run 29 GPU-hours.
+    """
+    pod, origin, logs = box
+    make_log(logs, f"steer-f-{TAG}-s1-tree-rollout-lam0", 110)
+    assert run_publish(pod, logs, "--push").returncode == 0
+
+    other, logs2 = peer_box(origin, tmp_path)
+    assert not (logs2 / f"train-steer-f-{TAG}-s1-tree-rollout-lam0.log").is_file()
+    p = sh(["bash", SCRIPT, "--pull"], other, LOG_DIR=str(logs2))
+    assert p.returncode == 0, p.stdout + p.stderr
+    got = logs2 / f"train-steer-f-{TAG}-s1-tree-rollout-lam0.log"
+    assert got.is_file(), p.stdout
+    assert "step:110" in got.read_text()
+
+
+def test_pull_never_overwrites_a_run_this_box_got_further_on(box, tmp_path):
+    pod, origin, logs = box
+    make_log(logs, f"grpo-{TAG}-s2", 20)
+    run_publish(pod, logs, "--push")
+
+    other, logs2 = peer_box(origin, tmp_path)
+    make_log(logs2, f"grpo-{TAG}-s2", 110)          # this box is ahead
+    p = sh(["bash", SCRIPT, "--pull"], other, LOG_DIR=str(logs2))
+    assert p.returncode == 0, p.stderr
+    assert "left 1 alone" in p.stdout
+    assert "step:110" in (logs2 / f"train-grpo-{TAG}-s2.log").read_text()
+
+
+def test_pull_does_not_touch_a_log_a_trainer_is_writing(box, tmp_path):
+    pod, origin, logs = box
+    run = f"steer-{TAG}-s2"
+    make_log(logs, run, 110)
+    run_publish(pod, logs, "--push")
+
+    other, logs2 = peer_box(origin, tmp_path)
+    make_log(logs2, run, 5)                          # ours is behind, but live
+    fake = subprocess.Popen(
+        ["bash", "-c",
+         f'exec -a "python3 -m verl.trainer.main_ppo trainer.experiment_name={run}" sleep 30'])
+    try:
+        time.sleep(0.4)
+        p = sh(["bash", SCRIPT, "--pull"], other, LOG_DIR=str(logs2))
+        assert p.returncode == 0, p.stderr
+        assert "step:110" not in (logs2 / f"train-{run}.log").read_text()
+    finally:
+        fake.kill(); fake.wait()
+
+
+def test_a_finished_arm_is_not_called_live_by_a_sibling(box):
+    """The prefix trap, in the function publish_logs.sh asks.
+
+    Run names are prefixes of each other: steer-f-<tag>-s1-tree-rollout is a
+    prefix of every tree arm, and ...-lam0 of ...-lam0.1. A substring test
+    called a finished arm live whenever a sibling was training, which is why
+    the lam0 log never reached the branch.
+    """
+    pod, _, logs = box
+    base = f"steer-f-{TAG}-s1-tree-rollout"
+    make_log(logs, base, 110)
+    make_log(logs, f"{base}-lam0", 110)
+    fake = subprocess.Popen(
+        ["bash", "-c",
+         f'exec -a "python3 -m verl.trainer.main_ppo '
+         f'trainer.experiment_name={base}-lam0.1" sleep 30'])
+    try:
+        time.sleep(0.4)
+        p = run_publish(pod, logs)
+        assert "0 skipped as live" in p.stdout, p.stdout
+        assert f"train-{base}.log" in p.stdout
+        assert f"train-{base}-lam0.log" in p.stdout
+    finally:
+        fake.kill(); fake.wait()

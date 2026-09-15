@@ -6,6 +6,7 @@
 #   bash run/publish_logs.sh --push          # commit and push
 #   bash run/publish_logs.sh --done-only     # only runs that reached their last step
 #   bash run/publish_logs.sh --queue-logs    # also the campaign/followups drivers
+#   bash run/publish_logs.sh --pull          # bring the OTHER box's logs down
 #
 # The logs are the experiment record: every number in the manuscript is
 # recomputed from them (scripts/analyze_seeds.py, scripts/seed1_table.py
@@ -70,10 +71,11 @@ log_dir_guard () {
     return 1
 }
 
-PUSH=0; DONE_ONLY=0; QUEUE_LOGS=0; FORCE=0
+PUSH=0; DONE_ONLY=0; QUEUE_LOGS=0; FORCE=0; PULL=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --push)       PUSH=1 ;;
+        --pull)       PULL=1 ;;
         --done-only)  DONE_ONLY=1 ;;
         --queue-logs) QUEUE_LOGS=1 ;;
         --force)      FORCE=1 ;;
@@ -85,6 +87,69 @@ while [ $# -gt 0 ]; do
 done
 
 [ "${ALLOW_FOREIGN_LOGS:-0}" = "1" ] || log_dir_guard || exit 1
+
+# How far a log got, so two boxes holding the same run name cannot destroy
+# each other's work. On 2026-09-15 the H100 publish replaced four A100 logs
+# with its own dead stubs of the same name -- including a finished 1 MB GRPO
+# seed-2 run, overwritten by an 8 KB carcass from a start that failed in
+# seconds. Nothing was lost (git keeps the old blob) but the branch tip, which
+# is what every analysis reads, was wrong and said nothing about it.
+last_step_in () {   # <file> -> the highest optimisation step it recorded
+    grep -o 'step:[0-9]* - global_seqlen' "$1" 2>/dev/null \
+        | grep -o '[0-9]\+' | sort -n | tail -1
+}
+# run name from the file name, so train_log_done and trainer_pid_for can be
+# asked about it. train-<run>.log and the recovery chain's train-<run>_<tag>.log.
+run_of () {   # <path> -> run name
+    local b; b="$(basename "$1" .log)"
+    b="${b#train-}"
+    printf '%s' "${b%%_*}"
+}
+# --- pull: teach this box what the other one has already finished -----------
+# A queue decides what is left by reading logs/experiments on the box it runs
+# on, so two boxes sharing a campaign disagree about what is done. On
+# 2026-09-15 the A100 listed all ten follow-up arms as remaining while the
+# H100 had already finished two of them: starting that queue would have
+# re-run 29 GPU-hours of completed work.
+#
+# Only files this box does not have, or has a SHORTER version of, are taken --
+# the same comparison the push side makes, for the same reason.
+if [ "${PULL}" = "1" ]; then
+    echo "pulling logs from origin/${BRANCH} into ${LOG_DIR}"
+    for i in 1 2 3 4; do
+        git fetch origin "${BRANCH}" && break
+        echo "fetch failed, retry ${i}"; sleep $(( 2 ** i ))
+    done
+    peer="$(mktemp -d)"
+    trap 'rm -rf "${peer}"' EXIT
+    if ! git archive "origin/${BRANCH}" logs/experiments 2>/dev/null \
+         | tar -x -C "${peer}" 2>/dev/null; then
+        echo "REFUSE: could not read logs/experiments from origin/${BRANCH}." >&2
+        exit 1
+    fi
+    took=0; kept=0
+    mkdir -p "${LOG_DIR}"
+    for f in "${peer}"/logs/experiments/train-*.log; do
+        [ -f "${f}" ] || continue
+        dest="${LOG_DIR}/$(basename "${f}")"
+        if [ -f "${dest}" ]; then
+            mine="$(last_step_in "${dest}")";  mine=${mine:-0}
+            theirs="$(last_step_in "${f}")";   theirs=${theirs:-0}
+            # Never overwrite a run this box got further on, and never touch a
+            # log a trainer here is still appending to.
+            rn="$(run_of "${dest}")"
+            if [ "${mine}" -ge "${theirs}" ] || run_is_live "${rn}"; then
+                kept=$(( kept + 1 )); continue
+            fi
+        fi
+        cp "${f}" "${dest}"
+        printf '   + %-58s step %s\n' "$(basename "${f}")" "$(last_step_in "${f}")"
+        took=$(( took + 1 ))
+    done
+    echo "took ${took} log(s), left ${kept} alone (this box is at or ahead)."
+    echo "Re-run the queues with DRY=1 to see what is actually left now."
+    exit 0
+fi
 
 # --- what box is this? ------------------------------------------------------
 # The commit message has to say, because the same arm name means different
@@ -120,13 +185,6 @@ if [ ${#candidates[@]} -eq 0 ]; then
     exit 0
 fi
 
-# run name from the file name, so train_log_done and trainer_pid_for can be
-# asked about it. train-<run>.log and the recovery chain's train-<run>_<tag>.log.
-run_of () {   # <path> -> run name
-    local b; b="$(basename "$1" .log)"
-    b="${b#train-}"
-    printf '%s' "${b%%_*}"
-}
 
 # A run's expected final step. steps_for_arm knows the one exception
 # (grpo-long, the compute-matched control, runs to 200), so ask it by arm
@@ -282,16 +340,6 @@ git -C "${WORKTREE}" rebase -q "origin/${BRANCH}" || {
     exit 1
 }
 
-# How far a log got, so two boxes holding the same run name cannot destroy
-# each other's work. On 2026-09-15 the H100 publish replaced four A100 logs
-# with its own dead stubs of the same name -- including a finished 1 MB GRPO
-# seed-2 run, overwritten by an 8 KB carcass from a start that failed in
-# seconds. Nothing was lost (git keeps the old blob) but the branch tip, which
-# is what every analysis reads, was wrong and said nothing about it.
-last_step_in () {   # <file> -> the highest optimisation step it recorded
-    grep -o 'step:[0-9]* - global_seqlen' "$1" 2>/dev/null \
-        | grep -o '[0-9]\+' | sort -n | tail -1
-}
 
 mkdir -p "${WORKTREE}/logs/experiments"
 staged=(); clobber=()

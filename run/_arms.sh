@@ -559,11 +559,34 @@ is_busy () { [ -n "$(busy_pids)" ]; }
 # checkpoint mid-write gives a corrupt backup that still passes verification)
 # and publish_logs.sh (committing a log that is still being appended to freezes
 # a partial record into git). One definition so they cannot disagree.
-trainer_pid_for () {   # <run-name> -> pids whose command line carries it
-    local pid cmd
+trainer_pid_for () {   # <run-name> -> pids training exactly this run
+    # The name has to match the trainer's experiment_name EXACTLY, because the
+    # run names are prefixes of one another by construction -- the same trap
+    # train_log_done above was fixed for:
+    #
+    #     steer-f-<tag>-s1-tree-rollout          is a prefix of every tree arm
+    #     steer-f-<tag>-s1-tree-rollout-lam0     is a prefix of -lam0.1, -lam0.5
+    #
+    # A substring test therefore called the finished signed arm "live" whenever
+    # any sibling was training. On 2026-09-15 that is why publish_logs.sh
+    # skipped the lam0 and lam0.1 logs as still being written: they were
+    # finished, and their names are prefixes of the arm that was running. Two
+    # completed runs stayed on one box.
+    local pid cmd name
     for pid in $(busy_pids); do
         cmd="$(tr '\0' ' ' < "/proc/${pid}/cmdline" 2>/dev/null || true)"
-        case "${cmd}" in *"$1"*) echo "${pid}" ;; esac
+        name="$(printf '%s' "${cmd}" \
+                | grep -oE 'trainer\.experiment_name=[^ ]+' | head -1)"
+        if [ -n "${name}" ]; then
+            [ "${name#trainer.experiment_name=}" = "$1" ] && echo "${pid}"
+            continue
+        fi
+        # No experiment_name on this command line (a wrapper script, or the
+        # chain runner). Fall back to a whole-word test rather than a bare
+        # substring: the name must not be followed by more name.
+        case " ${cmd} " in
+            *" $1 "*|*" $1="*|*"=$1 "*) echo "${pid}" ;;
+        esac
     done
 }
 run_is_live () { [ -n "$(trainer_pid_for "$1")" ]; }
