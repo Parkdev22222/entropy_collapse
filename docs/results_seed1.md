@@ -19,7 +19,7 @@ python3 scripts/seed1_table.py --git-ref origin/paper
 
 | arm | lam | rollout | signal | acc@32 | maj@32 | uplift | entropy | resp len | step-0 acc | source |
 |---|---|---|---|---|---|---|---|---|---|---|
-| **GRPO** | - | plain | none (`vanilla`) | .1350 | .1962 | .0612 | .1491 | 964 | .0390 | `seed1_grpo_transcript.json -- NOT IN GIT` |
+| **GRPO** | - | plain | none (`vanilla`) | .1350 | .1962 | .0612 | .1491 | 964 | .0390 | `train-grpo-Qwen2.5-Math-1.5B-s1.log` |
 | **STEER** | 0 | plain | local Omega only | .1330 | .1984 | .0654 | .1214 | 988 | .0430 | `train-steer-Qwen2.5-Math-1.5B-s1.log` |
 | **uniform** | .25 | tree | uniform decay on the support | .1313 | .1953 | .0640 | .1374 | 946 | .0390 | `train-steer-f-Qwen2.5-Math-1.5B-s1-tree-rollout-uniform.log` |
 | **permuted** | .25 | tree | A_H shuffled among siblings | .1370 | .2094 | .0724 | .1190 | 960 | .0390 | `train-steer-f-Qwen2.5-Math-1.5B-s1-tree-rollout-permuted.log` |

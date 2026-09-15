@@ -121,12 +121,12 @@ A_H(y_t) = Ĥ_togo(s_t ⊕ y_t) − mean over siblings sharing prefix s_t
 | permuted | .1370 | .2094 | .0724 | .1190 | 960.2 | 1492 |
 | **STEER-F** | **.1495** | **.2349** | **.0854** | .1210 | 983.9 | 1516 |
 
-⚠️ **GRPO 행은 커밋된 로그로 검증되지 않았다** — 학습 로그가 어느 브랜치에도 없다.
-사용자가 2026-09-15 세션에 붙여넣은 로그에서 읽은 값이고,
-`docs/seed1_grpo_transcript.json`에 step별로 보존돼 있다(그 파일이 없으면
-세션과 함께 사라진다). `seed1_table.py`는 이 행을 항상 `NOT IN GIT`으로
-표시하고, `logs/experiments/train-grpo-Qwen2.5-Math-1.5B-s1.log`가 들어오는
-순간 그쪽을 우선한다. pod에서 push해야 `\num{}` 매크로가 `[pending]`을 벗는다.
+✅ **해소됨 (2026-09-15).** GRPO 학습 로그가 `origin/paper`에 올라왔다(`d6e603f`,
+`train-grpo-Qwen2.5-Math-1.5B-s1.log`, 7,097줄, `loss_mode: vanilla`, step 110 완주).
+`seed1_table.py`가 그 로그에서 재계산한 값이 붙여넣기 기록과 **자리수까지 일치한다**
+(.1350 / .1962). 여섯 arm 전부 커밋된 로그에서 나온다.
+`docs/seed1_grpo_transcript.json`은 남겨둔다 — 이제 쓰이지는 않지만, 값이 로그와
+일치했다는 기록이다.
 
 ### 대조 (8개 plateau step 짝지음) — 논문 Table 2
 
@@ -375,10 +375,11 @@ STEER의 min–max 그룹이 달라진다 → **박스 하나에 시드 하나�
 
 ## 7. 미해결 항목
 
-1. **GRPO 학습 로그가 어느 브랜치에도 없다.** pod에서 `paper` 브랜치로 push해야
-   논문 표의 GRPO 행이 `[pending]`을 벗는다. **제일 값싸고 제일 중요하다.**
-   수치 자체는 `docs/seed1_grpo_transcript.json`에 보존됐지만, 그건 붙여넣기
-   기록이지 재계산 가능한 출처가 아니다 — 나머지 다섯 arm과 지위가 다르다.
+1. ~~**GRPO 학습 로그가 어느 브랜치에도 없다.**~~ **해소 (2026-09-15).**
+   `d6e603f`로 `origin/paper`에 올라왔고 `seed1_table.py`가 그 로그에서 재계산한다.
+   같은 푸시로 seed 2의 GRPO(완주)와 STEER(step 47 OOM)도 들어왔다.
+   로그를 올리는 절차는 `bash run/publish_logs.sh --push`이고
+   `docs/RUNBOOK.md`의 "로그를 git에 올리기" 절에 있다.
 2. **`checkpoints/mtp_calibration_Qwen2.5-Math-1.5B-paper.json` 회수** — 원고의 `a_k`
    수치 정합(발견된 4번째 오류). pod에서만 가능.
 3. **seed 1에 중복 draw가 생겼다** — STEER와 signed가 각각 두 런(기존, `_0905`).

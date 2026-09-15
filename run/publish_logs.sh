@@ -247,9 +247,38 @@ elif [ ! -d "${WORKTREE}/.git" ] && [ ! -f "${WORKTREE}/.git" ]; then
         git worktree add --track -b "${BRANCH}" "${WORKTREE}" "origin/${BRANCH}" || exit 1
     fi
 fi
-git -C "${WORKTREE}" pull --rebase origin "${BRANCH}" || {
+# A run that died between `git add` and `git commit` leaves the index dirty,
+# and every later run then failed at the rebase with "Your index contains
+# uncommitted changes" -- permanently, because nothing here cleaned up after
+# itself. The worktree is scratch space this script creates and only this
+# script writes to, so reset it. Commits survive: an earlier run that committed
+# but could not push keeps its work and pushes it below.
+#
+# NEVER when WORKTREE is ROOT. That branch is taken when the checkout is
+# already on ${BRANCH}, and it is the user's real tree -- resetting it would
+# throw away whatever they have in progress.
+if [ "${WORKTREE}" != "${ROOT}" ]; then
+    git -C "${WORKTREE}" reset -q --hard HEAD 2>/dev/null || true
+    git -C "${WORKTREE}" clean -qfd logs/experiments 2>/dev/null || true
+elif ! git -C "${WORKTREE}" diff --quiet || ! git -C "${WORKTREE}" diff --cached --quiet; then
+    echo "REFUSE: ${WORKTREE} has uncommitted changes and it is your working" >&2
+    echo "        tree, not a scratch worktree -- this script will not reset it." >&2
+    echo "        Commit or stash them, then re-run." >&2
+    exit 1
+fi
+
+# rebase, not `pull --rebase`: the fetch above already ran.
+git -C "${WORKTREE}" rebase -q "origin/${BRANCH}" || {
+    git -C "${WORKTREE}" rebase --abort 2>/dev/null || true
     echo "REFUSE: could not rebase ${WORKTREE} onto origin/${BRANCH}." >&2
-    echo "        Resolve it there, then re-run. The training tree is untouched." >&2
+    echo "        The training tree is untouched. To see which case this is:" >&2
+    echo "          git -C ${WORKTREE} log --oneline -2" >&2
+    echo "          git -C ${WORKTREE} status --short" >&2
+    echo "        A commit of your own that has not been pushed:" >&2
+    echo "          git -C ${WORKTREE} pull --rebase origin ${BRANCH} && \\" >&2
+    echo "            git -C ${WORKTREE} push origin ${BRANCH}" >&2
+    echo "        Nothing committed (the usual case -- a half-finished run):" >&2
+    echo "          git -C ${WORKTREE} reset --hard HEAD, then re-run this." >&2
     exit 1
 }
 
@@ -278,7 +307,10 @@ git -C "${WORKTREE}" commit -q -m "${msg}" || exit 1
 for i in 1 2 3 4; do
     git -C "${WORKTREE}" push origin "${BRANCH}" && break
     echo "push failed, retry ${i}"; sleep $(( 2 ** i ))
-    git -C "${WORKTREE}" pull --rebase origin "${BRANCH}" || true
+    # The other box pushed while we were committing; rebase onto it and retry.
+    git -C "${WORKTREE}" fetch origin "${BRANCH}" || true
+    git -C "${WORKTREE}" rebase -q "origin/${BRANCH}" \
+        || git -C "${WORKTREE}" rebase --abort 2>/dev/null || true
 done
 echo
 git -C "${WORKTREE}" log --oneline -1

@@ -93,6 +93,22 @@ def test_step_zero_is_read_even_though_parse_log_skips_it(logs):
     assert step_zero_acc(f) == pytest.approx(0.039)
 
 
+def logs_without_grpo(logs, tmp_path):
+    """A copy of the log set with the GRPO arm removed.
+
+    These tests used to rely on origin/paper simply not having that log. It
+    landed on 2026-09-15 (d6e603f), and the tests broke -- a test that asserts
+    about what a remote does NOT contain is a test with an expiry date. Build
+    the condition instead.
+    """
+    d = tmp_path / "no-grpo"
+    d.mkdir(exist_ok=True)
+    for f in logs.glob("train-*.log"):
+        if f.name.startswith("train-grpo-"):
+            continue
+        (d / f.name).write_bytes(f.read_bytes())
+    return d
+
 def run_table(tmp_path, log_dir, transcript=None):
     out = tmp_path / "out.md"
     cmd = [sys.executable, str(ROOT / "scripts" / "seed1_table.py"),
@@ -104,7 +120,7 @@ def run_table(tmp_path, log_dir, transcript=None):
 
 def test_a_missing_arm_is_marked_not_invented(tmp_path, logs):
     """No GRPO log and no transcript: the row says MISSING and the exit is 0."""
-    p, out = run_table(tmp_path, logs)
+    p, out = run_table(tmp_path, logs_without_grpo(logs, tmp_path))
     assert p.returncode == 0, p.stderr
     body = out.read_text()
     assert "| **GRPO** | - | plain | none (`vanilla`) | MISSING" in body
@@ -112,7 +128,8 @@ def test_a_missing_arm_is_marked_not_invented(tmp_path, logs):
 
 
 def test_the_transcript_row_is_labelled_as_not_in_git(tmp_path, logs):
-    p, out = run_table(tmp_path, logs, ROOT / "docs" / "seed1_grpo_transcript.json")
+    p, out = run_table(tmp_path, logs_without_grpo(logs, tmp_path),
+                       ROOT / "docs" / "seed1_grpo_transcript.json")
     assert p.returncode == 0, p.stderr
     body = out.read_text()
     row = [l for l in body.splitlines() if l.startswith("| **GRPO**")][0]
@@ -156,3 +173,21 @@ def test_no_empty_box_crash(tmp_path):
     p, _ = run_table(tmp_path, empty)
     assert p.returncode == 0, p.stderr
     assert "nothing to write" in p.stdout
+
+
+def test_the_grpo_log_is_now_on_the_branch_and_matches_the_transcript(logs):
+    """d6e603f published it. The transcript said .1350/.1962; so does the log.
+
+    This is the check that made the transcript worth keeping: a number nobody
+    could recompute turned out to be right when the source finally arrived.
+    """
+    f = logs / ("train-grpo-%s-s1.log" % TAG)
+    if not f.is_file():
+        pytest.skip("the GRPO seed-1 log is not on origin/paper (yet)")
+    agg = plateau(parse_log(f), 40, 110)
+    assert agg["n_val_points"] == 8
+    assert round(agg["acc"], 4) == 0.1350
+    assert round(agg["maj"], 4) == 0.1962
+    d = json.loads((ROOT / "docs" / "seed1_grpo_transcript.json").read_text())
+    win = [d["val"][str(s)] for s in range(40, 111, 10)]
+    assert round(sum(v["acc"] for v in win) / len(win), 4) == round(agg["acc"], 4)

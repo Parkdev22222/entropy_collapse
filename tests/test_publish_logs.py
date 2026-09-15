@@ -60,6 +60,10 @@ def box(tmp_path):
     sh(["git", "add", "README.md"], pod)
     sh(["git", "commit", "-m", "init"], pod)
     sh(["git", "push", "-u", "origin", "paper"], pod)
+    # A training box is never sitting on the log branch: it is on whatever
+    # branch the code came from. That is what makes the worktree path the
+    # normal one, and the ROOT path (already on `paper`) the exception.
+    sh(["git", "checkout", "-q", "-b", "work"], pod)
     return pod, origin, logs
 
 
@@ -222,3 +226,90 @@ def test_a_log_dir_outside_the_checkout_is_refused(box, tmp_path):
 
     p = sh(["bash", SCRIPT], pod, LOG_DIR=str(foreign), ALLOW_FOREIGN_LOGS="1")
     assert p.returncode == 0, "the escape hatch still exists for fixtures"
+
+
+# ------------------------------------------------- recovering from itself
+def wt_of(pod):
+    return Path(pod).parent / "entropy_logs_paper"
+
+
+def test_an_interrupted_run_does_not_wedge_the_next_one(box):
+    """The H100 failure of 2026-09-15.
+
+    A run that dies between `git add` and `git commit` leaves the worktree's
+    index dirty, and every later run then died at the rebase with "Your index
+    contains uncommitted changes" -- permanently, because nothing cleaned up.
+    """
+    pod, origin, logs = box
+    make_log(logs, f"grpo-{TAG}-s2", 110)
+    run_publish(pod, logs, "--push")          # creates the worktree
+    wt = wt_of(pod)
+    assert wt.is_dir()
+
+    # exactly what an interrupted run leaves behind
+    (wt / "logs" / "experiments" / f"train-steer-{TAG}-s2.log").write_text("half\n")
+    sh(["git", "add", "logs/experiments"], wt)
+    assert sh(["git", "diff", "--cached", "--quiet"], wt).returncode != 0
+
+    make_log(logs, f"steer-{TAG}-s2", 110)
+    p = run_publish(pod, logs, "--push")
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert "REFUSE" not in p.stderr
+    tree = sh(["git", "ls-tree", "-r", "--name-only", "paper"], origin).stdout
+    assert f"logs/experiments/train-steer-{TAG}-s2.log" in tree
+    # and the real log went up, not the half-written stand-in
+    blob = sh(["git", "show", f"paper:logs/experiments/train-steer-{TAG}-s2.log"],
+              origin).stdout
+    assert "half" not in blob and "step:110" in blob
+
+
+def test_a_commit_that_was_never_pushed_survives_the_cleanup(box):
+    """reset --hard HEAD keeps commits; only the index and worktree go back."""
+    pod, origin, logs = box
+    make_log(logs, f"grpo-{TAG}-s2", 110)
+    run_publish(pod, logs, "--push")
+    wt = wt_of(pod)
+
+    # a commit made but not pushed, plus leftover staging on top
+    (wt / "logs" / "experiments" / f"train-steer-{TAG}-s3.log").write_text("step:110 - x\n")
+    sh(["git", "add", "logs/experiments"], wt)
+    sh(["git", "commit", "-m", "an unpushed commit"], wt)
+    (wt / "logs" / "experiments" / "stray.log").write_text("leftover\n")
+    sh(["git", "add", "logs/experiments"], wt)
+
+    make_log(logs, f"steer-{TAG}-s4", 110)
+    p = run_publish(pod, logs, "--push")
+    assert p.returncode == 0, p.stdout + p.stderr
+    tree = sh(["git", "ls-tree", "-r", "--name-only", "paper"], origin).stdout
+    assert f"logs/experiments/train-steer-{TAG}-s3.log" in tree, \
+        "the unpushed commit must reach the remote, not be discarded"
+    assert "stray.log" not in tree, "the leftover staging must not"
+
+
+def test_it_never_resets_the_users_own_tree(box):
+    """The WORKTREE == ROOT branch is the user's checkout, not scratch space."""
+    pod, _, logs = box
+    make_log(logs, f"grpo-{TAG}-s2", 110)
+    sh(["git", "checkout", "-q", "paper"], pod)   # take the ROOT path
+    precious = Path(pod) / "README.md"
+    precious.write_text("work in progress I have not committed\n")
+    p = run_publish(pod, logs, "--push")
+    assert p.returncode == 1
+    assert "will not reset it" in p.stderr
+    assert precious.read_text() == "work in progress I have not committed\n"
+
+
+def test_the_refusal_names_the_recovery_command(box):
+    """A stuck operator must not have to improvise on the results branch."""
+    pod, _, logs = box
+    make_log(logs, f"grpo-{TAG}-s2", 110)
+    run_publish(pod, logs, "--push")
+    wt = wt_of(pod)
+    # a genuine conflict: the same path with different content on both sides
+    sh(["git", "checkout", "-q", "-b", "side"], wt)
+    (wt / "logs" / "experiments" / f"train-grpo-{TAG}-s2.log").write_text("theirs\n")
+    sh(["git", "add", "-A"], wt)
+    sh(["git", "commit", "-m", "diverge"], wt)
+    body = (ROOT / "run" / "publish_logs.sh").read_text()
+    assert "reset --hard HEAD, then re-run this." in body
+    assert "pull --rebase origin ${BRANCH} &&" in body
