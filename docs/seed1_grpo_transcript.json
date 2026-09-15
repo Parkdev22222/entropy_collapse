@@ -1,0 +1,46 @@
+{
+  "_why": [
+    "The GRPO seed-1 training log is not in any branch of this repository.",
+    "Every other seed-1 arm is recomputed from a committed log; this arm is not,",
+    "and the manuscript's headline contrast is drawn against it. The numbers",
+    "below were read from the log the user pasted into the session on 2026-09-15",
+    "and are kept here so they survive the session. They are NOT a substitute for",
+    "the log: scripts/seed1_table.py prefers the real log the moment one lands at",
+    "logs/experiments/train-grpo-Qwen2.5-Math-1.5B-s1.log, and marks every row it",
+    "takes from this file as transcript-sourced."
+  ],
+  "arm": "grpo",
+  "seed": 1,
+  "run_name": "grpo-Qwen2.5-Math-1.5B-s1",
+  "source": "session transcript 2026-09-15 (log not in git)",
+  "config": {
+    "loss_mode": "vanilla",
+    "data.seed": 1,
+    "total_training_steps": 110,
+    "n_gpus_per_node": 2,
+    "tensor_model_parallel_size": 2,
+    "save_best_only": false,
+    "save_after": 80
+  },
+  "val": {
+    "0":   {"acc": 0.039, "maj": 0.035},
+    "10":  {"acc": 0.075, "maj": 0.127},
+    "20":  {"acc": 0.120, "maj": 0.176},
+    "30":  {"acc": 0.108, "maj": 0.195},
+    "40":  {"acc": 0.144, "maj": 0.236},
+    "50":  {"acc": 0.120, "maj": 0.204},
+    "60":  {"acc": 0.126, "maj": 0.178},
+    "70":  {"acc": 0.130, "maj": 0.200},
+    "80":  {"acc": 0.135, "maj": 0.182},
+    "90":  {"acc": 0.136, "maj": 0.191},
+    "100": {"acc": 0.132, "maj": 0.171},
+    "110": {"acc": 0.157, "maj": 0.208}
+  },
+  "plateau_only": {
+    "_note": "per-step values were not transcribed for these; the window means were",
+    "window": [40, 110],
+    "entropy": 0.1491,
+    "resp_len": 963.9,
+    "s_per_step": 990.0
+  }
+}
