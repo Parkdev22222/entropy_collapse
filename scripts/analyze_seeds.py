@@ -84,6 +84,25 @@ def parse_log(path: Path) -> dict[int, dict[str, float]]:
     return out
 
 
+OFFLOAD_RE = re.compile(r"'param_offload':\s*(True|False)")
+
+
+def offloaded(path: Path) -> str:
+    """Did this run put params and the optimizer on the CPU?
+
+    It matters for reading a table, not for the method: OFFLOAD=1 is how the
+    queues recover from a CUDA OOM without touching ppo_micro_batch_size_per_gpu
+    (which IS the treatment -- it is STEER's min-max pool). But the AdamW update
+    then runs on CPU fp32, so such a seed is not bit-identical to its neighbours
+    even though it is the same algorithm. A reader should be able to see which
+    seeds that was, rather than find it in a queue log months later.
+    """
+    hits = OFFLOAD_RE.findall(path.read_text(errors="replace"))
+    if not hits:
+        return "?"
+    return "cpu" if hits[-1] == "True" else "gpu"
+
+
 def plateau(steps: dict[int, dict[str, float]], lo: int, hi: int) -> dict[str, float]:
     """Mean of each metric over the validation points inside [lo, hi].
 
@@ -251,6 +270,7 @@ def main(argv=None) -> int:
             agg = plateau(parse_log(f), lo, hi)
             if agg:
                 agg["log"] = f.name
+                agg["stack"] = offloaded(f)
                 per_seed[arm][seed] = agg
             else:
                 missing.append(f"{arm} s{seed} (no validation point in {lo}-{hi})")
@@ -262,13 +282,13 @@ def main(argv=None) -> int:
             "s_per_val_step", "branch_frac", "tw_mean", "n_val_points"]
 
     with (out_dir / "per_seed.tsv").open("w") as fh:
-        fh.write("arm\tseed\t" + "\t".join(cols) + "\tlog\n")
+        fh.write("arm\tseed\t" + "\t".join(cols) + "\tstack\tlog\n")
         for arm in MAIN_ARMS:
             for seed in sorted(per_seed.get(arm, {})):
                 r = per_seed[arm][seed]
                 fh.write(f"{arm}\t{seed}\t"
                          + "\t".join(f"{r[c]:.4f}" if c in r else "-" for c in cols)
-                         + f"\t{r['log']}\n")
+                         + f"\t{r.get('stack', '?')}\t{r['log']}\n")
 
     # ---------------------------------------------------------- arm means
     with (out_dir / "arm_means.tsv").open("w") as fh:

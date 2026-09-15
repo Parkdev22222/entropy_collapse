@@ -140,6 +140,29 @@ report () {
     done
     [ "${any}" = "0" ] && printf '  none -- every run that has a log got past step 1\n'
 
+    # A run that trained for hours and then hit a CUDA OOM is invisible above:
+    # last_step is not 0, so it is not a startup failure, and nothing else here
+    # looks at why an unfinished run stopped. One line each -- the full remedy
+    # is long and belongs in the queue log, not in a status sweep.
+    say "4b. anything that died on a CUDA OOM"
+    any=0
+    for s in ${seeds}; do
+        for a in ${arms}; do
+            rn="$(run_name_for "${a}" "${s}" 2>/dev/null)" || continue
+            log="$(newest_log "${rn}")"
+            [ -n "${log}" ] || continue
+            grep -qE 'OutOfMemoryError|CUDA out of memory' "${log}" 2>/dev/null || continue
+            train_log_done "${LOG_DIR}" "${rn}" "${STEPS}" && continue
+            any=1
+            printf '  %-46s OOM at step %s\n' "${rn}" "$(last_step "${rn}")"
+        done
+    done
+    if [ "${any}" = "0" ]; then
+        printf '  none\n'
+    else
+        printf '  full diagnosis:  . run/_arms.sh && diagnose_run_failure <log> <label> %s\n' "${STEPS}"
+    fi
+
     say "5. latest validation"
     local v
     v="$(grep -h 'val-core/aime_2024_dapo_boxed/acc/mean@32' "${LOG_DIR}"/train-*.log 2>/dev/null \

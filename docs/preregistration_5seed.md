@@ -67,6 +67,19 @@ missing, we say so rather than substituting the unpaired error.
   checkpoint, or a step-0 validation score outside `.030–.055` (which would mean a
   different initial checkpoint). Exclusions are listed in the paper with the reason.
 - A failed run is re-launched with the **same** seed, not a new one.
+- **An OOM re-launch may set `OFFLOAD=1`, and such a run is kept, not excluded.**
+  Added 2026-09-15, after the seed-2 STEER arm hit a CUDA OOM in
+  `update_policy`. The alternative fix — shrinking
+  `ppo_micro_batch_size_per_gpu` — is *not* available to us at any price: that
+  group is STEER's min–max pool, so a seed rescued that way would be a
+  different treatment from the seeds beside it. `OFFLOAD=1` moves the
+  parameters and optimizer to the CPU and leaves the objective, the pool and
+  every hyper-parameter untouched. It is not bit-identical (the AdamW update
+  then runs in CPU fp32), so the run is **marked**: `scripts/analyze_seeds.py`
+  reads `param_offload` out of each log and reports it as the `stack` column of
+  `per_seed.tsv`, and any table drawn from a mixed set says so. A re-launch
+  that also resumes from a mid-run checkpoint is likewise kept — the queue
+  writes optimizer state precisely so a crash costs steps rather than a run.
 - No seed is added after the results are seen. If the campaign is extended, the
   extension is reported as a separate, later set.
 

@@ -432,6 +432,95 @@ diagnose_startup_failure () {   # <log-file> <label>
     return 1
 }
 
+# --- why did a run that HAD started die? -------------------------------------
+# diagnose_startup_failure answers "did it ever reach step 1". That is the wrong
+# question for a run that trained for hours and then died, and until now the
+# queues asked no other: a CUDA OOM at step 47 printed nothing at all, and the
+# next pass re-ran the same configuration into the same wall.
+#
+# This classifies instead, and for an OOM it prints the levers that are actually
+# available -- which is narrower than it looks, because the two obvious ones are
+# both wrong here and someone rediscovers that every time:
+#
+#   ppo_micro_batch_size_per_gpu is STEER's min-max pool (run_steerf.sh:125).
+#   Shrinking it changes the METHOD, so a seed fixed that way is no longer the
+#   same treatment as the seeds beside it.
+#
+#   expandable_segments:True is what the CUDA error message itself suggests, and
+#   vLLM's sleep mode asserts against it at engine construction (pytorch#147851,
+#   run_steerf.sh:38-41). Following the error's advice kills the next run before
+#   it trains a single step.
+#
+# It deliberately does NOT call env_preflight: a run that reached step N proved
+# the environment imports, and preflight starts ray, which costs ~20 s per
+# failed run in a queue that may be failing in a row (task 22).
+oom_frame () {   # <log> -> "update_policy" | "compute_log_prob" | ""
+    # The last verl frame before the allocator gave up says which peak blew.
+    # They have different remedies, so guessing costs a 25 h run.
+    local f
+    f="$(grep -oE '(update_policy|compute_log_prob|update_actor|forecast_h_togo)' "$1" \
+         2>/dev/null | tail -1)"
+    case "${f}" in
+        update_policy|update_actor) echo "update_policy" ;;
+        compute_log_prob)           echo "compute_log_prob" ;;
+        *)                          echo "" ;;
+    esac
+}
+
+diagnose_run_failure () {   # <log-file> <label> [steps]
+    local log="$1" label="$2" want="${3:-110}" last step frame
+
+    [ -f "${log}" ] || { echo "[!] ${label}: no log at ${log}"; return 1; }
+
+    last="$(grep -o 'step:[0-9]* - global_seqlen' "${log}" 2>/dev/null | tail -1)"
+    step="${last#step:}"; step="${step% - global_seqlen}"
+
+    # Never started: that is the other function's question, and it owns the
+    # environment check.
+    if [ -z "${step}" ]; then
+        diagnose_startup_failure "${log}" "${label}"
+        return 1
+    fi
+
+    if grep -qE 'OutOfMemoryError|CUDA out of memory' "${log}" 2>/dev/null; then
+        frame="$(oom_frame "${log}")"
+        echo "[!] ${label}: CUDA OOM at step ${step}/${want}$([ "${frame}" != "" ] && echo " in ${frame}")."
+        printf '    last lines of %s:\n' "${log}"
+        tail -4 "${log}" 2>/dev/null | sed 's/^/      /'
+        echo "    The environment is fine -- it trained ${step} steps. This is a"
+        echo "    memory ceiling, and the sequence lengths that reach it vary run"
+        echo "    to run, so the same configuration can pass and then fail."
+        echo
+        echo "    What is safe to change (the treatment stays identical):"
+        echo "      OFFLOAD=1          optimizer + params to CPU, ~12 GiB back."
+        echo "                         Costs speed. The AdamW update then runs on"
+        echo "                         CPU fp32, so it is not bit-identical to a"
+        echo "                         seed that ran without it -- record which."
+        echo "      GPU_MEM_UTIL=0.45  shrinks vLLM's KV pool (default 0.6)."
+        if [ "${frame}" = "compute_log_prob" ]; then
+            echo "      LOGP_MBS=2         this OOM is in the log-prob pass, which"
+            echo "                         concatenates per-sequence results -- the"
+            echo "                         outputs are identical at any size."
+        fi
+        echo
+        echo "    What is NOT safe, however tempting:"
+        echo "      ppo_micro_batch_size_per_gpu   STEER's min-max runs over this"
+        echo "                                     group. Shrinking it changes the"
+        echo "                                     method (run_steerf.sh:125)."
+        echo "      PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True"
+        echo "                                     The CUDA error suggests it;"
+        echo "                                     vLLM sleep mode asserts against"
+        echo "                                     it and the run dies at engine"
+        echo "                                     construction (pytorch#147851)."
+        return 2        # 2 = OOM, so a caller can retry differently
+    fi
+
+    echo "[!] ${label}: died at step ${step}/${want} -- not a startup failure."
+    printf '    last lines of %s:\n' "${log}"
+    tail -6 "${log}" 2>/dev/null | sed 's/^/      /'
+    return 1
+}
+
 # --- is a trainer running? ---------------------------------------------------
 # `pgrep -f` matches whole command lines, so the shell that launched this script
 # matches too whenever the launch command mentions main_ppo. Excluding our own

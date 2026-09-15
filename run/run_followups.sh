@@ -49,7 +49,10 @@ SEED=${SEED:-1}
 STEPS=${STEPS:-110}
 LONG_STEPS=${LONG_STEPS:-200}      # grpo-long only: run past the wall-clock crossing
 LOG_DIR="${ROOT}/logs/experiments"
-MIN_FREE_GB=${MIN_FREE_GB:-20}
+# 30, not 20: a resumable checkpoint carries the optimizer state, so it is
+# ~25 GiB rather than 3.1 GiB. See the shared settings below.
+MIN_FREE_GB=${MIN_FREE_GB:-30}
+CKPT_ROOT="${ROOT}/checkpoints/STEER-F"
 DRY=${DRY:-0}
 REPO=${REPO:-}
 WAIT=${WAIT:-0}
@@ -158,7 +161,15 @@ topology_guard || exit 2
 
 # ---------------------------------------------------------- shared settings
 export SAVE_BEST_ONLY=True
-export SAVE_CONTENTS="['hf_model']"
+# A crash used to cost the whole run: ['hf_model'] writes no optimizer or rng
+# state, so trainer.resume_mode had nothing to resume FROM (run_steerf.sh:154).
+# On 2026-09-15 a CUDA OOM at step 47 cost all 25 h of the seed-2 steer arm.
+# The optimizer state turns that into at most SAVE_FREQ steps. It costs disk --
+# ~25 GiB per checkpoint against 3.1 GiB -- which MAX_CKPT_KEEP=1 holds flat and
+# `PRUNE=1 bash run/hf_backup.sh <run>` gives back once a run has finished.
+export SAVE_CONTENTS="['hf_model','model','optimizer','extra']"
+export RESUME_MODE=auto
+export MAX_CKPT_KEEP=1
 export SAVE_AFTER=0
 export SAVE_AFTER_OVERRIDE=0
 export MODEL_PATH                # never let a launcher's own default win
@@ -167,6 +178,33 @@ export VAL_DATA_DIR="${ROOT}/validation_data"
 
 banner "follow-ups: ${#QUEUE[@]} run(s), seed ${SEED}, steps=${STEPS}"
 mkdir -p "${LOG_DIR}" "${VAL_DATA_DIR}"
+
+# One definition of how a followup arm is launched, so the OOM retry re-runs
+# what failed instead of a second copy that drifts away from it.
+# shellcheck disable=SC2086  -- the trailing overrides are a deliberate word list
+launch_followup () {   # <arm> <kind> <lam> <run-name> <steps> [hydra overrides...]
+    local a="$1" kind="$2" lam="$3" rn="$4" steps="$5"
+    shift 5
+    local resume=""
+    # The launchers refuse an existing checkpoint dir on purpose; continuing is
+    # exactly what this queue means, since the arm is here because it is unfinished.
+    [ -d "${CKPT_ROOT}/${rn}" ] && resume=1
+    if [ "${kind}" = "grpo" ]; then
+        # run_grpo.sh honours STEPS and writes ${LOG_DIR}/train-<run>.log itself.
+        SEED="${SEED}" RUN_NAME="${rn}" LOG="${LOG_DIR}/train-${rn}.log" \
+            STEPS="${steps}" ${resume:+RESUME=1} bash run/run_grpo.sh
+        return $?
+    elif [ "${kind}" = "tree" ]; then
+        # run_uniform_ablation.sh writes ${LOG_DIR}/train-${RUN_NAME}.log itself.
+        ARM=signed SEED="${SEED}" RUN_NAME="${rn}" STEERF_LAM="${lam}" STEPS="${steps}" \
+            ${resume:+RESUME=1} bash run/run_uniform_ablation.sh "$@"
+        return $?
+    fi
+    SEED="${SEED}" RUN_NAME="${rn}" STEERF_LAM="${lam}" ${resume:+RESUME=1} \
+        bash run/run_steerf.sh $(steer_plain_args "${steps}") "$@" \
+        > "${LOG_DIR}/train-${rn}.log" 2>&1
+    return $?
+}
 
 for a in "${QUEUE[@]}"; do
     rn="$(run_name_for "${a}" "${SEED}")"
@@ -198,28 +236,29 @@ for a in "${QUEUE[@]}"; do
     [ -n "${extra_part}" ] && echo "  extra overrides: ${extra_part}"
     start=$(date +%s)
 
-    # shellcheck disable=SC2086  -- extra_part is a deliberate word list
-    if [ "${kind}" = "grpo" ]; then
-        # run_grpo.sh honours STEPS and writes ${LOG_DIR}/train-<run>.log itself.
-        SEED="${SEED}" RUN_NAME="${rn}" LOG="${LOG_DIR}/train-${rn}.log" \
-            STEPS="$(steps_for_arm "${a}")" bash run/run_grpo.sh
-        st=$?
-    elif [ "${kind}" = "tree" ]; then
-        # run_uniform_ablation.sh writes ${LOG_DIR}/train-${RUN_NAME}.log itself.
-        ARM=signed SEED="${SEED}" RUN_NAME="${rn}" STEERF_LAM="${lam}" STEPS="${STEPS}" \
-            bash run/run_uniform_ablation.sh ${extra_part}
-        st=$?
-    else
-        SEED="${SEED}" RUN_NAME="${rn}" STEERF_LAM="${lam}" \
-            bash run/run_steerf.sh $(steer_plain_args "${STEPS}") ${extra_part} \
-            > "${LOG_DIR}/train-${rn}.log" 2>&1
-        st=$?
-    fi
+    launch_followup "${a}" "${kind}" "${lam}" "${rn}" "${STEPS}" ${extra_part}
+    st=$?
     printf '[followups] %s exit %s after %s min\n' "${a}" "${st}" "$(( ($(date +%s) - start) / 60 ))"
 
     if [ "${st}" -ne 0 ]; then
+        diagnose_run_failure "${LOG_DIR}/train-${rn}.log" "${a}" "${STEPS}"
+        why=$?
+        if [ "${why}" = "2" ] && [ "${OOM_RETRY:-1}" = "1" ]; then
+            echo "[followups] retrying ${rn} with OFFLOAD=1 after the CUDA OOM."
+            echo "[followups] NOTE: OFFLOAD runs the AdamW update on CPU fp32, so"
+            echo "[followups]       this arm is not bit-identical to one that did not."
+            ray stop --force >/dev/null 2>&1 || true
+            sleep 5
+            await_gpus || true
+            start=$(date +%s)
+            OFFLOAD=1 launch_followup "${a}" "${kind}" "${lam}" "${rn}" "${STEPS}" ${extra_part}
+            st=$?
+            printf '[followups] %s retry exit %s after %s min\n' \
+                "${a}" "${st}" "$(( ($(date +%s) - start) / 60 ))"
+        fi
+    fi
+    if [ "${st}" -ne 0 ]; then
         echo "[followups] FAILED -- keeping the checkpoint, moving on"
-        diagnose_startup_failure "${LOG_DIR}/train-${rn}.log" "${a}" || true
         continue
     fi
     if ! train_log_done "${LOG_DIR}" "${rn}" "$(steps_for_arm "${a}")"; then

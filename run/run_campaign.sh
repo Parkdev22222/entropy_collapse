@@ -51,7 +51,10 @@ ARMS=${ARMS:-${CAMPAIGN_ARMS}}
 STEPS=${STEPS:-110}
 LOG_DIR="${ROOT}/logs/experiments"
 CKPT_ROOT="${ROOT}/checkpoints/STEER-F"
-MIN_FREE_GB=${MIN_FREE_GB:-20}
+# 30, not 20: a resumable checkpoint carries the optimizer and rng state, so
+# it is ~25 GiB rather than the 3.1 GiB of an hf_model-only one. See the
+# shared settings below for why that trade is worth the disk.
+MIN_FREE_GB=${MIN_FREE_GB:-30}
 DRY=${DRY:-0}
 REPO=${REPO:-}
 WAIT=${WAIT:-0}            # 1 = queue behind a running job instead of refusing
@@ -157,7 +160,22 @@ topology_guard || exit 2
 
 # ---------------------------------------------------------- shared settings
 export SAVE_BEST_ONLY=True                 # keep only the best checkpoint
-export SAVE_CONTENTS="['hf_model']"        # no optimizer / extra state
+# A crash used to cost the whole run. verl's checkpoint_contents defaults to
+# ['model','optimizer','extra'] and naming save_contents REPLACES that list, so
+# ['hf_model'] wrote no optimizer or rng state and trainer.resume_mode had
+# nothing to resume FROM (run_steerf.sh:154). This queue said "keeping the
+# checkpoint so it can be resumed" while making resuming impossible; on
+# 2026-09-15 a CUDA OOM at step 47 of the seed-2 steer arm therefore cost all
+# 25 hours of it. Writing the optimizer turns that into at most SAVE_FREQ steps.
+#
+# The cost is disk: a full 1.5B checkpoint is ~25 GiB against 3.1 GiB for
+# hf_model alone. MAX_CKPT_KEEP=1 holds the peak flat (verl deletes the old one
+# BEFORE writing the new one), MIN_FREE_GB above is raised to match, and
+# `PRUNE=1 bash run/hf_backup.sh <run>` gives the difference back once a run
+# has finished -- only actor/huggingface is needed to evaluate or publish.
+export SAVE_CONTENTS="['hf_model','model','optimizer','extra']"
+export RESUME_MODE=auto                    # run_steerf.sh defaults to disable
+export MAX_CKPT_KEEP=1                     # peak stays at one checkpoint
 export SAVE_AFTER=0                        # run_grpo.sh
 export SAVE_AFTER_OVERRIDE=0               # run_steerf.sh
 export MODEL_PATH                          # never let a launcher's own default win
@@ -165,8 +183,48 @@ export N_GPUS TP_SIZE                       # settled by topology_guard, above
 export VAL_DATA_DIR="${ROOT}/validation_data"
 export STEPS
 
-banner "campaign: ${#QUEUE[@]} run(s), steps=${STEPS}, best-only, hf_model only"
+banner "campaign: ${#QUEUE[@]} run(s), steps=${STEPS}, best-only, resumable"
 mkdir -p "${LOG_DIR}" "${VAL_DATA_DIR}"
+
+# One place that knows how each arm is launched, so the OOM retry below runs
+# exactly what failed rather than a second, drifting copy of it.
+#
+# RESUME=1 is passed whenever a checkpoint directory is already there.
+# run_grpo.sh:137 and run_uniform_ablation.sh:143 refuse in that case on
+# purpose -- resume_mode=auto would otherwise continue an old run when someone
+# meant to start a fresh one. Continuing IS what this queue means: the run is
+# in the queue because train_log_done says it never reached ${STEPS}.
+launch_arm () {   # <arm> <seed> <run-name> <log>
+    local arm="$1" seed="$2" rn="$3" log="$4" resume=""
+    [ -d "${CKPT_ROOT}/${rn}" ] && resume=1
+
+    # Only run_steerf.sh writes the trainer's output to stdout. run_grpo.sh
+    # and run_uniform_ablation.sh both redirect their child into exactly
+    # ${LOG_DIR}/train-<run>.log themselves, so teeing there would put two
+    # writers at independent offsets on one file and shred it.
+    case "${arm}" in
+        grpo)
+            SEED="${seed}" RUN_NAME="${rn}" LOG="${log}" ${resume:+RESUME=1} \
+                bash run/run_grpo.sh
+            return $?
+            ;;
+        steer)
+            # run_steerf.sh hardcodes STEPS=200 inside its SCALE case, so an
+            # exported STEPS never reaches it -- without the trailing override
+            # this arm trains to 200 and the queue stalls for an extra 20 h.
+            SEED="${seed}" RUN_NAME="${rn}" STEERF_LAM=0 ${resume:+RESUME=1} \
+                bash run/run_steerf.sh $(steer_plain_args "${STEPS}") 2>&1 | tee "${log}"
+            return "${PIPESTATUS[0]}"
+            ;;
+        signed|uniform|permuted)
+            ARM="${arm}" SEED="${seed}" RUN_NAME="${rn}" STEERF_LAM=0.25 ${resume:+RESUME=1} \
+                bash run/run_uniform_ablation.sh
+            return $?
+            ;;
+    esac
+    echo "[campaign] unknown arm '${arm}'" >&2
+    return 3
+}
 
 for item in "${QUEUE[@]}"; do
     arm="${item%%:*}"; rest="${item#*:}"; seed="${rest%%:*}"; rn="${rest##*:}"
@@ -192,36 +250,39 @@ for item in "${QUEUE[@]}"; do
     # rather than waiting for it.
     await_gpus || true
 
-    # Only run_steerf.sh writes the trainer's output to stdout. run_grpo.sh
-    # and run_uniform_ablation.sh both redirect their child into exactly
-    # ${LOG_DIR}/train-<run>.log themselves, so teeing there would put two
-    # writers at independent offsets on one file and shred it.
-    case "${arm}" in
-        grpo)
-            SEED="${seed}" RUN_NAME="${rn}" LOG="${log}" \
-                bash run/run_grpo.sh
-            st=$?
-            ;;
-        steer)
-            # run_steerf.sh hardcodes STEPS=200 inside its SCALE case, so an
-            # exported STEPS never reaches it -- without the trailing override
-            # this arm trains to 200 and the queue stalls for an extra 20 h.
-            SEED="${seed}" RUN_NAME="${rn}" STEERF_LAM=0 \
-                bash run/run_steerf.sh $(steer_plain_args "${STEPS}") 2>&1 | tee "${log}"
-            st=${PIPESTATUS[0]}
-            ;;
-        signed|uniform|permuted)
-            ARM="${arm}" SEED="${seed}" RUN_NAME="${rn}" STEERF_LAM=0.25 \
-                bash run/run_uniform_ablation.sh
-            st=$?
-            ;;
-    esac
+    launch_arm "${arm}" "${seed}" "${rn}" "${log}"
+    st=$?
     printf '[campaign] %s seed %s exit %s after %s min\n' \
         "${arm}" "${seed}" "${st}" "$(( ($(date +%s) - start) / 60 ))"
 
     if [ "${st}" -ne 0 ]; then
-        echo "[campaign] FAILED -- keeping the checkpoint so it can be resumed, moving on"
-        diagnose_startup_failure "${log}" "${arm} seed ${seed}" || true
+        diagnose_run_failure "${log}" "${arm} seed ${seed}" "${STEPS}"
+        why=$?
+        # rc 2 means CUDA OOM. Offloading the optimizer and params to CPU is the
+        # one large lever that leaves the treatment alone -- unlike the micro
+        # batch, which IS the treatment. Once, then move on: a second OOM at the
+        # same setting is a ceiling, not a tail event.
+        if [ "${why}" = "2" ] && [ "${OOM_RETRY:-1}" = "1" ]; then
+            echo "[campaign] retrying ${rn} with OFFLOAD=1 after the CUDA OOM."
+            echo "[campaign] NOTE: OFFLOAD moves the AdamW update to CPU fp32, so"
+            echo "[campaign]       this seed's arithmetic is not bit-identical to"
+            echo "[campaign]       seeds that ran without it. analyze_seeds.py"
+            echo "[campaign]       reads param_offload out of the log and reports it."
+            ray stop --force >/dev/null 2>&1 || true
+            sleep 5
+            await_gpus || true
+            start=$(date +%s)
+            OFFLOAD=1 launch_arm "${arm}" "${seed}" "${rn}" "${log}"
+            st=$?
+            printf '[campaign] %s seed %s retry exit %s after %s min\n' \
+                "${arm}" "${seed}" "${st}" "$(( ($(date +%s) - start) / 60 ))"
+            [ "${st}" -ne 0 ] && diagnose_run_failure "${log}" \
+                "${arm} seed ${seed} (OFFLOAD=1 retry)" "${STEPS}" || true
+        fi
+    fi
+    if [ "${st}" -ne 0 ]; then
+        echo "[campaign] FAILED -- the checkpoint carries the optimizer state, so"
+        echo "[campaign] the next pass over this queue resumes rather than restarts."
         continue
     fi
     if ! is_done "${rn}"; then

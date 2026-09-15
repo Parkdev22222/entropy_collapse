@@ -38,7 +38,10 @@ ARMS=${ARMS:-"grpo steer signed"}
 SEED=${SEED:-1}
 STEPS=${STEPS:-110}
 LOG_DIR="${ROOT}/logs/experiments"
-MIN_FREE_GB=${MIN_FREE_GB:-20}
+# 30, not 20: a resumable checkpoint carries the optimizer state, so it is
+# ~25 GiB rather than 3.1 GiB. See the shared settings below.
+MIN_FREE_GB=${MIN_FREE_GB:-30}
+CKPT_ROOT="${ROOT}/checkpoints/STEER-F"
 DRY=${DRY:-0}
 REPO=${REPO:-}
 
@@ -58,6 +61,33 @@ done
 # backbone and that backbone's three-way contrast is complete, which is the
 # unit the paper reports. Arm-major would leave every backbone half-finished.
 declare -a QUEUE=()
+# One definition of how a backbone arm is launched, so the OOM retry re-runs
+# what failed rather than a second copy of it.
+launch_backbone () {   # <arm> <run-name> <log> [hydra overrides...]
+    local arm="$1" rn="$2" log="$3"
+    shift 3
+    local resume=""
+    # The launchers refuse an existing checkpoint dir on purpose; continuing is
+    # what this queue means, since the arm is here because it is unfinished.
+    [ -d "${CKPT_ROOT}/${rn}" ] && resume=1
+    case "${arm}" in
+        grpo)
+            SEED="${SEED}" RUN_NAME="${rn}" LOG="${log}" ${resume:+RESUME=1} \
+                bash run/run_grpo.sh "$@"
+            return $? ;;
+        steer)
+            SEED="${SEED}" RUN_NAME="${rn}" STEERF_LAM=0 ${resume:+RESUME=1} \
+                bash run/run_steerf.sh $(steer_plain_args "${STEPS}") "$@" 2>&1 | tee "${log}"
+            return "${PIPESTATUS[0]}" ;;
+        signed)
+            ARM=signed SEED="${SEED}" RUN_NAME="${rn}" STEERF_LAM=0.25 ${resume:+RESUME=1} \
+                bash run/run_uniform_ablation.sh "$@"
+            return $? ;;
+    esac
+    echo "[backbones] unknown arm '${arm}'" >&2
+    return 3
+}
+
 for b in ${BACKBONES}; do
     ( export MODEL_TAG="${b}"
       unset MODEL_PATH VAL_PARQUET BEST_METRIC_KEY
@@ -97,7 +127,15 @@ topology_guard || exit 2
 
 # ---------------------------------------------------------- shared settings
 export SAVE_BEST_ONLY=True
-export SAVE_CONTENTS="['hf_model']"
+# A crash used to cost the whole run: ['hf_model'] writes no optimizer or rng
+# state, so trainer.resume_mode had nothing to resume FROM (run_steerf.sh:154).
+# On 2026-09-15 a CUDA OOM at step 47 cost all 25 h of the seed-2 steer arm.
+# The optimizer state turns that into at most SAVE_FREQ steps. It costs disk --
+# ~25 GiB per checkpoint against 3.1 GiB -- which MAX_CKPT_KEEP=1 holds flat and
+# `PRUNE=1 bash run/hf_backup.sh <run>` gives back once a run has finished.
+export SAVE_CONTENTS="['hf_model','model','optimizer','extra']"
+export RESUME_MODE=auto
+export MAX_CKPT_KEEP=1
 export SAVE_AFTER=0
 export SAVE_AFTER_OVERRIDE=0
 export N_GPUS TP_SIZE
@@ -148,26 +186,30 @@ for item in "${QUEUE[@]}"; do
     val_over=( "data.val_files=['${ROOT}/${VAL_PARQUET}']"
                "++trainer.best_metric_key=${BEST_METRIC_KEY}" )
 
-    case "${arm}" in
-        grpo)
-            SEED="${SEED}" RUN_NAME="${rn}" LOG="${log}" \
-                bash run/run_grpo.sh "${val_over[@]}"
-            st=$? ;;
-        steer)
-            SEED="${SEED}" RUN_NAME="${rn}" STEERF_LAM=0 \
-                bash run/run_steerf.sh $(steer_plain_args "${STEPS}") "${val_over[@]}" 2>&1 | tee "${log}"
-            st=${PIPESTATUS[0]} ;;
-        signed)
-            ARM=signed SEED="${SEED}" RUN_NAME="${rn}" STEERF_LAM=0.25 \
-                bash run/run_uniform_ablation.sh "${val_over[@]}"
-            st=$? ;;
-    esac
+    launch_backbone "${arm}" "${rn}" "${log}" "${val_over[@]}"
+    st=$?
     printf '[backbones] %s %s exit %s after %s min\n' \
         "${bb}" "${arm}" "${st}" "$(( ($(date +%s) - start) / 60 ))"
 
     if [ "${st}" -ne 0 ]; then
+        diagnose_run_failure "${log}" "${bb} ${arm}" "${STEPS}"
+        why=$?
+        if [ "${why}" = "2" ] && [ "${OOM_RETRY:-1}" = "1" ]; then
+            echo "[backbones] retrying ${rn} with OFFLOAD=1 after the CUDA OOM."
+            echo "[backbones] NOTE: OFFLOAD runs the AdamW update on CPU fp32, so"
+            echo "[backbones]       this arm is not bit-identical to one that did not."
+            ray stop --force >/dev/null 2>&1 || true
+            sleep 5
+            await_gpus || true
+            start=$(date +%s)
+            OFFLOAD=1 launch_backbone "${arm}" "${rn}" "${log}" "${val_over[@]}"
+            st=$?
+            printf '[backbones] %s %s retry exit %s after %s min\n' \
+                "${bb}" "${arm}" "${st}" "$(( ($(date +%s) - start) / 60 ))"
+        fi
+    fi
+    if [ "${st}" -ne 0 ]; then
         echo "[backbones] FAILED -- keeping the checkpoint, moving on"
-        diagnose_startup_failure "${log}" "${bb} ${arm}" || true
         continue
     fi
     if ! train_log_done "${LOG_DIR}" "${rn}" "${STEPS}"; then
