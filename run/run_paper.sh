@@ -216,7 +216,19 @@ if have measure; then
     guard measure-omega python3 scripts/measure_omega_at_branches.py \
         --model "${MODEL_PATH}" --out "${DOC_DIR}/omega_at_branches.json"
 
-    if [ -f "${ROLLOUTS}" ]; then
+    # NOT `if [ -f "${ROLLOUTS}" ]`. rollout_data/ is gitignored, so a fresh box
+    # never has it, and the conditional made the two most load-bearing
+    # measurements vanish without reaching FAILED or the summary -- which is
+    # what happened on the H100. Let the scripts fail loudly instead; `guard`
+    # records the label and the stage carries on.
+    if [ ! -f "${ROLLOUTS}" ]; then
+        note "no warm-up rollouts at ${ROLLOUTS}"
+        note "  they are gitignored, so git will not bring them: either run"
+        note "    bash run/collect_warmup_rollouts.sh"
+        note "  or fetch them with  bash run/migrate_pod.sh --import"
+        note "  measure-locality and measure-recall will be reported as failed."
+    fi
+    if true; then
         # THE one that answers "your future term is a local signal".
         guard measure-locality python3 scripts/measure_forecast_locality.py \
             --model "${MODEL_PATH}" --heads "${HEADS}" --calib "${CALIB}" \

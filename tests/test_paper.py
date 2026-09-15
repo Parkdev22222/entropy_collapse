@@ -30,9 +30,16 @@ OVERFULL_PT = 5.0
 
 @pytest.fixture(scope="module")
 def tex():
+    """The manuscript with its LaTeX comments removed.
+
+    The header documents the slot mechanism with a literal `\\num{X}` example,
+    and a comment is not a slot -- counting it made the audit report one
+    permanently unfillable cell that does not exist.
+    """
     if not TEX.is_file():
         pytest.skip("the manuscript is not in this checkout")
-    return TEX.read_text()
+    return "\n".join(l for l in TEX.read_text().splitlines()
+                      if not l.lstrip().startswith("%"))
 
 
 def test_no_slot_is_unfillable(tex):
@@ -82,3 +89,55 @@ def test_the_build_resolves_every_reference():
     log = LOG.read_text(errors="replace")
     assert "Undefined control sequence" not in log
     assert not re.search(r"(Citation|Reference) `[^']*' on page .* undefined", log)
+
+
+# --------------------------------------- can a finished experiment reach the page?
+def emittable_names():
+    """Every macro name scripts/analyze_seeds.py is able to write.
+
+    Derived from the source rather than from a list kept here, so the two
+    cannot drift: a slot the manuscript asks for and the emitter cannot produce
+    is a table that stays red however long its experiment runs.
+    """
+    src = (ROOT / "scripts" / "analyze_seeds.py").read_text()
+    arms = re.search(r"MAIN_ARMS = \[([^\]]*)\]", src).group(1)
+    arms = re.findall(r'"([a-z-]+)"', arms)
+    stems = re.findall(r'"[a-z0-9.-]+":\s*"([a-z]+)"', src)
+    metrics = ["acc", "maj", "uplift", "entropy"]
+    pairs = re.findall(r'\("([a-z]+)", "([a-z]+)"\)', src)
+
+    names = {"Nseeds", "Plateaulo", "Plateauhi", "STDaime", "SEaime", "Wseed",
+             "Bsigncount", "Dirconsistency", "Dirconsistencyperm",
+             "Matchstep", "Longsteps", "Rgrpolongacc",
+             "Wsigned", "Wgrpo", "Wgrpolong"}
+    for a in arms:
+        names |= {f"N{a}", f"Nall{a}", f"R{a}len", f"R{a}cost"}
+        for c in metrics:
+            names |= {f"R{a}{c}", f"E{a}{c}", f"S{a}{c}", f"Lo{a}{c}", f"Hi{a}{c}"}
+    for stem in stems:
+        names |= {f"R{stem}acc", f"R{stem}maj"}
+    for a, b in pairs:
+        for c in metrics:
+            names |= {f"C{a}{b}{c}", f"T{a}{b}{c}", f"P{a}{b}{c}",
+                      f"W{a}{b}{c}", f"WT{a}{b}{c}", f"WN{a}{b}{c}"}
+        names.add(f"N{a}{b}")
+    # backbone rows are the same analysis under --macro-prefix
+    prefixed = set()
+    for pre in ("Bqwenbig", "Bllama", "Bmistral"):
+        prefixed |= {pre + n for n in names}
+    return names | prefixed
+
+
+def test_every_slot_can_be_produced_by_the_emitter(tex):
+    """The generalisation of the Table 12 defect.
+
+    There, twenty cells had no macro name at all. Here the names exist but
+    nothing writes them: until 2026-09-15 analyze_seeds.py knew only the five
+    main arms, so the follow-up ablations, the compute-matched control, the
+    backbones and the six-benchmark count could all finish and leave their
+    tables red, indistinguishable from tables still waiting for data.
+    """
+    want = set(re.findall(r"\\num\{([A-Za-z]+)\}", tex))
+    orphans = sorted(want - emittable_names())
+    assert not orphans, (
+        f"{len(orphans)} slot(s) no run can ever fill: {orphans[:12]}")

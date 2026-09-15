@@ -63,7 +63,28 @@ DERIVED = {"uplift": lambda r: r["maj"] - r["acc"]}
 
 # Arms in the order the paper reports them. The first is the reference every
 # contrast is drawn against.
+# Section 12.8's benchmarks, in the order collect_results.py writes them.
+MATH6 = ["AIME24", "AIME25", "AMC23", "MATH500", "Minerva", "Olympiad"]
+
 MAIN_ARMS = ["grpo", "steer", "uniform", "permuted", "signed"]
+
+# The follow-up ablations of Table 10, and the compute-matched control. They
+# are seed 1 only and are not part of the seed-level statistics, so they live
+# outside MAIN_ARMS -- but the manuscript has a slot for each, and until this
+# table existed nothing emitted them: the runs could all finish and Table 10
+# would stay red. The value is the macro stem, because the paper names the
+# lambda arms by role (lamlo/lamhi/lamzero) rather than by value.
+FOLLOWUP_ARMS = {
+    "lam0.1":       "lamlo",
+    "lam0.5":       "lamhi",
+    "lam0-tree":    "lamzero",
+    "xclip-signed": "xclipsigned",
+    "xclip-steer":  "xclipsteer",
+    "rloo-signed":  "rloosigned",
+    "rloo-steer":   "rloosteer",
+    "opo-signed":   "oposigned",
+    "opo-steer":    "oposteer",
+}
 CONTRASTS = [("signed", "grpo"), ("signed", "steer"), ("signed", "uniform"),
              ("signed", "permuted"), ("steer", "grpo"), ("uniform", "steer")]
 
@@ -128,6 +149,47 @@ def offloaded(path: Path) -> str:
     if not hits:
         return "?"
     return "cpu" if hits[-1] == "True" else "gpu"
+
+
+def direction_consistency(tsv: Path, a: str, b: str) -> tuple[int, int] | None:
+    """On how many of the six benchmarks does arm `a` beat arm `b`?
+
+    Section 12.8's headline is not any single cell -- a 30-question benchmark
+    cannot separate a method from a lucky draw -- but whether the ordering seen
+    on AIME24 survives elsewhere. The count is the statistic, and the paper
+    reports it "whatever it returns".
+
+    Reads the table scripts/collect_results.py already produces, rather than
+    parsing the evaluation logs a second time; a second parser is a second
+    thing to drift.
+    """
+    if not tsv.is_file():
+        return None
+    rows: dict[str, dict[str, float]] = {}
+    lines = tsv.read_text().splitlines()
+    if not lines:
+        return None
+    head = lines[0].split("\t")
+    for line in lines[1:]:
+        cell = line.split("\t")
+        if len(cell) != len(head):
+            continue
+        # the averaged row when there is one, else the single seed
+        row = {h: c for h, c in zip(head, cell)}
+        arm = row.get("arm", "")
+        if arm in rows and row.get("seed") != "avg":
+            continue
+        vals = {}
+        for bench in MATH6:
+            try:
+                vals[bench] = float(row.get(bench, "-"))
+            except ValueError:
+                pass
+        if len(vals) == len(MATH6):
+            rows[arm] = vals
+    if a not in rows or b not in rows:
+        return None
+    return sum(1 for x in MATH6 if rows[a][x] > rows[b][x]), len(MATH6)
 
 
 def plateau(steps: dict[int, dict[str, float]], lo: int, hi: int) -> dict[str, float]:
@@ -262,6 +324,13 @@ def main(argv=None) -> int:
                          "agreeing with the contrasts)")
     ap.add_argument("--long-steps", type=int, default=200,
                     help="final step of the compute-matched grpo-long control")
+    ap.add_argument("--macro-prefix", default="",
+                    help="prepend this to every macro name, so a backbone's run "
+                         "can be analysed with the same code and merged into one "
+                         "numbers.tex (Table 12 names them Bqwenbig, Bllama, "
+                         "Bmistral)")
+    ap.add_argument("--eval-table", default="results/summary.tsv",
+                    help="the six-benchmark table scripts/collect_results.py writes")
     ap.add_argument("--git-ref", default=None,
                     help="read the logs out of this ref instead of the working "
                          "tree (they live on `paper`)")
@@ -296,6 +365,16 @@ def main(argv=None) -> int:
             "uniform": f"steer-f-{t}-s{seed}-tree-rollout-uniform",
             "permuted": f"steer-f-{t}-s{seed}-tree-rollout-permuted",
             "grpo-long": f"grpo-{t}-s{seed}-long",
+            # run/_arms.sh:run_name_for owns these; kept in step with it.
+            "lam0.1": f"steer-f-{t}-s{seed}-tree-rollout-lam0.1",
+            "lam0.5": f"steer-f-{t}-s{seed}-tree-rollout-lam0.5",
+            "lam0-tree": f"steer-f-{t}-s{seed}-tree-rollout-lam0",
+            "xclip-signed": f"steer-f-{t}-s{seed}-tree-rollout-xclip",
+            "xclip-steer": f"steer-{t}-s{seed}-xclip",
+            "rloo-signed": f"steer-f-{t}-s{seed}-tree-rollout-rloo",
+            "rloo-steer": f"steer-{t}-s{seed}-rloo",
+            "opo-signed": f"steer-f-{t}-s{seed}-tree-rollout-opo",
+            "opo-steer": f"steer-{t}-s{seed}-opo",
         }[arm]
 
     def reached(path: Path, want: int) -> bool:
@@ -359,6 +438,18 @@ def main(argv=None) -> int:
                                        if lo <= k <= hi and "acc" in v}
             else:
                 missing.append(f"{arm} s{seed} (no validation point in {lo}-{hi})")
+
+    # The follow-up arms, at the one seed they were run at. They carry no error
+    # bar by design (Table 10's caption says so), so they are plateau means and
+    # nothing more.
+    followups: dict[str, dict[str, float]] = {}
+    for arm, stem in FOLLOWUP_ARMS.items():
+        f = find_log(run_name(arm, 1), args.steps)
+        if f is None:
+            continue
+        agg = plateau(parse_log(f), lo, hi)
+        if agg:
+            followups[stem] = agg
 
     # ------------------------------------------------- within-run stability
     # A paired t over the validation points of ONE run. It asks whether a gap
@@ -458,6 +549,11 @@ def main(argv=None) -> int:
                          f"{st['p']:.4f}\t{','.join(map(str, shared))}\n")
 
     # ------------------------------------------------------- compute match
+    # Table 11's cells, kept so the macro block below can emit them. The TSV
+    # was written since this script existed, but nothing carried the numbers
+    # into the manuscript, so the table would have stayed red however long the
+    # long GRPO run went.
+    match: dict[str, float] = {}
     with (out_dir / "compute_match.tsv").open("w") as fh:
         fh.write("seed\tsteerf_steps\tsteerf_seconds\tgrpo_long_step\t"
                  "grpo_long_seconds\tsteerf_acc\tgrpo_long_acc\tdiff\n")
@@ -482,6 +578,13 @@ def main(argv=None) -> int:
             s_acc = per_seed["signed"][seed]["acc"]
             fh.write(f"{seed}\t{args.steps}\t{budget:.0f}\t{val[-1]}\t{spent:.0f}\t"
                      f"{s_acc:.4f}\t{g_acc:.4f}\t{s_acc - g_acc:+.4f}\n")
+            if not match:          # the manuscript's table is one seed wide
+                g_budget = sum(r.get("s_per_step", 0.0)
+                               for st, r in long_steps.items() if st <= args.long_steps)
+                match = {"Matchstep": val[-1], "Longsteps": args.long_steps,
+                         "Rgrpolongacc": g_acc, "Wsigned": budget / 3600.0,
+                         "Wgrpolong": spent / 3600.0,
+                         "Wgrpo": g_budget * args.steps / max(1, args.long_steps) / 3600.0}
 
     # ------------------------------------------------------------- LaTeX
     with (out_dir / "tables.tex").open("w") as fh:
@@ -515,11 +618,20 @@ def main(argv=None) -> int:
     # data yet renders as a visible placeholder rather than a plausible number:
     # a paper must never contain a figure nobody measured, and "I will replace
     # it later" is how a predicted number reaches a submission.
+    # A backbone run is the same five-arm analysis under another model tag, so
+    # Table 12's cells are R<arm>acc and C signed-vs-<arm> acc with a prefix.
+    # One invocation per backbone, each writing its own macro file:
+    #
+    #   analyze_seeds.py --model-tag Qwen2.5-Math-7B --macro-prefix Bqwenbig \
+    #       --tex-macros results/numbers-qwenbig.tex
+    #
+    # and the manuscript \input{}s them all. Nothing about the statistics
+    # changes; only the names do.
     macro_path = Path(args.tex_macros) if args.tex_macros else out_dir / "numbers.tex"
     letters = str.maketrans("", "", "0123456789-_.")
 
     def mac(name: str, value, fmt: str = "{:.4f}") -> str:
-        nm = name.translate(letters)
+        nm = (args.macro_prefix + name).translate(letters)
         # ".1495", not "0.1495" -- the table style the manuscript already uses.
         if fmt in ("{:.4f}", "{:+.4f}") and isinstance(value, (int, float)) \
                 and value == value and abs(value) < 1:
@@ -573,6 +685,41 @@ def main(argv=None) -> int:
             fh.write(mac(f"R{arm}len", (sum(v) / len(v)) if v else None, "{:.0f}"))
             v = [r["s_per_step"] for r in rows if "s_per_step" in r]
             fh.write(mac(f"R{arm}cost", (sum(v) / len(v)) if v else None, "{:.0f}"))
+        # Table 12's bottom line: on how many backbones does STEER-F - GRPO
+        # keep its sign? Each backbone writes its own macro file with a prefix,
+        # so count the ones already on disk plus this run. Reported as a count
+        # out of four because the rows are not on a common scale and must not
+        # be averaged -- docs/preregistration_5seed.md fixes that in advance.
+        if not args.macro_prefix:
+            signs = []
+            for f in sorted(out_dir.glob("numbers-*.tex")) + [macro_path]:
+                if not f.is_file():
+                    continue
+                for m in re.finditer(r"\\providecommand\{\\[A-Za-z]*Csignedgrpoacc\}"
+                                     r"\{([^}]*)\}", f.read_text()):
+                    v = m.group(1).replace("PENDING", "")
+                    try:
+                        signs.append(float(v.lstrip("+")) > 0)
+                    except ValueError:
+                        pass
+            fh.write(mac("Bsigncount", sum(signs) if signs else None, "{:d}"))
+
+        # Section 12.8. Absent evaluation table -> PENDING, not a guess.
+        ev = Path(args.eval_table)
+        for name, other in (("Dirconsistency", "uniform"),
+                            ("Dirconsistencyperm", "permuted")):
+            hit = direction_consistency(ev, "signed", other)
+            fh.write(mac(name, hit[0] if hit else None, "{:d}"))
+
+        # Table 11. Wall clocks are hours, which is how the caption reads them.
+        for k in ("Matchstep", "Longsteps"):
+            fh.write(mac(k, match.get(k), "{:d}") if k in match else mac(k, None))
+        fh.write(mac("Rgrpolongacc", match.get("Rgrpolongacc")))
+        for k in ("Wsigned", "Wgrpo", "Wgrpolong"):
+            fh.write(mac(k, match.get(k), "{:.1f}") if k in match else mac(k, None))
+        for stem, agg in sorted(followups.items()):
+            for c in ("acc", "maj"):
+                fh.write(mac(f"R{stem}{c}", agg.get(c)))
         fh.write(mac("Wseed", within_seed, "{:d}") if within_seed
                  else mac("Wseed", None))
         for key, st in sorted(within.items()):
