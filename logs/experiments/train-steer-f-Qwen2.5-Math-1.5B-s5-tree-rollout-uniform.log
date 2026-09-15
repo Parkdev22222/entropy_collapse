@@ -21,34 +21,14 @@
 ++ '[' 2 -eq 1 ']'
 ++ GPU_MEM_UTIL=0.6
 ++ export N_GPUS TP_SIZE GPU_MEM_UTIL
-+ export PYTHONPATH=/workspace/entropy_collapse:/workspace/entropy_collapse:
-+ PYTHONPATH=/workspace/entropy_collapse:/workspace/entropy_collapse:
++ export PYTHONPATH=/workspace/entropy_collapse:
++ PYTHONPATH=/workspace/entropy_collapse:
 + echo 'Current VERL path:'
 Current VERL path:
 + python3 -c 'import verl; print(verl.__file__)'
 /workspace/entropy_collapse/verl/__init__.py:18: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
   import pkg_resources
-Traceback (most recent call last):
-  File "<string>", line 1, in <module>
-  File "/workspace/entropy_collapse/verl/__init__.py", line 22, in <module>
-    from .protocol import DataProto
-  File "/workspace/entropy_collapse/verl/protocol.py", line 39, in <module>
-    from verl.utils.torch_functional import allgather_dict_tensors
-  File "/workspace/entropy_collapse/verl/utils/torch_functional.py", line 29, in <module>
-    from transformers import PreTrainedTokenizer
-  File "/usr/local/lib/python3.12/dist-packages/transformers/__init__.py", line 27, in <module>
-    from . import dependency_versions_check
-  File "/usr/local/lib/python3.12/dist-packages/transformers/dependency_versions_check.py", line 57, in <module>
-    require_version_core(deps[pkg])
-  File "/usr/local/lib/python3.12/dist-packages/transformers/utils/versions.py", line 117, in require_version_core
-    return require_version(requirement, hint)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/local/lib/python3.12/dist-packages/transformers/utils/versions.py", line 111, in require_version
-    _compare_versions(op, got_ver, want_ver, requirement, pkg, hint)
-  File "/usr/local/lib/python3.12/dist-packages/transformers/utils/versions.py", line 44, in _compare_versions
-    raise ImportError(
-ImportError: huggingface-hub>=0.34.0,<1.0 is required for a normal functioning of this module, but found huggingface-hub==1.30.0.
-Try: `pip install transformers -U` or `pip install -e '.[dev]'` if you're working with git main
+/workspace/entropy_collapse/verl/__init__.py
 + python3 -c 'import steer_f; print(steer_f.__file__)'
 /workspace/entropy_collapse/steer_f/__init__.py
 + project_name=STEER-F
@@ -103,7 +83,7 @@ Try: `pip install transformers -U` or `pip install -e '.[dev]'` if you're workin
 + save_contents='['\''hf_model'\'']'
 + RESUME_MODE=auto
 ++ date +%Y%m%d_%H%M%S
-+ current_datetime=20260907_104317
++ current_datetime=20260913_025128
 + perm_tag=
 + '[' 0 = 1 ']'
 + run_name=steer-f-Qwen2.5-Math-1.5B-s5-tree-rollout-uniform
@@ -112,25 +92,44 @@ Try: `pip install transformers -U` or `pip install -e '.[dev]'` if you're workin
 + python3 -m verl.trainer.main_ppo algorithm.adv_estimator=grpo 'data.train_files=['\''/workspace/entropy_collapse/datasets/DAPO-Math-17k.parquet'\'']' 'data.val_files=['\''/workspace/entropy_collapse/datasets/aime24.parquet'\'']' data.train_batch_size=512 data.max_prompt_length=1024 data.max_response_length=3072 data.filter_overlong_prompts=True data.truncation=left actor_rollout_ref.model.path=Qwen/Qwen2.5-Math-1.5B actor_rollout_ref.actor.optim.lr=1e-6 actor_rollout_ref.model.use_remove_padding=True actor_rollout_ref.actor.ppo_mini_batch_size=32 actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=8 actor_rollout_ref.actor.use_kl_loss=False actor_rollout_ref.actor.kl_loss_coef=0.001 actor_rollout_ref.actor.kl_loss_type=low_var_kl actor_rollout_ref.actor.entropy_coeff=0 actor_rollout_ref.actor.clip_ratio_high=0.28 actor_rollout_ref.actor.clip_ratio_low=0.2 actor_rollout_ref.actor.clip_ratio_c=10.0 actor_rollout_ref.actor.policy_loss.loss_mode=entropy_control ++actor_rollout_ref.actor.policy_loss.token_weight_min=0.7 ++actor_rollout_ref.actor.policy_loss.token_weight_max=1.0 ++actor_rollout_ref.actor.policy_loss.linear=False ++actor_rollout_ref.actor.policy_loss.steerf_lam=0.25 ++actor_rollout_ref.actor.policy_loss.steerf_kappa=2 ++actor_rollout_ref.actor.policy_loss.steerf_gamma_h=0.7 ++actor_rollout_ref.actor.policy_loss.steerf_clip_c=1.0 ++actor_rollout_ref.actor.policy_loss.steerf_norm=scale ++actor_rollout_ref.actor.policy_loss.steerf_baseline=sibling ++actor_rollout_ref.actor.policy_loss.steerf_apply=branch ++actor_rollout_ref.actor.policy_loss.steerf_permute_ah=0 ++actor_rollout_ref.actor.policy_loss.steerf_mapping=minmax ++actor_rollout_ref.actor.policy_loss.steerf_winsor_q=0.01 ++actor_rollout_ref.actor.policy_loss.steerf_forecast=mtp ++actor_rollout_ref.actor.policy_loss.steerf_heads_path=/workspace/entropy_collapse/checkpoints/mtp_heads_Qwen2.5-Math-1.5B-paper.pt ++actor_rollout_ref.actor.policy_loss.steerf_calib_path=/workspace/entropy_collapse/checkpoints/mtp_calibration_Qwen2.5-Math-1.5B-paper.json actor_rollout_ref.model.enable_gradient_checkpointing=True ++actor_rollout_ref.actor.entropy_from_logits_with_chunking=True actor_rollout_ref.actor.fsdp_config.param_offload=False actor_rollout_ref.actor.fsdp_config.optimizer_offload=False actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=4 actor_rollout_ref.rollout.tensor_model_parallel_size=2 actor_rollout_ref.rollout.name=vllm actor_rollout_ref.rollout.gpu_memory_utilization=0.6 'actor_rollout_ref.actor.checkpoint.save_contents=['\''hf_model'\'']' actor_rollout_ref.rollout.n=8 actor_rollout_ref.rollout.val_kwargs.n=1 actor_rollout_ref.rollout.val_kwargs.do_sample=True actor_rollout_ref.rollout.val_kwargs.temperature=1.0 actor_rollout_ref.rollout.val_kwargs.top_p=0.7 actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=4 actor_rollout_ref.ref.fsdp_config.param_offload=False algorithm.use_kl_in_reward=False trainer.rollout_data_dir=/workspace/entropy_collapse/rollout_data/STEER-F/steer-f-Qwen2.5-Math-1.5B-s5-tree-rollout-uniform trainer.critic_warmup=0 'trainer.logger=['\''console'\'','\''wandb'\'']' trainer.project_name=STEER-F trainer.experiment_name=steer-f-Qwen2.5-Math-1.5B-s5-tree-rollout-uniform trainer.n_gpus_per_node=2 trainer.nnodes=1 trainer.save_freq=10 trainer.test_freq=10 trainer.total_epochs=10 trainer.total_training_steps=200 trainer.resume_mode=auto ++trainer.validation_data_dir=/workspace/entropy_collapse/validation_data ++trainer.save_best_only=True ++trainer.delete_old_best_checkpoint=True ++trainer.save_after=0 ++trainer.best_metric_key=val-core/aime_2024_dapo_boxed/acc/mean@32 ++data.seed=5 'trainer.logger=['\''console'\'','\''tensorboard'\'']' ++trainer.total_training_steps=110 ++trainer.rollout_data_dir=null '++actor_rollout_ref.rollout.steerf_tree_depths=[64,192,384]' '++actor_rollout_ref.rollout.steerf_tree_factors=[2,2,2]' ++actor_rollout_ref.rollout.steerf_tree_roots=1
 /workspace/entropy_collapse/verl/__init__.py:18: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
   import pkg_resources
+2026-09-13 02:51:44,675	ERROR services.py:1431 -- Failed to start the dashboard , return code 1
+2026-09-13 02:51:44,676	ERROR services.py:1456 -- Error should be written to 'dashboard.log' or 'dashboard.err'. We are printing the last 20 lines for you. See 'https://docs.ray.io/en/master/ray-observability/user-guides/configure-logging.html#logging-directory-structure' to find where the log file is.
+2026-09-13 02:51:44,677	ERROR services.py:1500 -- 
+The last 20 lines of /tmp/ray/session_2026-09-13_02-51-42_291016_25979/logs/dashboard.log (it contains the error message from the dashboard): 
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/ray/dashboard/utils.py", line 328, in get_all_modules
+    importlib.import_module(name)
+  File "/usr/lib/python3.12/importlib/__init__.py", line 90, in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<frozen importlib._bootstrap>", line 1387, in _gcd_import
+  File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1331, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 935, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 995, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "/usr/local/lib/python3.12/dist-packages/ray/dashboard/modules/aggregator/aggregator_agent.py", line 9, in <module>
+    from ray._private.telemetry.open_telemetry_metric_recorder import (
+  File "/usr/local/lib/python3.12/dist-packages/ray/_private/telemetry/open_telemetry_metric_recorder.py", line 10, in <module>
+    from opentelemetry.exporter.prometheus import PrometheusMetricReader
+  File "/usr/local/lib/python3.12/dist-packages/opentelemetry/exporter/prometheus/__init__.py", line 104, in <module>
+    from opentelemetry.semconv._incubating.attributes.otel_attributes import (
+ImportError: cannot import name 'OtelComponentTypeValues' from 'opentelemetry.semconv._incubating.attributes.otel_attributes' (/usr/local/lib/python3.12/dist-packages/opentelemetry/semconv/_incubating/attributes/otel_attributes.py)
+2026-09-13 02:52:15,112	INFO node.py:438 -- Failed to get node info b'RPC error: Deadline Exceeded'
+Error executing job with overrides: ['algorithm.adv_estimator=grpo', "data.train_files=['/workspace/entropy_collapse/datasets/DAPO-Math-17k.parquet']", "data.val_files=['/workspace/entropy_collapse/datasets/aime24.parquet']", 'data.train_batch_size=512', 'data.max_prompt_length=1024', 'data.max_response_length=3072', 'data.filter_overlong_prompts=True', 'data.truncation=left', 'actor_rollout_ref.model.path=Qwen/Qwen2.5-Math-1.5B', 'actor_rollout_ref.actor.optim.lr=1e-6', 'actor_rollout_ref.model.use_remove_padding=True', 'actor_rollout_ref.actor.ppo_mini_batch_size=32', 'actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=8', 'actor_rollout_ref.actor.use_kl_loss=False', 'actor_rollout_ref.actor.kl_loss_coef=0.001', 'actor_rollout_ref.actor.kl_loss_type=low_var_kl', 'actor_rollout_ref.actor.entropy_coeff=0', 'actor_rollout_ref.actor.clip_ratio_high=0.28', 'actor_rollout_ref.actor.clip_ratio_low=0.2', 'actor_rollout_ref.actor.clip_ratio_c=10.0', 'actor_rollout_ref.actor.policy_loss.loss_mode=entropy_control', '++actor_rollout_ref.actor.policy_loss.token_weight_min=0.7', '++actor_rollout_ref.actor.policy_loss.token_weight_max=1.0', '++actor_rollout_ref.actor.policy_loss.linear=False', '++actor_rollout_ref.actor.policy_loss.steerf_lam=0.25', '++actor_rollout_ref.actor.policy_loss.steerf_kappa=2', '++actor_rollout_ref.actor.policy_loss.steerf_gamma_h=0.7', '++actor_rollout_ref.actor.policy_loss.steerf_clip_c=1.0', '++actor_rollout_ref.actor.policy_loss.steerf_norm=scale', '++actor_rollout_ref.actor.policy_loss.steerf_baseline=sibling', '++actor_rollout_ref.actor.policy_loss.steerf_apply=branch', '++actor_rollout_ref.actor.policy_loss.steerf_permute_ah=0', '++actor_rollout_ref.actor.policy_loss.steerf_mapping=minmax', '++actor_rollout_ref.actor.policy_loss.steerf_winsor_q=0.01', '++actor_rollout_ref.actor.policy_loss.steerf_forecast=mtp', '++actor_rollout_ref.actor.policy_loss.steerf_heads_path=/workspace/entropy_collapse/checkpoints/mtp_heads_Qwen2.5-Math-1.5B-paper.pt', '++actor_rollout_ref.actor.policy_loss.steerf_calib_path=/workspace/entropy_collapse/checkpoints/mtp_calibration_Qwen2.5-Math-1.5B-paper.json', 'actor_rollout_ref.model.enable_gradient_checkpointing=True', '++actor_rollout_ref.actor.entropy_from_logits_with_chunking=True', 'actor_rollout_ref.actor.fsdp_config.param_offload=False', 'actor_rollout_ref.actor.fsdp_config.optimizer_offload=False', 'actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=4', 'actor_rollout_ref.rollout.tensor_model_parallel_size=2', 'actor_rollout_ref.rollout.name=vllm', 'actor_rollout_ref.rollout.gpu_memory_utilization=0.6', "actor_rollout_ref.actor.checkpoint.save_contents=['hf_model']", 'actor_rollout_ref.rollout.n=8', 'actor_rollout_ref.rollout.val_kwargs.n=1', 'actor_rollout_ref.rollout.val_kwargs.do_sample=True', 'actor_rollout_ref.rollout.val_kwargs.temperature=1.0', 'actor_rollout_ref.rollout.val_kwargs.top_p=0.7', 'actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=4', 'actor_rollout_ref.ref.fsdp_config.param_offload=False', 'algorithm.use_kl_in_reward=False', 'trainer.rollout_data_dir=/workspace/entropy_collapse/rollout_data/STEER-F/steer-f-Qwen2.5-Math-1.5B-s5-tree-rollout-uniform', 'trainer.critic_warmup=0', "trainer.logger=['console','wandb']", 'trainer.project_name=STEER-F', 'trainer.experiment_name=steer-f-Qwen2.5-Math-1.5B-s5-tree-rollout-uniform', 'trainer.n_gpus_per_node=2', 'trainer.nnodes=1', 'trainer.save_freq=10', 'trainer.test_freq=10', 'trainer.total_epochs=10', 'trainer.total_training_steps=200', 'trainer.resume_mode=auto', '++trainer.validation_data_dir=/workspace/entropy_collapse/validation_data', '++trainer.save_best_only=True', '++trainer.delete_old_best_checkpoint=True', '++trainer.save_after=0', '++trainer.best_metric_key=val-core/aime_2024_dapo_boxed/acc/mean@32', '++data.seed=5', "trainer.logger=['console','tensorboard']", '++trainer.total_training_steps=110', '++trainer.rollout_data_dir=null', '++actor_rollout_ref.rollout.steerf_tree_depths=[64,192,384]', '++actor_rollout_ref.rollout.steerf_tree_factors=[2,2,2]', '++actor_rollout_ref.rollout.steerf_tree_roots=1']
 Traceback (most recent call last):
-  File "<frozen runpy>", line 189, in _run_module_as_main
-  File "<frozen runpy>", line 112, in _get_module_details
-  File "/workspace/entropy_collapse/verl/__init__.py", line 22, in <module>
-    from .protocol import DataProto
-  File "/workspace/entropy_collapse/verl/protocol.py", line 39, in <module>
-    from verl.utils.torch_functional import allgather_dict_tensors
-  File "/workspace/entropy_collapse/verl/utils/torch_functional.py", line 29, in <module>
-    from transformers import PreTrainedTokenizer
-  File "/usr/local/lib/python3.12/dist-packages/transformers/__init__.py", line 27, in <module>
-    from . import dependency_versions_check
-  File "/usr/local/lib/python3.12/dist-packages/transformers/dependency_versions_check.py", line 57, in <module>
-    require_version_core(deps[pkg])
-  File "/usr/local/lib/python3.12/dist-packages/transformers/utils/versions.py", line 117, in require_version_core
-    return require_version(requirement, hint)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/local/lib/python3.12/dist-packages/transformers/utils/versions.py", line 111, in require_version
-    _compare_versions(op, got_ver, want_ver, requirement, pkg, hint)
-  File "/usr/local/lib/python3.12/dist-packages/transformers/utils/versions.py", line 44, in _compare_versions
-    raise ImportError(
-ImportError: huggingface-hub>=0.34.0,<1.0 is required for a normal functioning of this module, but found huggingface-hub==1.30.0.
-Try: `pip install transformers -U` or `pip install -e '.[dev]'` if you're working with git main
+  File "/workspace/entropy_collapse/verl/trainer/main_ppo.py", line 45, in main
+    run_ppo(config)
+  File "/workspace/entropy_collapse/verl/trainer/main_ppo.py", line 56, in run_ppo
+    ray.init(
+  File "/usr/local/lib/python3.12/dist-packages/ray/_private/client_mode_hook.py", line 134, in wrapper
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/ray/_private/worker.py", line 1917, in init
+    _global_node = ray._private.node.Node(
+                   ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/ray/_private/node.py", line 440, in __init__
+    raise Exception(
+Exception: The current node timed out during startup. This could happen because some of the raylet failed to startup or the GCS has become overloaded.
+
+Set the environment variable HYDRA_FULL_ERROR=1 for a complete stack trace.
