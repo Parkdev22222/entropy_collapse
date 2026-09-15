@@ -141,11 +141,29 @@ arm-우선으로 돌리면 STEER-F만 5시드고 GRPO는 1시드로 남는다.
 `REPO`를 주면 런이 끝날 때마다 HF Hub에 올리고 바이트 단위로 검증한 뒤 로컬을 지운다
 → 디스크 정상 상태가 체크포인트 1개(3.1 GB). 빼면 런당 3.1 GB가 쌓인다.
 
+### 디스크가 찼을 때 (학습 중에도 안전)
+
+큐는 여유가 `MIN_FREE_GB`(기본 20) 미만이면 **다음 arm을 시작하지 않고 멈춘다**
+(`run_campaign.sh:176`). 도는 런이 죽는 게 아니라 그 다음이 안 뜬다.
+
+```bash
+bash run/hf_backup.sh                    # 인자 없이 = 런 목록
+PRUNE=1 bash run/hf_backup.sh <끝난-런>   # optimizer/extra state 삭제, 네트워크 없음
+REPO=DSDSh/steer-f_2          bash run/hf_backup.sh <끝난-런>   # 업로드 + 검증
+REPO=DSDSh/steer-f_2 DELETE=1 bash run/hf_backup.sh <끝난-런>   # 검증 후 삭제
+```
+
+**`PRUNE=1`을 먼저 친다.** 체크포인트 용량의 대부분이 optimizer/extra state이고
+평가에도 Hub 업로드에도 쓰이지 않는다(`actor/huggingface/`만 있으면 된다). 네트워크가
+필요 없어서 즉시 회수된다. 도는 런은 세 검사가 알아서 막으므로 런 이름을 고를 때
+무엇이 도는지 몰라도 된다.
+
 ## 알려진 함정
 
 | | |
 |---|---|
 | **★ `steer_f/`는 도너 것이어야 한다** | 두 브랜치는 **공통 조상이 없고** 양쪽 다 `steer_f/`를 갖는다. 같은 패키지의 두 버전이 아니라 **두 계보**이고, `origin/paper`의 `verl`은 그쪽 `steer_f`를 이름으로 부른다(`dp_actor.py:407` → `forecast_h_togo` 외 7개). 이 브랜치 것을 쓰면 **모든 tree·steer arm이 워커 초기화에서 죽는다.** 두 계보가 바이트까지 같은 파일은 `tree_rollout.py` 하나뿐인데 하필 그게 모든 게이트가 import하던 파일이라, 게이트는 통과하고 런만 죽었다. `bash run/bootstrap_pod.sh`가 이제 덮어쓰고, `python3 run/_check_steer_f.py`가 `verl` 소스의 import 문과 대조한다. 손으로는 `git checkout origin/paper -- steer_f` |
+| **백업은 이름이 아니라 상태로 막힌다** | `hf_backup.sh`의 `LIVE_TAG`는 기본값이 `_0905`였고 그 접미사는 `run_0905_chain.sh`만 붙인다 — 캠페인 런은 전부 통과했다. 그리고 검증이 못 잡는다: 로컬 크기와 Hub 크기를 비교하는데 잘린 파일은 **자기 자신의 잘린 사본과 크기가 같다.** 지금은 (1) 이 런 이름을 커맨드라인에 가진 트레이너, (2) `FRESH_MIN`(기본 30분) 안에 쓰인 디렉토리, (3) `LIVE_TAG` 셋 중 하나라도 걸리면 REFUSE하고, 대신 올릴 수 있는 런을 찍는다. 완주하지 않은 런은 **경고만** 한다(죽은 런의 체크포인트도 보관 가치가 있다). `FORCE=1`이 전부를 덮는다 |
 | **보상 채점기 의존성** | `word2number`가 없으면 **step-0 검증에서** 죽는다 — 모델 다 올리고 생성까지 끝난 뒤다. `verl/utils/reward_score/__init__.py:58`이 지연 import를 하고 그 끝에 `qwen_math_eval_toolkit/parser.py:7 → from word2number import w2n`가 있다. 로그만 보면 환경 문제로 안 보인다(런이 한참 돌다 죽는다). `pip install word2number sympy`. `_check_deps.py`가 이제 둘 다 요구하고, `env_preflight`이 그 모듈을 **큐 시작 전에** import해본다 |
 | **심볼이 있다고 부를 수 있는 건 아니다** | 두 계보는 이름뿐 아니라 **시그니처**도 다르다. `measure_ah_support.py`가 `entropy_advantage`를 import하는 데는 성공하고 `TypeError: unexpected keyword argument 'response_ids'`로 죽었다 — 도너 쪽은 `(h_togo_vals, group_index, mask, responses=…)`를 받고 텐서를 돌려주는데 이 브랜치 쪽은 `response_ids=`/`group_size=`를 받고 2-튜플을 준다. `bootstrap_pod.sh`가 이 파일도 도너 것으로 덮고, `_check_steer_f.py`가 큐가 부르는 스크립트의 **호출부까지** 대조한다 |
 | **`run_uniform_ablation.sh`는 `_gpu_defaults.sh`를 안 본다** | :83-84가 `N_GPUS=${N_GPUS:-2}`를 하드코딩하고 **export**한다. 자식 `run_steerf.sh`의 감지도 같이 막힌다. 4장 박스에서 tree arm 6개가 2장, steer arm 3개가 4장으로 갈렸다 — 같은 표 안에서. 수치는 안 바뀐다(`ppo_micro_batch_size_per_gpu=8`이 min–max 풀이고 장수와 무관)지만 **arm 간 불일치**가 문제다. `_arms.sh`의 `gpu_topology`가 한 곳에서 정하고 `topology_guard`가 거부한다. `bash run/run_status.sh` 2절이 로그에서 잡아낸다 |
@@ -243,8 +261,8 @@ Write로 명시돼 있어야 하고, read 전용이면 업로드가 401로 죽�
 
 `--export`를 학습 중인 박스에서 돌리면 위험했다: `hf_backup.sh`의 라이브 가드는 런 이름에
 `_0905`가 들어갈 때만 발동하는데 캠페인 런 이름엔 접미사가 없어서, **verl이 쓰는 중인
-디렉토리를 올리고 바이트 검증까지 통과시킨다.** 지금은 이름이 아니라 **상태**로 판정한다 —
-학습이 돌고 있으면 로그가 최종 스텝에 도달한 런만 올린다.
+디렉토리를 올리고 바이트 검증까지 통과시킨다.** 지금은 `--export`도 `hf_backup.sh`도
+이름이 아니라 **상태**로 판정한다 — 아래 함정 표 참조.
 
 옮기는 것은 **git에 없고 GPU 시간이 드는 것**뿐이다:
 
