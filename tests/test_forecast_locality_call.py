@@ -124,3 +124,34 @@ def test_sibling_support_runs_on_the_shapes_the_script_builds(tmp_path):
 
     with pytest.raises(TypeError):
         mod.sibling_support(resp, len(uid), mask)      # the shipped bug
+
+
+# --- the local twin -----------------------------------------------------
+
+
+def test_local_twin_is_read_at_the_same_offset_as_the_forecast():
+    """The defect that made the first real run a null test.
+
+    slice_response_hidden takes hidden[:, -T:] -- "the hidden produced after
+    consuming responses[:, i]" -- so H_togo[t] is conditioned on s_t + y_t.
+    The twin was read from logits[:, P-1 : P-1+T], i.e. H(pi(.|s_t)),
+    conditioned on the prefix alone. entropy_advantage applies no shift of its
+    own, so prefix-matched siblings all carry the same value there and the
+    sibling baseline cancels it exactly: the run reported
+    a_local_absmean = 1.0e-07 against a_h_absmean = 0.283, with a correlation
+    of -6e-09 that could not have come out any other way.
+    """
+    src = SCRIPT.read_text()
+    assert "out.logits[:, P: P + T, :]" in src or \
+           "out.logits[:, P : P + T, :]" in src, \
+        "the local twin must be read at P..P+T-1, matching slice_response_hidden"
+    assert "out.logits[:, P - 1: P - 1 + T, :]" not in src, \
+        "P-1 is the pre-branch state; the sibling baseline annihilates it"
+
+
+def test_a_void_run_is_announced_not_reported_as_a_result():
+    """A collapsed twin must be called out, not read as 'uncorrelated'."""
+    src = SCRIPT.read_text()
+    assert "VOID" in src, "no guard against a degenerate local twin"
+    assert "a_local_absmean" in src.split("def main")[1], \
+        "the guard has to look at the twin's own magnitude"

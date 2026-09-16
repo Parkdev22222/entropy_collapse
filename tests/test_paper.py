@@ -121,6 +121,13 @@ def emittable_names():
             names |= {f"C{a}{b}{c}", f"T{a}{b}{c}", f"P{a}{b}{c}",
                       f"W{a}{b}{c}", f"WT{a}{b}{c}", f"WN{a}{b}{c}"}
         names.add(f"N{a}{b}")
+    # The locality measurement has its own emitter; read its table rather
+    # than listing the names here, for the same reason as above.
+    loc = (ROOT / "scripts" / "emit_locality_numbers.py").read_text()
+    body = re.search(r"MACROS = \{(.*?)\n\}", loc, re.S)
+    names |= set(re.findall(r'"([A-Za-z]+)":\s*\(', body.group(1)))
+    names |= set(re.findall(r'out\["([A-Za-z]+)"\]', loc))
+
     # backbone rows are the same analysis under --macro-prefix
     prefixed = set()
     for pre in ("Bqwenbig", "Bllama", "Bmistral"):

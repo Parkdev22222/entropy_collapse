@@ -310,6 +310,16 @@ if have analysis; then
         --logs "${LOG_DIR}" --out "${RES_DIR}" --steps "${STEPS}"
     guard analysis-bench python3 scripts/collect_results.py \
         --logs "${LOG_DIR}" --out "${RES_DIR}/benchmarks.tsv"
+    # The locality JSON is written by the measure stage. Without this the
+    # macros are never produced and the diagnostic stays red in the paper
+    # however many times the measurement runs -- the failure mode of task 29.
+    for j in "${DOC_DIR}/forecast_locality.json" \
+             "${DOC_DIR}/forecast_locality_val.json"; do
+        [ -f "${j}" ] || continue
+        guard analysis-locality python3 scripts/emit_locality_numbers.py \
+            --json "${j}" --out "${RES_DIR}/numbers-locality.tex"
+        break
+    done
 fi
 
 # ================================================================ summary

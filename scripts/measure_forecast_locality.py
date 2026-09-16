@@ -232,10 +232,21 @@ def main(argv=None):
             out = model(input_ids=ids, attention_mask=attn,
                         output_hidden_states=True, use_cache=False)
             hidden = out.hidden_states[-1]
-            # H(pi(.|s_t)) for the response positions. Position t of the
-            # response is predicted by the logits at index P+t-1, the same
-            # off-by-one verl applies when it logs actor/entropy.
-            logits = out.logits[:, P - 1: P - 1 + T, :].float()
+            # The local twin has to be read at the SAME offset as H_togo, or
+            # the comparison is void. slice_response_hidden takes
+            # hidden[:, -T:], "the hidden produced after consuming
+            # responses[:, i]", so H_togo[t] is conditioned on s_t + y_t.
+            # Reading the local entropy at P-1+t instead gives H(pi(.|s_t)),
+            # conditioned on the prefix alone -- and every prefix-matched
+            # sibling shares that prefix, so the sibling baseline in
+            # entropy_advantage (which applies no shift of its own) cancels it
+            # EXACTLY. The first run of this script measured
+            # a_local_absmean = 1.0e-07 against a_h_absmean = 0.283, i.e.
+            # float32 round-off on h_local_mean = 1.62, and reported a
+            # correlation of -6e-09: a null test that could not have come out
+            # any other way. Section 6's Alignment paragraph states this same
+            # off-by-one for H_togo; the twin needs it too.
+            logits = out.logits[:, P: P + T, :].float()
             logp = torch.log_softmax(logits, dim=-1)
             h_local = -(logp.exp() * logp).sum(-1).cpu()
             del out, logits, logp
@@ -302,6 +313,18 @@ def main(argv=None):
               f"(rho {s['advantage_spearman_a_h_vs_a_local']:+.3f})")
         print(f"               R^2 explained by local  = {s['advantage_r_squared']:.3f}")
         print(f"               sign agreement          = {s['sign_agreement']:.3f}")
+        print(f"    magnitudes |A_H| = {s['a_h_absmean']:.4f}   "
+              f"|A_local| = {s['a_local_absmean']:.4g}")
+        # A near-zero correlation only means "unrelated" if both signals
+        # exist. If the twin has collapsed to float32 round-off on its own
+        # level, it correlates with nothing and the test proves nothing.
+        if s["a_local_absmean"] < 1e-5 * max(s["h_local_mean"], 1e-9):
+            print("    *** VOID: |A_local| is at float32 round-off of "
+                  "h_local_mean. The twin")
+            print("        carries no signal, so this correlation says nothing "
+                  "about the")
+            print("        forecast. Check that h_local is read at the same "
+                  "offset as H_togo.")
         print()
     print("  Read it as: high levels correlation is expected and harmless; the")
     print("  claim survives when the ADVANTAGE correlation and R^2 are low, because")
