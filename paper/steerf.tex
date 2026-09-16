@@ -87,10 +87,12 @@ blindness is worse than an omission: the local estimator is exactly zero at a
 uniform branch point, that zero is the correct first-order answer, and the
 visitation term's prefactor is simultaneously maximal there --- the two channels are
 \emph{anti-correlated}, so no refinement of the local term can recover the missing
-signal. We then derive an estimator for the visitation channel that costs one extra
-forward pass. The reward-to-go implied by the decomposition is the remaining
-conditional entropy $\Htogo$, which we forecast with parallel
-multi-token-prediction heads; the sibling-prefix baseline that keeps the estimator
+signal. We then derive an estimator for the visitation channel. The reward-to-go implied
+by the decomposition is the remaining conditional entropy $\Htogo$, which we
+forecast with parallel multi-token-prediction heads at the cost of one extra
+forward pass --- though we also measure that forecast to be close to a scalar
+multiple of a quantity the trainer already computes, and report the head-free
+control that follows; the sibling-prefix baseline that keeps the estimator
 unbiased is supplied by a tree-structured rollout in which several samples share a
 prefix and diverge at scheduled depths. The resulting advantage $\AH$ sums to zero
 within a sibling set by construction, so the method cannot change the average amount
@@ -1273,6 +1275,63 @@ allow, so there is little headroom in scheduling more cuts; and the intervention
 extremely sparse --- about one position in eighty --- which makes the size of the
 effect in Table~\ref{tab:contrast} the surprising part rather than the small support.
 
+\subsection{Is the future term a local term?}
+\label{sec:res:locality}
+
+Section~\ref{sec:approx} reports a calibration that suppresses every head past
+the first, leaving $\hat{H}_{\mathrm{togo}}$ dominated by one step ahead. That
+invites the sharpest objection to the paper: if the forecast reaches one step,
+is $\AH$ anything a purely local quantity could not have produced? The question
+is answerable without training anything. We apply the \emph{same} operator ---
+the same sibling baseline, mask and grouping --- to two inputs: the calibrated
+forecast, and the policy's own next-token entropy read at the same offset, the
+state after the branch token. Any difference between the two is the
+forecaster's contribution and nothing else. We report it on the sibling
+support, where $\AH$ can be non-zero at all; outside it both are identically
+zero and a statistic over all positions measures the support rather than the
+forecast.
+
+The answer is that the forecaster is not earning its cost. Over
+\num{Locn} branch points from \num{Locgroups} validation prompts, the two
+advantages correlate at $r = \num{Locadv}$ (Spearman $\num{Locadvrho}$), the
+local twin explains $R^2 = \num{Locrsq}$ of the treatment, and the two agree in
+sign $\num{Locsign}$ of the time --- and the sign is what the token weights are
+monotone in. The levels correlate less than the advantages
+($\num{Loclevels}$), which is the wrong way round for an artefact of scale.
+
+The mechanism is one the paper had already measured without connecting it. With
+$\kappa = 2$ and $\gamma_H = 0.7$ the calibration instantiates to
+$\hat{H}_{\mathrm{togo}} = 0.72\,H_1 + 0.06\,H_2 + 0.11$, the sibling baseline
+removes the constant, and the first head is built to reproduce the policy's own
+next-token distribution --- its final layer is zero-initialised and its fitted
+$a_1 = 1.03$ says it stayed there. So $\AH$ should be close to
+$\gamma_H a_1 = 0.72$ times the local twin, and the measured magnitudes are
+$\num{Locahmag}$ against $\num{Locloctwinmag}$, a ratio of $\num{Locratio}$.
+$\AH$ is very nearly a scalar multiple of a quantity the trainer already
+computes, and Eq.~\eqref{eq:combine} divides the scale out through
+$\rho = \operatorname{rms}\{\mathrm{visit}\}$.
+
+Two things this does \emph{not} say. It does not touch
+Eq.~\eqref{eq:twochannel}, which is an identity, nor
+Section~\ref{sec:blind}: the local twin is not $\Om$. $\Om$ carries no
+sibling baseline and no tree, vanishes at a uniform branch point, and the twin
+exists only because the tree supplies siblings to difference against. What the
+measurement indicts is the \emph{forecasting apparatus} --- the MTP heads,
+their warm-up and their calibration --- not the visitation channel. Read
+alongside Section~\ref{sec:res:ablate}, where the sampler alone recovers
+$\num{Rlamzeroacc}$ against \textsc{steer}'s $\num{Rsteeracc}$ while the
+forecast adds the remainder, two independent measurements now point the same
+way.
+
+The caveats are the ones a single diagnostic run carries: \num{Locgroups}
+prompts at one validation step of the base policy, on independently sampled
+rollouts, whose sibling support therefore sits early in the response rather
+than at the scheduled branch depths. The head-free arm of
+Table~\ref{tab:followups} is the direct test, and it is cheaper than the arm it
+would replace: \textsc{oracle} reads $\Htogo$ from the policy's realised
+entropy, which verl computes in the same pass, so it carries none of the
+overhead in Section~\ref{sec:res:cost}.
+
 \subsection{Seeds, not steps}
 \label{sec:res:seeds}
 
@@ -1369,6 +1428,9 @@ $\lambda = 0.5$  & stronger& \num{Rlamhiacc}  & \num{Rlamhimaj}  \\
 \multicolumn{4}{@{}l}{\emph{the sampler, with the forecast switched off}} \\
 $\lambda = 0$, tree & tree only & \num{Rlamzeroacc} & \num{Rlamzeromaj} \\
 \textsc{steer}      & neither   & \num{Rsteeracc}   & \num{Rsteermaj}   \\
+\midrule
+\multicolumn{4}{@{}l}{\emph{the forecaster, replaced by what the trainer already has}} \\
+\textsc{oracle} & no heads & \num{Roracleacc} & \num{Roraclemaj} \\
 \midrule
 \multicolumn{4}{@{}l}{\emph{relaxed ratio clipping} ($\epsilon_{\mathrm{hi}}{=}5$, $\epsilon_{\mathrm{lo}}{=}0.99$)} \\
 STEER-F        & --- & \num{Rxclipsignedacc} & \num{Rxclipsignedmaj} \\
@@ -1589,13 +1651,23 @@ paper establishes without it is the ordering of the arms and the mechanism that
 produces it, since the three controls sit at zero while only the arm carrying $\AH$
 moves.
 
-\paragraph{The effective horizon is one step.}
+\paragraph{The forecaster does not earn its cost.}
 The calibration in Eq.~\eqref{eq:a3} suppresses heads beyond the first, so
 $\hat{H}_{\mathrm{togo}}$ is dominated by a single step ahead. This is the predicted
-behavior of Eq.~\eqref{eq:mi} rather than a bug, but it means the ``future'' in the
-visitation term is a short future, and a forecaster whose error did not grow with
-$k$ would test the idea more sharply. A sequential forecaster is the obvious
-comparison and we have not run it.
+behavior of Eq.~\eqref{eq:mi} rather than a bug, but
+Section~\ref{sec:res:locality} measures the consequence and it is worse than a
+short horizon: put through the same sibling baseline, the policy's own
+next-token entropy reproduces $\AH$ at $r = \num{Locadv}$ and
+$R^2 = \num{Locrsq}$, with the magnitudes in the ratio $\num{Locratio}$ that
+$\gamma_H a_1$ predicts. On that evidence the MTP heads, their warm-up and
+their calibration are machinery around a quantity the trainer already computes,
+and they carry the overhead of Section~\ref{sec:res:cost} to do it. We report
+the \textsc{oracle} arm of Table~\ref{tab:followups} as the direct test. What
+the measurement does not reach is the visitation channel itself: the local twin
+is not $\Om$, and it exists only because the tree supplies siblings to
+difference against. A forecaster whose error did not grow with $k$ would test
+the idea more sharply; a sequential forecaster is the obvious comparison and we
+have not run it.
 
 \paragraph{The support is small by construction.}
 Section~\ref{sec:tree} bounds the fraction of positions carrying a non-zero $\AH$ at

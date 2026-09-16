@@ -78,6 +78,9 @@ FOLLOWUP_ARMS = {
     "lam0.1":       "lamlo",
     "lam0.5":       "lamhi",
     "lam0-tree":    "lamzero",
+    # The forecaster's own control: same tree, same lambda, H_togo read
+    # from the policy's realised entropy instead of the MTP heads.
+    "oracle":       "oracle",
     "xclip-signed": "xclipsigned",
     "xclip-steer":  "xclipsteer",
     "rloo-signed":  "rloosigned",
@@ -369,6 +372,7 @@ def main(argv=None) -> int:
             "lam0.1": f"steer-f-{t}-s{seed}-tree-rollout-lam0.1",
             "lam0.5": f"steer-f-{t}-s{seed}-tree-rollout-lam0.5",
             "lam0-tree": f"steer-f-{t}-s{seed}-tree-rollout-lam0",
+            "oracle": f"steer-f-{t}-s{seed}-tree-rollout-oracle",
             "xclip-signed": f"steer-f-{t}-s{seed}-tree-rollout-xclip",
             "xclip-steer": f"steer-{t}-s{seed}-xclip",
             "rloo-signed": f"steer-f-{t}-s{seed}-tree-rollout-rloo",

@@ -82,6 +82,11 @@ def emit(doc):
     cfg = doc.get("config") or {}
     if "n_groups" in cfg:
         out["Locgroups"] = str(int(cfg["n_groups"]))
+    # Derived, because the prose's whole point is that this ratio lands on the
+    # calibration constant gamma_H * a_1 = .72 rather than on 1.
+    b = doc.get(BRANCH) or {}
+    if b.get("a_local_absmean"):
+        out["Locratio"] = f"{b['a_h_absmean'] / b['a_local_absmean']:.3f}"
     return out
 
 

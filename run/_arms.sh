@@ -194,6 +194,13 @@ run_name_for () {   # <arm> <seed>  -> the trainer's experiment_name
         lam0.1)       echo "steer-f-${MODEL_TAG}-s$2-tree-rollout-lam0.1" ;;
         lam0.5)       echo "steer-f-${MODEL_TAG}-s$2-tree-rollout-lam0.5" ;;
         lam0-tree)    echo "steer-f-${MODEL_TAG}-s$2-tree-rollout-lam0" ;;
+        # The forecaster's own control. measure_forecast_locality.py put
+        # A_H at r = .917 (R^2 = .840) against the sibling-relative
+        # deviation of the policy's own next-token entropy, with the two
+        # magnitudes in a ratio of .741 -- gamma_H * a_1 = .72, the
+        # calibration constant. oracle_h_togo runs that quantity through
+        # the same path with no heads, no Phase 1 and no extra forward.
+        oracle)       echo "steer-f-${MODEL_TAG}-s$2-tree-rollout-oracle" ;;
         xclip-signed) echo "steer-f-${MODEL_TAG}-s$2-tree-rollout-xclip" ;;
         xclip-steer)  echo "steer-${MODEL_TAG}-s$2-xclip" ;;
         rloo-signed)  echo "steer-f-${MODEL_TAG}-s$2-tree-rollout-rloo" ;;

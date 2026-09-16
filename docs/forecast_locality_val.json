@@ -1,0 +1,37 @@
+{
+  "config": {
+    "model": "Qwen/Qwen2.5-Math-1.5B",
+    "heads": "checkpoints/mtp_heads_Qwen2.5-Math-1.5B-paper.pt",
+    "calib": "checkpoints/mtp_calibration_Qwen2.5-Math-1.5B-paper.json",
+    "kappa": 2,
+    "gamma_h": 0.7,
+    "baseline": "sibling",
+    "n_groups": 4
+  },
+  "sibling_support": {
+    "n_positions": 3024,
+    "levels_pearson_h_togo_vs_h_local": 0.8912250153355352,
+    "levels_spearman_h_togo_vs_h_local": 0.7932094916041522,
+    "advantage_pearson_a_h_vs_a_local": 0.9166683563419231,
+    "advantage_spearman_a_h_vs_a_local": 0.7232235959341674,
+    "advantage_r_squared": 0.840280875518603,
+    "sign_agreement": 0.9209809264305178,
+    "a_h_absmean": 0.052852656692266464,
+    "a_local_absmean": 0.07130664587020874,
+    "h_togo_mean": 0.45975974202156067,
+    "h_local_mean": 0.3696073591709137
+  },
+  "branch_points_only": {
+    "n_positions": 464,
+    "levels_pearson_h_togo_vs_h_local": 0.8814414460079332,
+    "levels_spearman_h_togo_vs_h_local": 0.9724327009750655,
+    "advantage_pearson_a_h_vs_a_local": 0.9166683563419245,
+    "advantage_spearman_a_h_vs_a_local": 0.936636061409379,
+    "advantage_r_squared": 0.8402808755186054,
+    "sign_agreement": 0.9209809264305178,
+    "a_h_absmean": 0.34445351362228394,
+    "a_local_absmean": 0.4647226333618164,
+    "h_togo_mean": 1.0072747468948364,
+    "h_local_mean": 1.0599029064178467
+  }
+}

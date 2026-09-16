@@ -44,7 +44,7 @@ cd "${ROOT}" || { echo "FATAL: cannot cd to ${ROOT}" >&2; exit 1; }
 # shellcheck source=run/_arms.sh
 . "${ROOT}/run/_arms.sh"
 
-ARMS=${ARMS:-"lam0-tree grpo-long lam0.1 lam0.5 xclip-signed xclip-steer rloo-signed rloo-steer opo-signed opo-steer"}
+ARMS=${ARMS:-"lam0-tree oracle grpo-long lam0.1 lam0.5 xclip-signed xclip-steer rloo-signed rloo-steer opo-signed opo-steer"}
 SEED=${SEED:-1}
 STEPS=${STEPS:-110}
 LONG_STEPS=${LONG_STEPS:-200}      # grpo-long only: run past the wall-clock crossing
@@ -70,6 +70,7 @@ arm_spec () {   # <arm>
         lam0.1)       echo "tree STEERF_LAM=0.1"  ;;
         lam0.5)       echo "tree STEERF_LAM=0.5"  ;;
         lam0-tree)    echo "tree STEERF_LAM=0"    ;;
+        oracle)       echo "tree STEERF_LAM=0.25 STEERF_FORECAST=oracle" ;;
         xclip-signed) echo "tree STEERF_LAM=0.25 -- ${XCLIP}" ;;
         rloo-signed)  echo "tree STEERF_LAM=0.25 -- algorithm.adv_estimator=rloo" ;;
         opo-signed)   echo "tree STEERF_LAM=0.25 -- algorithm.adv_estimator=opo"  ;;
@@ -182,25 +183,29 @@ mkdir -p "${LOG_DIR}" "${VAL_DATA_DIR}"
 # One definition of how a followup arm is launched, so the OOM retry re-runs
 # what failed instead of a second copy that drifts away from it.
 # shellcheck disable=SC2086  -- the trailing overrides are a deliberate word list
-launch_followup () {   # <arm> <kind> <lam> <run-name> <steps> [hydra overrides...]
-    local a="$1" kind="$2" lam="$3" rn="$4" steps="$5"
-    shift 5
+launch_followup () {   # <arm> <kind> <lam> <run-name> <steps> <envs> [hydra ...]
+    # <envs> is arm_spec's assignment list verbatim. The loop used to pull only
+    # STEERF_LAM out of it and drop the rest, so an arm whose spec set anything
+    # else -- STEERF_FORECAST=oracle is the first -- ran under its own name with
+    # the default value. Unquoted on purpose: these are K=V words.
+    local a="$1" kind="$2" lam="$3" rn="$4" steps="$5" envs="$6"
+    shift 6
     local resume=""
     # The launchers refuse an existing checkpoint dir on purpose; continuing is
     # exactly what this queue means, since the arm is here because it is unfinished.
     [ -d "${CKPT_ROOT}/${rn}" ] && resume=1
     if [ "${kind}" = "grpo" ]; then
         # run_grpo.sh honours STEPS and writes ${LOG_DIR}/train-<run>.log itself.
-        SEED="${SEED}" RUN_NAME="${rn}" LOG="${LOG_DIR}/train-${rn}.log" \
+        env ${envs} SEED="${SEED}" RUN_NAME="${rn}" LOG="${LOG_DIR}/train-${rn}.log" \
             STEPS="${steps}" ${resume:+RESUME=1} bash run/run_grpo.sh
         return $?
     elif [ "${kind}" = "tree" ]; then
         # run_uniform_ablation.sh writes ${LOG_DIR}/train-${RUN_NAME}.log itself.
-        ARM=signed SEED="${SEED}" RUN_NAME="${rn}" STEERF_LAM="${lam}" STEPS="${steps}" \
-            ${resume:+RESUME=1} bash run/run_uniform_ablation.sh "$@"
+        env ${envs} ARM=signed SEED="${SEED}" RUN_NAME="${rn}" STEERF_LAM="${lam}" \
+            STEPS="${steps}" ${resume:+RESUME=1} bash run/run_uniform_ablation.sh "$@"
         return $?
     fi
-    SEED="${SEED}" RUN_NAME="${rn}" STEERF_LAM="${lam}" ${resume:+RESUME=1} \
+    env ${envs} SEED="${SEED}" RUN_NAME="${rn}" STEERF_LAM="${lam}" ${resume:+RESUME=1} \
         bash run/run_steerf.sh $(steer_plain_args "${steps}") "$@" \
         > "${LOG_DIR}/train-${rn}.log" 2>&1
     return $?
@@ -236,7 +241,7 @@ for a in "${QUEUE[@]}"; do
     [ -n "${extra_part}" ] && echo "  extra overrides: ${extra_part}"
     start=$(date +%s)
 
-    launch_followup "${a}" "${kind}" "${lam}" "${rn}" "${STEPS}" ${extra_part}
+    launch_followup "${a}" "${kind}" "${lam}" "${rn}" "${STEPS}" "${env_part}" ${extra_part}
     st=$?
     printf '[followups] %s exit %s after %s min\n' "${a}" "${st}" "$(( ($(date +%s) - start) / 60 ))"
 
@@ -251,7 +256,8 @@ for a in "${QUEUE[@]}"; do
             sleep 5
             await_gpus || true
             start=$(date +%s)
-            OFFLOAD=1 launch_followup "${a}" "${kind}" "${lam}" "${rn}" "${STEPS}" ${extra_part}
+            OFFLOAD=1 launch_followup "${a}" "${kind}" "${lam}" "${rn}" "${STEPS}" \
+                "${env_part}" ${extra_part}
             st=$?
             printf '[followups] %s retry exit %s after %s min\n' \
                 "${a}" "${st}" "$(( ($(date +%s) - start) / 60 ))"

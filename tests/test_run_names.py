@@ -148,3 +148,36 @@ def test_every_queue_exports_model_path_before_launching():
         text = (REPO / "run" / q).read_text()
         assert "MODEL_PATH" in text, f"{q} never mentions MODEL_PATH"
         assert "model_guard" in text, f"{q} does not call model_guard"
+
+
+def test_the_analyser_and_the_queue_agree_on_every_run_name():
+    """Two tables name the same runs; they drift silently.
+
+    run/_arms.sh:run_name_for is what the queue launches under, and
+    scripts/analyze_seeds.py has its own copy to find the logs afterwards.
+    Adding the `oracle` arm to one and not the other made the analyser raise
+    KeyError on every invocation -- which the seed-1 table caught only because
+    it shells out to the analyser. A disagreement in the other direction is
+    worse: the analyser would look for a log the queue never writes and report
+    the arm as missing forever.
+    """
+    import ast
+    import re
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parent.parent
+           / "scripts" / "analyze_seeds.py").read_text()
+    body = re.search(r"def run_name\(arm: str, seed: int\) -> str:\n"
+                     r"\s+t = args\.model_tag\n\s+return (\{.*?\n\s+\})\[arm\]",
+                     src, re.S)
+    assert body, "analyze_seeds.run_name no longer has a literal table"
+    arms = [k.value for k in ast.parse(body.group(1), mode="eval").body.keys]
+
+    for arm in arms:
+        theirs = run_name(arm, 1)
+        assert theirs, f"run/_arms.sh does not know the arm {arm!r}"
+        # The python side interpolates the same tag; compare the whole string.
+        mine = re.search(rf'"{re.escape(arm)}": f"([^"]+)"', body.group(1))
+        assert mine, arm
+        expected = mine.group(1).replace("{t}", "Qwen2.5-Math-1.5B").replace("{seed}", "1")
+        assert theirs == expected, f"{arm}: bash {theirs!r} vs python {expected!r}"
