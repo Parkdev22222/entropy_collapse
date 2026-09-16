@@ -249,7 +249,12 @@ def main(argv=None):
         # The local twin: same operator, same grouping, same mask.
         a_loc = compute_a_h(h_local, resp, mask, uid, cfg)
 
-        support = sibling_support(resp, B, mask).bool() & mask.bool()
+        # Keyword form on purpose: the signature is (responses, mask,
+        # group_index) and this call used to pass (resp, B, mask), i.e. the
+        # batch size where the mask belongs. Nothing here had ever run, so
+        # the first execution would have died on torch.zeros_like(int).
+        support = sibling_support(responses=resp, mask=mask,
+                                  group_index=uid).bool() & mask.bool()
         if not bool(support.any()):
             continue
         branch = (a_h != 0) & support
