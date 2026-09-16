@@ -1210,7 +1210,8 @@ Where that structural change comes from is a separate question, and the arm that
 answers it finished after this section was first written. \textsc{uniform} runs the
 sampler at $\lambda = .25$ with the forecast's value destroyed and shows no uplift
 gain, which reads as though the structure belonged to $\AH$. It does not: the
-$\lambda = 0$ tree arm --- the sampler alone, no damping at all --- reaches an uplift
+$\lambda = 0$ tree arm --- the sampler with the future channel off, \textsc{steer}'s
+local damping still in place --- reaches an uplift
 of $\num{Rlamzerouplift}$, against $\num{Rsteeruplift}$ for \textsc{steer} and
 $\num{Rsigneduplift}$ for STEER-F. On this evidence most of the structural gain is
 the sampler's, and Section~\ref{sec:res:ablate} reports it that way. The
