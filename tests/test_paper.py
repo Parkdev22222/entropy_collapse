@@ -115,7 +115,7 @@ def emittable_names():
         for c in metrics:
             names |= {f"R{a}{c}", f"E{a}{c}", f"S{a}{c}", f"Lo{a}{c}", f"Hi{a}{c}"}
     for stem in stems:
-        names |= {f"R{stem}acc", f"R{stem}maj"}
+        names |= {f"R{stem}{c}" for c in ("acc", "maj", "uplift")}
     for a, b in pairs:
         for c in metrics:
             names |= {f"C{a}{b}{c}", f"T{a}{b}{c}", f"P{a}{b}{c}",

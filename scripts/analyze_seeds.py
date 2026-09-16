@@ -718,7 +718,9 @@ def main(argv=None) -> int:
         for k in ("Wsigned", "Wgrpo", "Wgrpolong"):
             fh.write(mac(k, match.get(k), "{:.1f}") if k in match else mac(k, None))
         for stem, agg in sorted(followups.items()):
-            for c in ("acc", "maj"):
+            # uplift too: the lambda=0 tree arm's uplift is the number that
+            # settles whether the structural gain belongs to the sampler.
+            for c in ("acc", "maj", "uplift"):
                 fh.write(mac(f"R{stem}{c}", agg.get(c)))
         fh.write(mac("Wseed", within_seed, "{:d}") if within_seed
                  else mac("Wseed", None))

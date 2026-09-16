@@ -1204,8 +1204,18 @@ part explained by the sample set's structure:
 against GRPO, with the uplift term at $t = 4.82$; against \textsc{steer} the uplift
 term is $+.0200$ ($t = 3.26$). Nearly two thirds of the improvement is not that
 individual samples are more often right, but that the right ones agree with each
-other more and the wrong ones agree less. Since \textsc{uniform} shows no uplift
-gain, the structural change is attributable to $\AH$ and not to the tree.
+other more and the wrong ones agree less.
+
+Where that structural change comes from is a separate question, and the arm that
+answers it finished after this section was first written. \textsc{uniform} runs the
+sampler at $\lambda = .25$ with the forecast's value destroyed and shows no uplift
+gain, which reads as though the structure belonged to $\AH$. It does not: the
+$\lambda = 0$ tree arm --- the sampler alone, no damping at all --- reaches an uplift
+of $\num{Rlamzerouplift}$, against $\num{Rsteeruplift}$ for \textsc{steer} and
+$\num{Rsigneduplift}$ for STEER-F. On this evidence most of the structural gain is
+the sampler's, and Section~\ref{sec:res:ablate} reports it that way. The
+decomposition above is unaffected --- it is measured against GRPO, which has no tree
+--- but the attribution is not what the five-arm design alone could see.
 
 \subsection{Entropy is not the channel}
 \label{sec:res:entropy}
@@ -1386,6 +1396,25 @@ switches the forecast off while leaving the sampler in place, and is the direct
 answer to ``is tree rollout simply a better sampler''. Read against \textsc{steer},
 which has neither, its difference is the sampler's own contribution; read against
 STEER-F, what remains is the forecast's.
+
+The answer is not the one the rest of this paper was written expecting. The sampler
+alone reaches $\num{Rlamzeroacc}$ against \textsc{steer}'s $\num{Rsteeracc}$, and
+$\num{Rlamzeromaj}$ against $\num{Rsteermaj}$ --- about two thirds of STEER-F's
+accuracy margin over \textsc{steer} and the large majority of its majority-vote
+margin. Its uplift, $\num{Rlamzerouplift}$, is not below STEER-F's
+$\num{Rsigneduplift}$. What remains for the forecast is the accuracy gap between
+$\num{Rlamzeroacc}$ and $\num{Rsignedacc}$.
+
+Two things keep this from being decisive, and neither rescues the original reading.
+Every cell here is one run, and the spread across this block is about twice the
+run-to-run spread measured in Section~\ref{sec:res:seeds} --- suggestive, not
+settled. And the $\lambda$ sweep is not monotone: $\lambda = .1$ sits below
+$\lambda = 0$ on accuracy, which is what noise looks like at this sample size. We
+report the block as measured and do not reconcile it. The five-seed campaign of
+Appendix~\ref{sec:appendix-prereg} decides whether the sampler or the forecast
+carries the structural term; until then, \textsc{uniform} and \textsc{permuted}
+establish that the forecast's \emph{value} matters at fixed $\lambda$, and nothing
+in this paper establishes that the tree does not.
 
 \paragraph{Clipping and the advantage estimator.} The relaxed-clipping setting is
 where entropy interventions are supposed to matter most, because ratio clipping
