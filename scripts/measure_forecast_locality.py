@@ -168,6 +168,27 @@ def summarise(a_h: torch.Tensor, a_loc: torch.Tensor,
     }
 
 
+def local_entropy(h, lm_head, chunk_size):
+    """H(pi(.|state)) for [B, T, H] hidden states, without a [B, T, V] tensor.
+
+    Calling the CausalLM head on a whole group materialises
+    [32, 768, 151936] float32 = 13.9 GB of logits, plus 4.6 GB each for logp
+    and its exponential, on a box that is also training. forecast_h_togo
+    already chunks its unembedding for exactly this reason; this is the same
+    prescription for the local twin, which was the one path still doing it in
+    one shot. Softmax is independent per position, so the chunking is exact.
+    """
+    B, T, _ = h.shape
+    flat = h.reshape(B * T, -1)
+    out = torch.empty(B * T, dtype=torch.float32, device=flat.device)
+    for i in range(0, flat.shape[0], chunk_size):
+        logits = lm_head(flat[i:i + chunk_size]).float()
+        logp = torch.log_softmax(logits, dim=-1)
+        out[i:i + chunk_size] = -(logp.exp() * logp).sum(-1)
+        del logits, logp
+    return out.view(B, T)
+
+
 def main(argv=None):
     args = build_argparser().parse_args(argv)
     from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -229,9 +250,20 @@ def main(argv=None):
         attn = torch.cat([torch.ones((B, P), dtype=torch.long), mask], dim=1).to(args.device)
 
         with torch.no_grad():
-            out = model(input_ids=ids, attention_mask=attn,
-                        output_hidden_states=True, use_cache=False)
-            hidden = out.hidden_states[-1]
+            # The decoder, not the CausalLM: the head's [B, S, V] logits are
+            # 13.9 GB for one group here and every one of them is thrown away
+            # except the T-slice below, and output_hidden_states=True pins all
+            # 29 layers to reach the one we use. get_decoder() is the
+            # PreTrainedModel API, so this holds for the other backbones too.
+            decoder = model.get_decoder() if hasattr(model, "get_decoder") else None
+            if decoder is not None:
+                hidden = decoder(input_ids=ids, attention_mask=attn,
+                                 use_cache=False).last_hidden_state
+            else:
+                out = model(input_ids=ids, attention_mask=attn,
+                            output_hidden_states=True, use_cache=False)
+                hidden = out.hidden_states[-1]
+                del out
             # The local twin has to be read at the SAME offset as H_togo, or
             # the comparison is void. slice_response_hidden takes
             # hidden[:, -T:], "the hidden produced after consuming
@@ -246,10 +278,9 @@ def main(argv=None):
             # correlation of -6e-09: a null test that could not have come out
             # any other way. Section 6's Alignment paragraph states this same
             # off-by-one for H_togo; the twin needs it too.
-            logits = out.logits[:, P: P + T, :].float()
-            logp = torch.log_softmax(logits, dim=-1)
-            h_local = -(logp.exp() * logp).sum(-1).cpu()
-            del out, logits, logp
+            h_local = local_entropy(hidden[:, P: P + T, :],
+                                    model.get_output_embeddings(),
+                                    args.chunk_size).cpu()
 
         h_togo = forecast_h_togo(hidden, model.get_output_embeddings(), heads,
                                  response_length=T, cfg=cfg, calib=calib,

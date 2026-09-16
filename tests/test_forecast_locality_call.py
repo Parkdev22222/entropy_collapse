@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import math
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -142,10 +144,9 @@ def test_local_twin_is_read_at_the_same_offset_as_the_forecast():
     of -6e-09 that could not have come out any other way.
     """
     src = SCRIPT.read_text()
-    assert "out.logits[:, P: P + T, :]" in src or \
-           "out.logits[:, P : P + T, :]" in src, \
+    assert re.search(r"hidden\[:, P\s*:\s*P \+ T, :\]", src), \
         "the local twin must be read at P..P+T-1, matching slice_response_hidden"
-    assert "out.logits[:, P - 1: P - 1 + T, :]" not in src, \
+    assert not re.search(r"\[:, P - 1\s*:\s*P - 1 \+ T, :\]", src), \
         "P-1 is the pre-branch state; the sibling baseline annihilates it"
 
 
@@ -155,3 +156,56 @@ def test_a_void_run_is_announced_not_reported_as_a_result():
     assert "VOID" in src, "no guard against a degenerate local twin"
     assert "a_local_absmean" in src.split("def main")[1], \
         "the guard has to look at the twin's own magnitude"
+
+
+# --- memory: the group forward used to be 33 GB ------------------------
+
+
+def _load_local_entropy():
+    """Compile just local_entropy out of the script.
+
+    Importing the module pulls steer_f, whose copy on this branch is the
+    early Phase 0-2 file (see the header). Lifting the one function keeps the
+    test on the real source instead of a paraphrase of it.
+    """
+    torch = pytest.importorskip("torch")
+    tree = ast.parse(SCRIPT.read_text())
+    fn = next((n for n in tree.body
+               if isinstance(n, ast.FunctionDef) and n.name == "local_entropy"), None)
+    assert fn is not None, "local_entropy is gone; the chunking went with it"
+    ns = {"torch": torch}
+    exec(compile(ast.Module(body=[fn], type_ignores=[]), "<local_entropy>", "exec"), ns)
+    return torch, ns["local_entropy"]
+
+
+def test_chunking_the_local_entropy_is_exact():
+    """Softmax is per position, so the chunk size must not move the answer.
+
+    This is what licenses the memory fix: one group's logits were
+    [32, 768, 151936] float32 = 13.9 GB, plus 4.6 GB each for logp and its
+    exponential, on a box that is also training.
+    """
+    torch, local_entropy = _load_local_entropy()
+    torch.manual_seed(0)
+    B, T, H, V = 3, 7, 16, 41
+    h = torch.randn(B, T, H)
+    head = torch.nn.Linear(H, V, bias=False)
+
+    whole = local_entropy(h, head, B * T)
+    for chunk in (11, 5, 1):
+        got = local_entropy(h, head, chunk)
+        assert torch.allclose(whole, got, atol=1e-6), f"chunk={chunk}"
+    assert whole.shape == (B, T)
+    assert (whole > 0).all() and (whole <= math.log(V) + 1e-5).all()
+
+
+def test_the_group_forward_does_not_build_every_layer_or_the_full_logits():
+    """The regression: one discarded 13.9 GB tensor and 28 discarded layers."""
+    src = SCRIPT.read_text()
+    body = src.split("for gi, (prompt, responses) in enumerate(groups):")[1]
+    assert "get_decoder()" in body, "the CausalLM head rebuilds [B, S, V] logits"
+    assert "out.logits" not in body, "the local twin must come from hidden states"
+    # Comments here discuss the old path, so count code lines only. The one
+    # survivor is the fallback for a model without get_decoder().
+    code = [ln for ln in body.splitlines() if not ln.lstrip().startswith("#")]
+    assert sum("output_hidden_states=True" in ln for ln in code) <= 1
