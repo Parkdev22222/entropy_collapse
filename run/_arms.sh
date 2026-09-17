@@ -25,7 +25,7 @@ MODEL_TAG=${MODEL_TAG:-Qwen2.5-Math-1.5B}
 # 2026-09-14: that derivation assumed one family. backbone_profile() below now
 # owns the pairing, so a known tag fills in its own path, validation set and
 # selection key together, and an unknown tag must supply them rather than
-# silently resolving to "Qwen/Qwen2.5-Math-Llama-3.1-8B".
+# silently resolving to "Qwen/Qwen2.5-Math-Llama-3.2-3B".
 backbone_profile () {   # <tag> -> sets MODEL_PATH / VAL_PARQUET / BEST_METRIC_KEY
     # Everything a backbone changes, in one place. They travel together because
     # they cannot disagree: the run name says the tag, the trainer loads the
@@ -46,8 +46,15 @@ backbone_profile () {   # <tag> -> sets MODEL_PATH / VAL_PARQUET / BEST_METRIC_K
             MODEL_PATH=${MODEL_PATH:-Qwen/${tag}}
             VAL_PARQUET=${VAL_PARQUET:-datasets/aime24.parquet}
             BEST_METRIC_KEY=${BEST_METRIC_KEY:-val-core/aime_2024_dapo_boxed/acc/mean@32} ;;
-        Llama-3.1-8B)
-            MODEL_PATH=${MODEL_PATH:-meta-llama/Llama-3.1-8B}
+        Llama-3.2-3B)
+            # 3B, not the 8B this row started as. A single H200 holds a 3B run
+            # without offload -- weights, grads and the fp32 AdamW state come to
+            # ~48 GB against 141 -- while an 8B needs param and optimizer
+            # offload, which runs the update on CPU and is no longer the same
+            # numerical stack as the other rows. The backbone claim is the sign
+            # of the contrast within a family, not its scale, and the 7B/1.5B
+            # Qwen pair is what carries scale.
+            MODEL_PATH=${MODEL_PATH:-meta-llama/Llama-3.2-3B}
             VAL_PARQUET=${VAL_PARQUET:-datasets/math500.parquet}
             BEST_METRIC_KEY=${BEST_METRIC_KEY:-val-core/math500/acc/mean@1} ;;
         Mistral-7B-v0.3)

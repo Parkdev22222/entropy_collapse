@@ -28,7 +28,7 @@ def arms(snippet: str, **env):
 PROFILES = [
     ("Qwen2.5-Math-1.5B", "Qwen/Qwen2.5-Math-1.5B", "aime24", "aime_2024_dapo_boxed/acc/mean@32"),
     ("Qwen2.5-Math-7B",   "Qwen/Qwen2.5-Math-7B",   "aime24", "aime_2024_dapo_boxed/acc/mean@32"),
-    ("Llama-3.1-8B",      "meta-llama/Llama-3.1-8B", "math500", "math500/acc/mean@1"),
+    ("Llama-3.2-3B",      "meta-llama/Llama-3.2-3B", "math500", "math500/acc/mean@1"),
     ("Mistral-7B-v0.3",   "mistralai/Mistral-7B-v0.3", "math500", "math500/acc/mean@1"),
 ]
 
@@ -55,8 +55,8 @@ def test_non_math_backbones_do_not_select_on_aime24():
 
 
 def test_unknown_tag_refuses_rather_than_guessing():
-    """The old derivation turned MODEL_TAG=Llama-3.1-8B into
-    'Qwen/Qwen2.5-Math-Llama-3.1-8B'."""
+    """The old derivation turned MODEL_TAG=Llama-3.2-3B into
+    'Qwen/Qwen2.5-Math-Llama-3.2-3B'."""
     p = arms("backbone_profile Gemma-2-9B", MODEL_TAG="Gemma-2-9B")
     assert p.returncode != 0
     assert "not a known backbone" in p.stdout + p.stderr

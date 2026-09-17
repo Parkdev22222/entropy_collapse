@@ -33,7 +33,7 @@ cd "${ROOT}" || { echo "FATAL: cannot cd to ${ROOT}" >&2; exit 1; }
 # shellcheck source=run/_arms.sh
 . "${ROOT}/run/_arms.sh"
 
-BACKBONES=${BACKBONES:-"Qwen2.5-Math-7B Llama-3.1-8B Mistral-7B-v0.3"}
+BACKBONES=${BACKBONES:-"Qwen2.5-Math-7B Llama-3.2-3B Mistral-7B-v0.3"}
 ARMS=${ARMS:-"grpo steer signed"}
 SEED=${SEED:-1}
 STEPS=${STEPS:-110}

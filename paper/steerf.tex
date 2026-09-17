@@ -939,7 +939,7 @@ Backbone & Family & Math-spec. & Validation \\
 \midrule
 $1.5$B  & Qwen2.5-Math & yes & AIME 2024 \\
 $7$B    & Qwen2.5-Math & yes & AIME 2024 \\
-$8$B    & Llama 3.1    & no  & MATH500 \\
+$3$B    & Llama 3.2    & no  & MATH500 \\
 $7$B    & Mistral      & no  & MATH500 \\
 \bottomrule
 \end{tabular}
@@ -1557,7 +1557,7 @@ $1.5$B Qwen-Math & \num{Rgrpoacc} & \num{Rsteeracc} & \num{Rsignedacc}
                  & \num{Csignedgrpoacc} & \num{Csignedsteeracc} \\
 $7$B Qwen-Math   & \num{BqwenbigRgrpoacc} & \num{BqwenbigRsteeracc} & \num{BqwenbigRsignedacc}
                  & \num{BqwenbigCsignedgrpoacc} & \num{BqwenbigCsignedsteeracc} \\
-$8$B Llama       & \num{BllamaRgrpoacc} & \num{BllamaRsteeracc} & \num{BllamaRsignedacc}
+$3$B Llama       & \num{BllamaRgrpoacc} & \num{BllamaRsteeracc} & \num{BllamaRsignedacc}
                  & \num{BllamaCsignedgrpoacc} & \num{BllamaCsignedsteeracc} \\
 $7$B Mistral     & \num{BmistralRgrpoacc} & \num{BmistralRsteeracc} & \num{BmistralRsignedacc}
                  & \num{BmistralCsignedgrpoacc} & \num{BmistralCsignedsteeracc} \\
@@ -1699,9 +1699,12 @@ Table~\ref{tab:anticorr} is a prediction rather than an observation.
 The full decomposition---the five arms, the ablations, the mechanism
 diagnostics---rests on one $1.5$B model. The three further backbones
 (Section~\ref{sec:backbones}) carry the three-way contrast at one seed each, which
-establishes the sign and not its size, and they stop at $7$--$8$B: we have no
+establishes the sign and not its size, and they stop at $7$B: we have no
 evidence about models an order of magnitude larger, where the base policy is
-sharper and the relative size of the two channels may differ. The non-mathematics
+sharper and the relative size of the two channels may differ. The two
+non-mathematics rows are also the smallest of the four, so family and scale are
+not fully crossed: what they test is whether the sign survives a different
+pre-training corpus, not whether it survives one at $8$B or beyond. The non-mathematics
 backbones are also selected on a different benchmark from the mathematics ones
 (Section~\ref{sec:valset}); that is what makes their rows measurable, and it is
 also why no claim in this paper compares accuracy across backbones.
