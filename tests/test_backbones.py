@@ -187,3 +187,36 @@ def test_an_unknown_backbone_stops_the_queue():
     p = dry(BACKBONES="Qwen2.5-Math-7B Gemma-2-9B")
     assert p.returncode != 0
     assert "unknown backbone" in p.stdout + p.stderr
+
+
+# ----------------------------------------------- the heads filename (2026-09-17)
+def test_queue_looks_for_the_heads_the_warmup_actually_writes(tmp_path):
+    """warmup_and_validate.sh:24 defaults SCALE=paper and writes
+    mtp_heads_<tag>-paper.pt; run_steerf.sh:73 derives the same name from the
+    same variable; run_uniform_ablation.sh:95 -- the launcher the signed arm
+    goes through -- hardcodes the -paper variant. The queue used to build the
+    bare mtp_heads_<tag>.pt, which nothing writes.
+
+    The cost was quiet: heads_guard gates only the signed arm, so GRPO and
+    STEER would train for ~80 H200-hours and the one arm the backbone row
+    exists for would be skipped by a line that scrolls past in a log.
+    """
+    src = (ROOT / "run" / "run_backbones.sh").read_text()
+    first = src.index("export STEERF_HEADS=")
+    line = src[first:src.index("\n", first)]
+    assert "${scale" in line, f"the primary path ignores SCALE: {line}"
+    # The bare name may still appear, but only inside the -f fallback: a
+    # backbone warmed up with SCALE= empty writes it, and refusing a
+    # forecaster that exists would be a worse failure than either.
+    bare = 'checkpoints/mtp_heads_${bb}.pt'
+    assert src.count(bare) == 2, "bare name should appear only in the fallback"
+    assert "[ ! -f " in src[first:first + 1200]
+
+
+def test_a_missing_forecaster_is_reported_at_the_end_not_only_in_passing():
+    """The skip message is printed mid-queue, hours before the queue ends.
+    The summary is where an operator looks."""
+    src = (ROOT / "run" / "run_backbones.sh").read_text()
+    assert "SKIPPED_SIGNED" in src
+    assert "NO FORECASTER" in src
+    assert "cannot answer the question they are for" in src

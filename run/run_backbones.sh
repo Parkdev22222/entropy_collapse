@@ -160,15 +160,45 @@ for item in "${QUEUE[@]}"; do
     export MODEL_TAG="${bb}"
     unset MODEL_PATH VAL_PARQUET BEST_METRIC_KEY
     backbone_profile "${bb}" || exit 2
-    export STEERF_HEADS="${ROOT}/checkpoints/mtp_heads_${bb}.pt"
-    export STEERF_CALIB="${ROOT}/checkpoints/mtp_calibration_${bb}.json"
+    # ${SCALE} or the file will not be there. warmup_and_validate.sh:24
+    # defaults SCALE to "paper" and names its outputs
+    # mtp_heads_<tag>-paper.pt, run_steerf.sh:73 derives the same name from
+    # the same variable, and run_uniform_ablation.sh:95 -- the launcher the
+    # signed arm actually goes through -- hardcodes the -paper variant. This
+    # line used to build the bare mtp_heads_<tag>.pt, which nothing writes.
+    #
+    # The cost was quiet, which is the point: heads_guard gates only the
+    # signed arm, so GRPO and STEER would train for ~80 H200-hours and the
+    # one arm the backbone row exists for would be skipped with a line that
+    # scrolls past in a log.
+    scale="${SCALE-paper}"
+    export STEERF_HEADS="${ROOT}/checkpoints/mtp_heads_${bb}${scale:+-${scale}}.pt"
+    export STEERF_CALIB="${ROOT}/checkpoints/mtp_calibration_${bb}${scale:+-${scale}}.json"
+    # Fall back to the un-suffixed pair when that is what the box has: a
+    # backbone warmed up with SCALE= set empty writes those names, and
+    # refusing a forecaster that exists would be a worse failure than either.
+    if [ ! -f "${STEERF_HEADS}" ] && [ -f "${ROOT}/checkpoints/mtp_heads_${bb}.pt" ]; then
+        export STEERF_HEADS="${ROOT}/checkpoints/mtp_heads_${bb}.pt"
+        export STEERF_CALIB="${ROOT}/checkpoints/mtp_calibration_${bb}.json"
+    fi
 
     if ! model_guard; then exit 2; fi
 
     # Only the STEER-F arm opens the forecaster. GRPO does not, and STEER runs
     # at lambda=0, where run_steerf.sh:76 never loads it.
     if [ "${arm}" = "signed" ] && ! heads_guard; then
-        echo "[backbones] SKIP ${rn} -- warm up ${bb}'s heads first"
+        # Loud, because this is the arm the row exists for. Skipping it
+        # quietly leaves GRPO and STEER to run for days and produces a table
+        # whose decisive column is empty.
+        echo "[backbones] ================================================" >&2
+        echo "[backbones] SKIP ${rn} -- ${bb} has no forecaster." >&2
+        echo "[backbones] This is the STEER-F arm. GRPO and STEER will still" >&2
+        echo "[backbones] run and the row will come back WITHOUT its result." >&2
+        echo "[backbones] Warm it up first:" >&2
+        echo "[backbones]   MODEL_PATH=${MODEL_PATH} bash run/collect_warmup_rollouts.sh" >&2
+        echo "[backbones]   MODEL_PATH=${MODEL_PATH} bash run/warmup_and_validate.sh" >&2
+        echo "[backbones] ================================================" >&2
+        SKIPPED_SIGNED="${SKIPPED_SIGNED:-} ${bb}"
         continue
     fi
 
@@ -235,3 +265,13 @@ for b in ${BACKBONES}; do
         printf '  %-52s %s\n' "${rn}" "${r}"
     done
 done
+
+# A row whose STEER-F arm never ran is not a partial result, it is no result:
+# the backbone section exists to say whether STEER-F beats GRPO on another
+# family. Say so once more at the end, where the operator actually looks.
+if [ -n "${SKIPPED_SIGNED:-}" ]; then
+    echo
+    echo "[backbones] NO FORECASTER, so no STEER-F arm, for:${SKIPPED_SIGNED}"
+    echo "[backbones] Those rows cannot answer the question they are for."
+    echo "[backbones] Heads are looked for at checkpoints/mtp_heads_<tag>${SCALE-paper:+-${SCALE-paper}}.pt"
+fi
