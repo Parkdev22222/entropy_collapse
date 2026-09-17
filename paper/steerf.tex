@@ -1350,16 +1350,20 @@ question from whether it survives re-running, and we report it only in
 Appendix~\ref{sec:appendix-within} so the two are not confused.
 
 Run-to-run spread is itself worth reporting, and with one seed per arm it is the
-number that decides how much the rest of this section is worth. We can measure it
-directly for one arm: GRPO has finished \num{Nallgrpo} seeds, and its converged-window
-accuracy moves from \num{Logrpoacc} to \num{Higrpoacc} between them --- a spread of
-\num{Sgrpoacc}, against a headline STEER-F\,$-$\,GRPO gap of \num{Csignedgrpoacc}.
-On majority vote the spread is \num{Sgrpomaj} against \num{Csignedgrpomaj}. The
-second STEER-F run of Appendix~\ref{sec:appendix-within} gives an independent estimate
-of the same quantity and agrees with it.
+number that decides how much the rest of this section is worth. Two arms have now
+finished twice. GRPO's converged-window accuracy moves from \num{Logrpoacc} to
+\num{Higrpoacc} across its \num{Nallgrpo} seeds --- a spread of \num{Sgrpoacc},
+against a headline STEER-F\,$-$\,GRPO gap of \num{Csignedgrpoacc}; on majority vote
+the spread is \num{Sgrpomaj} against \num{Csignedgrpomaj}. \textsc{permuted} moves
+from \num{Lopermutedacc} to \num{Hipermutedacc} across its \num{Nallpermuted}, a
+spread of \num{Spermutedacc}, roughly six times smaller.
 
-Two things follow, and they point in opposite directions. The gap is larger than the
-spread on both metrics, and on majority vote by more than a factor of two. But it is
+That disagreement is itself the result. A range between two draws is not a standard
+error, and two such ranges differing by a factor of six do not bound a third arm's.
+We therefore read the larger one as the operative figure and decline the smaller,
+which means no contrast in this paper should be compared against a noise floor
+quoted to one significant figure. On that conservative reading the gap is larger than
+the spread on both metrics, and on majority vote by more than a factor of two. But it is
 the \emph{same order} as the spread, which is precisely the regime in which a single
 seed cannot decide the question: the comparison we are making is between one draw
 from each arm, and the arm we can observe twice moved by more than half the effect we
@@ -1637,11 +1641,14 @@ the two things that would settle it.
 \paragraph{A single seed, and a gap the same order as the noise on it.}
 Every arm rests on one data seed, so no contrast in this paper carries a
 seed-level test. This is the limitation that bounds all the others. We can now put a
-number on it rather than an argument: the one arm we have run twice, GRPO, moved
-\num{Sgrpoacc} in converged-window accuracy between its two seeds, against a headline
-gap of \num{Csignedgrpoacc}. The gap is the larger of the two, and on majority vote
-by more than a factor of two, but not by the margin that would let a single draw from
-each arm settle it. The across-problem standard error we quote elsewhere is a
+number on it rather than an argument, though not yet a stable one: of the two arms
+run twice, GRPO moved \num{Sgrpoacc} in converged-window accuracy between its seeds
+and \textsc{permuted} moved \num{Spermutedacc}, a sixfold disagreement between two
+estimates of the same quantity. Against the larger, and a headline gap of
+\num{Csignedgrpoacc}, the gap is the bigger of the two, and on majority vote by more
+than a factor of two, but not by the margin that would let a single draw from each
+arm settle it --- and the sixfold spread between the two estimates means the floor
+itself is not yet measured. The across-problem standard error we quote elsewhere is a
 different quantity and does not bound this one. Rollout sampling is not seeded across
 processes, so a re-run of the same configuration is a second draw rather than a
 restoration --- which is what makes the repeat measurable, and what makes it
