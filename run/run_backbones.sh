@@ -33,7 +33,12 @@ cd "${ROOT}" || { echo "FATAL: cannot cd to ${ROOT}" >&2; exit 1; }
 # shellcheck source=run/_arms.sh
 . "${ROOT}/run/_arms.sh"
 
-BACKBONES=${BACKBONES:-"Qwen2.5-Math-7B Llama-3.2-3B Mistral-7B-v0.3"}
+# Mistral-7B-v0.3 is the BASE checkpoint, and the base Llama that used to sit in
+# this list scored .020 on MATH500 -- see the 2026-09-17 note in _arms.sh. Gate a
+# base backbone on the training-set group pass rate before spending a run on it:
+#     python3 scripts/phase3_port_model.py passrate --model <path> \
+#         --prompts datasets/DAPO-Math-17k.parquet --min-informative <frac>
+BACKBONES=${BACKBONES:-"Qwen2.5-Math-7B Llama-3.2-3B-Instruct Mistral-7B-v0.3"}
 ARMS=${ARMS:-"grpo steer signed"}
 SEED=${SEED:-1}
 STEPS=${STEPS:-110}

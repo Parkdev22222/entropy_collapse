@@ -69,6 +69,7 @@ Correcting the Visitation Channel in Token-Level Entropy Control for RLVR}
 %   scripts/measure_forecast_locality.py  ->  docs/forecast_locality*.json
 %   scripts/emit_locality_numbers.py      ->  results/numbers-locality.tex
 \loadnumbers{numbers-locality.tex}
+\loadnumbers{numbers-probe.tex}
 
 \begin{document}
 \maketitle
@@ -939,13 +940,15 @@ Backbone & Family & Math-spec. & Validation \\
 \midrule
 $1.5$B  & Qwen2.5-Math & yes & AIME 2024 \\
 $7$B    & Qwen2.5-Math & yes & AIME 2024 \\
-$3$B    & Llama 3.2    & no  & MATH500 \\
+$3$B$^{\ast}$ & Llama 3.2 & no  & MATH500 \\
 $7$B    & Mistral      & no  & MATH500 \\
 \bottomrule
 \end{tabular}
 \caption{Backbones. The validation set differs by backbone, deliberately;
 Section~\ref{sec:valset} says why, and the analysis never compares absolute
-accuracy across rows.}
+accuracy across rows. $^{\ast}$This row uses the instruction-tuned checkpoint;
+the other three are base models, and Section~\ref{sec:valset} says why this one
+cannot be.}
 \label{tab:backbones}
 \end{table}
 
@@ -970,6 +973,27 @@ across backbones. We state it here rather than in a footnote because it constrai
 what may be read off the results: every contrast we report is \emph{within} a
 backbone, and no claim compares absolute accuracy between rows of
 Table~\ref{tab:backbones}.
+
+\paragraph{Base or instruction-tuned.} The same measurement forces a second
+protocol difference. The Llama backbone is the instruction-tuned checkpoint; the
+other three are base models. We began with the base one and scored it under this
+protocol before training it: it reached $\num{Bllamabaseacc}$ on MATH500 and
+$\num{Bllamabasegsm}$ on grade-school arithmetic. The cause is mechanical rather
+than mathematical---that checkpoint ships a chat template, which our data pipeline
+applies, so a model that was never instruction-tuned receives the instruction
+format and continues the prompt instead of answering it.
+
+What this costs is not a weak row but an absent one. A group of $n = 8$ responses
+receives zero advantage when its members score alike, so at that solve rate
+$(1 - \num{Bllamabaseacc})^{8} \approx 0.85$ of groups carry no gradient at all, on
+a training set harder than the benchmark just quoted. Neither our method nor the
+baselines can learn from the remainder, and the row would compare two untrained
+models. We therefore gate a backbone on the fraction of non-degenerate groups on
+the \emph{training} set, measured against a backbone known to train, rather than
+on a validation score: a validation set says whether a backbone can be measured,
+not whether it can learn. On that gate the instruction-tuned checkpoint leaves
+$\num{Bllamainform}$ of groups informative against $\num{Bqweninform}$ for the
+$1.5$B mathematics backbone, a ratio of $\num{Bllamainformratio}$.
 
 Optimization uses GRPO with $n = 8$ responses per prompt, a constant learning rate
 of $1\mathrm{e}{-6}$ with no warm-up (so that the schedule is independent of the
@@ -1565,7 +1589,9 @@ $7$B Mistral     & \num{BmistralRgrpoacc} & \num{BmistralRsteeracc} & \num{Bmist
 \end{tabular}
 \caption{The headline contrast on four backbones, seed $1$, converged window.
 The two rightmost columns are within-backbone differences; columns are not
-averaged, because the rows are not on a common scale.}
+averaged, because the rows are not on a common scale. The Llama row uses the
+instruction-tuned checkpoint (Section~\ref{sec:valset}); the other three are base
+models.}
 \label{tab:backbones-results}
 \end{table}
 
@@ -1701,13 +1727,17 @@ diagnostics---rests on one $1.5$B model. The three further backbones
 (Section~\ref{sec:backbones}) carry the three-way contrast at one seed each, which
 establishes the sign and not its size, and they stop at $7$B: we have no
 evidence about models an order of magnitude larger, where the base policy is
-sharper and the relative size of the two channels may differ. The two
-non-mathematics rows are also the smallest of the four, so family and scale are
-not fully crossed: what they test is whether the sign survives a different
-pre-training corpus, not whether it survives one at $8$B or beyond. The non-mathematics
-backbones are also selected on a different benchmark from the mathematics ones
-(Section~\ref{sec:valset}); that is what makes their rows measurable, and it is
-also why no claim in this paper compares accuracy across backbones.
+sharper and the relative size of the two channels may differ. Family
+and scale are also not fully crossed---the mathematics backbones span $1.5$B to
+$7$B and the others sit at $3$B and $7$B---so what the latter test is whether the
+sign survives a different pre-training corpus, not whether it survives one at $8$B
+or beyond. Those rows further differ from the mathematics ones in more than
+family. They are selected on a different benchmark (Section~\ref{sec:valset}), and
+the Llama row is instruction-tuned where the other three are base models, which was
+forced rather than chosen: the base checkpoint left almost every training group
+degenerate. Each difference is what makes the row measurable at all, and each is a
+reason no claim here compares accuracy across backbones---only the sign of a
+within-backbone contrast is read.
 
 \section*{Ethics Statement}
 

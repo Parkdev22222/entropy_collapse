@@ -132,7 +132,18 @@ def emittable_names():
     prefixed = set()
     for pre in ("Bqwenbig", "Bllama", "Bmistral"):
         prefixed |= {pre + n for n in names}
-    return names | prefixed
+
+    # The go/no-go probes carry their own full names rather than a prefix, so
+    # they join after the prefixing rather than before it. Same rule as above:
+    # read the emitter's table, do not restate it here.
+    probe = (ROOT / "scripts" / "emit_probe_numbers.py").read_text()
+    body = re.search(r"MACROS = \{(.*?)\n\}", probe, re.S)
+    extra = set(re.findall(r'"([A-Za-z]+)":\s*\(', body.group(1)))
+    extra |= set(re.findall(r'out\["([A-Za-z]+)"\]', probe))
+    extra |= set(re.findall(r'"([A-Za-z]+)"', re.search(
+        r"PASSRATE_MACROS = \{([^}]*)\}", probe).group(1)))
+
+    return names | prefixed | extra
 
 
 def test_every_slot_can_be_produced_by_the_emitter(tex):

@@ -28,7 +28,7 @@ def arms(snippet: str, **env):
 PROFILES = [
     ("Qwen2.5-Math-1.5B", "Qwen/Qwen2.5-Math-1.5B", "aime24", "aime_2024_dapo_boxed/acc/mean@32"),
     ("Qwen2.5-Math-7B",   "Qwen/Qwen2.5-Math-7B",   "aime24", "aime_2024_dapo_boxed/acc/mean@32"),
-    ("Llama-3.2-3B",      "meta-llama/Llama-3.2-3B", "math500", "math500/acc/mean@1"),
+    ("Llama-3.2-3B-Instruct", "meta-llama/Llama-3.2-3B-Instruct", "math500", "math500/acc/mean@1"),
     ("Mistral-7B-v0.3",   "mistralai/Mistral-7B-v0.3", "math500", "math500/acc/mean@1"),
 ]
 
@@ -52,6 +52,42 @@ def test_non_math_backbones_do_not_select_on_aime24():
             assert "aime24" in got
         else:
             assert "math500" in got, f"{tag} still validates on {got}"
+
+
+@pytest.mark.parametrize("tag,path,val,key", PROFILES)
+def test_every_profile_satisfies_model_guard(tag, path, val, key):
+    """The static form of the check model_guard makes at launch.
+
+    model_guard refuses when basename(MODEL_PATH) != MODEL_TAG, because a run
+    trained on one model and logged under another looks fine forever after. A
+    profile that violates it does not fail here in this file, it fails on the
+    box after the queue has already started -- which is what nearly happened on
+    2026-09-17, when swapping the Llama row to the instruction-tuned checkpoint
+    changed the path but not yet the tag.
+    """
+    p = arms("model_guard && echo GUARD_OK", MODEL_TAG=tag)
+    assert "GUARD_OK" in p.stdout, p.stdout + p.stderr
+    assert path.rsplit("/", 1)[-1] == tag
+
+
+def test_a_profile_whose_path_and_tag_disagree_is_refused():
+    p = arms("model_guard", MODEL_TAG="Llama-3.2-3B",
+             MODEL_PATH="meta-llama/Llama-3.2-3B-Instruct")
+    assert p.returncode != 0
+    assert "the run names say" in p.stdout + p.stderr
+
+
+def test_the_base_llama_checkpoint_is_not_the_configured_one():
+    """2026-09-17: meta-llama/Llama-3.2-3B is a BASE checkpoint that ships a
+    chat template, so the pipeline hands the instruction format to a model that
+    was never instruction-tuned. Measured on this protocol it reached .020 on
+    MATH500, which leaves .98^8 = 85% of GRPO groups degenerate -- no arm can
+    learn from the rest. Guard the regression by name, since the two paths
+    differ by one suffix.
+    """
+    src = (ROOT / "run" / "_arms.sh").read_text()
+    assert "meta-llama/Llama-3.2-3B-Instruct}" in src
+    assert "meta-llama/Llama-3.2-3B}" not in src
 
 
 def test_unknown_tag_refuses_rather_than_guessing():

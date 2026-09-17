@@ -52,7 +52,7 @@ python3 scripts/analyze_seeds.py --git-ref origin/paper \
     --out results --tex-macros results/numbers-qwenbig.tex
 
 python3 scripts/analyze_seeds.py --git-ref origin/paper \
-    --model-tag Llama-3.1-8B --macro-prefix Bllama \
+    --model-tag Llama-3.2-3B-Instruct --macro-prefix Bllama \
     --out results --tex-macros results/numbers-llama.tex
 
 python3 scripts/analyze_seeds.py --git-ref origin/paper \

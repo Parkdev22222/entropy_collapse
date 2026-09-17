@@ -320,6 +320,14 @@ if have analysis; then
             --json "${j}" --out "${RES_DIR}/numbers-locality.tex"
         break
     done
+    # Same reason, for the backbone go/no-go probes. The record is committed
+    # rather than produced by the measure stage, so this runs unconditionally
+    # and the passrate files fill in whenever the box has written them.
+    guard analysis-probe python3 scripts/emit_probe_numbers.py \
+        --json "${DOC_DIR}/backbone_probe.json" \
+        --passrate-ref "${DOC_DIR}/probe_qwen15.json" \
+        --passrate-new "${DOC_DIR}/probe_llama32i.json" \
+        --out "${RES_DIR}/numbers-probe.tex"
 fi
 
 # ================================================================ summary
