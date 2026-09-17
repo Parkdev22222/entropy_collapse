@@ -28,6 +28,13 @@ WHAT IT EMITS
     zero reads as "hard benchmark", but grade-school arithmetic near zero
     reads as what it is, a model that never emits an answer.
 
+    `Bllamainstacc` / `Bllamainstgsm` are the same two cells for the
+    instruction-tuned checkpoint, under a protocol that is identical because
+    eval_steerf.sh pins its own benchmark lists.  They are what turns the
+    paragraph from an excuse into a controlled comparison: same family, same
+    parameter count, seventeen times the score.  Without them a reviewer reads
+    the Llama row as "too small to learn" and the manuscript has no answer.
+
     `Bqweninform` / `Bllamainform` / `Bllamainformratio` are the gate proper
     -- the fraction of GRPO groups that are not degenerate, for a backbone
     known to train and for the candidate.  The ratio is what the prose
@@ -46,6 +53,8 @@ from pathlib import Path
 MACROS = {
     "Bllamabaseacc": ("llama_base_eval", ("avg_at_1", "math500"), "acc"),
     "Bllamabasegsm": ("llama_base_eval", ("avg_at_1", "gsm8k_test"), "acc"),
+    "Bllamainstacc": ("llama_instruct_eval", ("avg_at_1", "math500"), "acc"),
+    "Bllamainstgsm": ("llama_instruct_eval", ("avg_at_1", "gsm8k_test"), "acc"),
 }
 
 # The two passrate files arrive from scripts/phase3_port_model.py --out, so

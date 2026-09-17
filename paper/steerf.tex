@@ -983,6 +983,14 @@ than mathematical---that checkpoint ships a chat template, which our data pipeli
 applies, so a model that was never instruction-tuned receives the instruction
 format and continues the prompt instead of answering it.
 
+The instruction-tuned checkpoint of the same family and the same parameter count,
+scored under the identical protocol, reaches $\num{Bllamainstacc}$ and
+$\num{Bllamainstgsm}$ on those two benchmarks. Holding family and scale fixed and
+changing only the checkpoint moves MATH500 by a factor of seventeen, which is what
+identifies the failure as one of format rather than of capacity: this backbone can
+do the arithmetic, and the base checkpoint was not being asked for it in a form it
+could answer.
+
 What this costs is not a weak row but an absent one. A group of $n = 8$ responses
 receives zero advantage when its members score alike, so at that solve rate
 $(1 - \num{Bllamabaseacc})^{8} \approx 0.85$ of groups carry no gradient at all, on

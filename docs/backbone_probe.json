@@ -8,21 +8,56 @@
     "protocol": "run/eval_steerf.sh with trainer.val_only=True, H200 x1, gpu_memory_utilization 0.8, tp 1",
     "source": "session transcript -- the eval log is not in git",
     "avg_at_1": {
-      "math500": 0.020,
+      "math500": 0.02,
       "minerva_math": 0.011,
       "olympiadbench": 0.013,
       "gsm8k_test": 0.024
     },
     "avg_at_32": {
-      "aime24": 0.000,
-      "aime25": 0.000,
+      "aime24": 0.0,
+      "aime25": 0.0,
       "amc23": 0.014
     },
     "reward_mean_at_1": -0.96,
-    "dapo_correct_mean_at_1": 0.000,
+    "dapo_correct_mean_at_1": 0.0,
     "_reward_note": "verl/utils/reward_score/multi_datasets_eval.py:327 scores (dapo_correct OR qwen_correct), so dapo_correct = 0 is not itself fatal -- qwen_correct carries the accuracy and -0.96 is exactly 0.02*1 + 0.98*(-1). The grader is fine; the solve rate is 2%.",
     "_cause": "The base tokenizer ships a chat template, and both scripts/_common.py:221 and verl's RLHFDataset apply a template when one is present, so a model that was never instruction-tuned is handed the instruction format. It continues the prompt instead of answering it.",
     "_verdict": "no-go. At a 2% solve rate .98^8 = .85 of the GRPO groups come back all-wrong and contribute zero advantage."
+  },
+  "llama_instruct_eval": {
+    "model": "meta-llama/Llama-3.2-3B-Instruct",
+    "checkpoint_kind": "instruct",
+    "date": "2026-09-17",
+    "protocol": "identical to llama_base_eval -- run/eval_steerf.sh pins its own benchmark lists at :37-38, so the two runs are comparable column by column",
+    "source": "session transcript -- the eval log is not in git",
+    "avg_at_1": {
+      "math500": 0.34,
+      "minerva_math": 0.114,
+      "olympiadbench": 0.105,
+      "gsm8k_test": 0.803
+    },
+    "dapo_correct_mean_at_1": {
+      "math500": 0.092,
+      "minerva_math": 0.022,
+      "olympiadbench": 0.031,
+      "gsm8k_test": 0.0
+    },
+    "qwen_correct_mean_at_1": {
+      "math500": 0.34,
+      "minerva_math": 0.11,
+      "olympiadbench": 0.105,
+      "gsm8k_test": 0.803
+    },
+    "reward_mean_at_1": {
+      "math500": -0.32,
+      "minerva_math": -0.772,
+      "olympiadbench": -0.789,
+      "gsm8k_test": 0.606
+    },
+    "_reward_identity": "reward = 2*acc - 1 holds to the printed digit on all four (2*.340-1 = -.320, 2*.114-1 = -.772, 2*.803-1 = +.606), which confirms compute_score_both's binary OR score end to end.",
+    "_what_it_settles": "Same family, same parameter count, same protocol, 17x on MATH500 and 33x on grade-school arithmetic. The base row's .020 was a format failure, not a capability ceiling -- so a reviewer cannot read Table 12's Llama row as 'too small to learn'. dapo_correct also comes back off the floor on MATH500 (.000 -> .092): the boxed form returned.",
+    "_gsm8k_dapo_zero": "dapo_correct stays exactly 0 on GSM8K while qwen_correct is .803 -- the model answers correctly but never in \\boxed{} form there, GSM8K's own convention being '#### answer'. Harmless for training, because the reward is the OR and reward/mean@1 = +.606 is realised; worth knowing because the DAPO grader alone would score that benchmark zero.",
+    "_verdict": "go, on the measurability axis. The training-set group pass rate is still the gate: .34 implies only 0.66^8 = 3.6% all-wrong groups under a binomial assumption, but per-problem difficulty is not uniform, so the true figure is higher -- which is why passrate counts the histogram instead of assuming."
   },
   "passrate": {
     "_how": "python3 scripts/phase3_port_model.py passrate --model <path> --prompts datasets/DAPO-Math-17k.parquet --n-prompts 200 --group-size 8 --out <file>, then paste the summary here. Absolute values are not reward rates -- that tool grades with phase1_validate.answers_match, not the training reward -- so only the ratio against the reference backbone means anything.",

@@ -114,3 +114,46 @@ def test_the_record_says_where_its_numbers_came_from():
     doc = json.loads((ROOT / "docs" / "backbone_probe.json").read_text())
     assert "source" in doc["llama_base_eval"]
     assert doc["llama_base_eval"]["checkpoint_kind"] == "base"
+
+
+# --------------------------------------- the controlled comparison (2026-09-17)
+def test_instruct_checkpoint_is_recorded_as_the_control():
+    """Without it the Llama row reads as 'too small to learn'.
+
+    The base checkpoint scoring .020 is only evidence of a format failure if
+    something rules out capacity, and the only thing that does is the same
+    family at the same parameter count under the same protocol. eval_steerf.sh
+    pins its benchmark lists at :37-38, so the two runs are comparable cell by
+    cell -- which is what makes this a control rather than an anecdote.
+    """
+    doc = json.loads((ROOT / "docs" / "backbone_probe.json").read_text())
+    base = doc["llama_base_eval"]["avg_at_1"]
+    inst = doc["llama_instruct_eval"]["avg_at_1"]
+    assert doc["llama_instruct_eval"]["checkpoint_kind"] == "instruct"
+    assert set(base) == set(inst), "the two runs must cover the same benchmarks"
+    assert inst["math500"] / base["math500"] > 10
+
+
+def test_recorded_rewards_satisfy_the_binary_score_identity():
+    """compute_score_both returns +1/-1, so mean reward must be 2*acc - 1.
+
+    This is the cheapest possible check that the reward path is intact, and it
+    is the one that would have caught a misreading of dapo_correct = 0 as a
+    broken grader: the identity holds on all four benchmarks, so nothing about
+    the scoring was wrong -- only the solve rate.
+    """
+    doc = json.loads((ROOT / "docs" / "backbone_probe.json").read_text())
+    rec = doc["llama_instruct_eval"]
+    for name, acc in rec["avg_at_1"].items():
+        # Tolerance is 2e-3 because acc itself is logged to three decimals: an
+        # accuracy printed as .105 can be .1055, which doubles to .001 of slack
+        # in the reward. Olympiad-Bench sits exactly on that edge (-0.789 vs a
+        # nominal -0.790) and it is rounding, not a discrepancy.
+        assert abs(rec["reward_mean_at_1"][name] - (2 * acc - 1)) < 2e-3, name
+
+
+def test_emits_both_checkpoints_so_the_paper_can_contrast_them():
+    out = emit({"llama_base_eval": {"avg_at_1": {"math500": 0.020, "gsm8k_test": 0.024}},
+                "llama_instruct_eval": {"avg_at_1": {"math500": 0.340, "gsm8k_test": 0.803}}})
+    assert out["Bllamabaseacc"] == "0.020" and out["Bllamainstacc"] == "0.340"
+    assert out["Bllamabasegsm"] == "0.024" and out["Bllamainstgsm"] == "0.803"
