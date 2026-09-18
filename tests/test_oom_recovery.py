@@ -195,3 +195,62 @@ def test_analyze_seeds_reports_which_stack_a_seed_ran_on():
         assert offloaded(gpu) == "gpu"
         assert offloaded(cpu) == "cpu"
         assert offloaded(none) == "?"
+
+
+# ------------------------------------------- CUDA's other names for OOM (09-17)
+CUBLAS_LOG = """val-core/aime_2024_dapo_boxed/acc/mean@32:0.039
+Training Progress:   0%|          | 0/110 [07:48<?, ?it/s]
+  File "verl/workers/actor/dp_actor.py", line 862, in update_policy
+    loss.backward()
+RuntimeError: CUDA error: CUBLAS_STATUS_ALLOC_FAILED when calling `cublasCreate(handle)`
+"""
+
+
+def test_cublas_alloc_failure_is_an_oom(tmp_path):
+    """The shape that got away on 2026-09-17.
+
+    A seed-3 run passed step-0 validation, spent 7:48 in its first update and
+    died in loss.backward() with CUBLAS_STATUS_ALLOC_FAILED -- an OOM in the
+    frame where OOMs happen. It matched neither 'OutOfMemoryError' nor 'CUDA
+    out of memory', so rc was 1, the queue's OFFLOAD=1 retry never fired, and
+    it moved to the next arm with the same ceiling waiting.
+    """
+    log = tmp_path / "train.log"
+    log.write_text(CUBLAS_LOG)
+    p = arms(f'diagnose_run_failure "{log}" "permuted seed 3" 110')
+    assert p.returncode == 2, p.stdout + p.stderr
+    assert "CUDA OOM" in p.stdout
+    assert "update_policy" in p.stdout
+
+
+def test_an_oom_before_step_one_is_not_reported_as_a_startup_failure(tmp_path):
+    """Without a 'step:N - global_seqlen' line the old order handed this to the
+    startup path, which replies 'the environment imports fine, so this was
+    specific to the run' -- true, useless, and it hides OFFLOAD=1."""
+    log = tmp_path / "train.log"
+    log.write_text(CUBLAS_LOG)
+    p = arms(f'diagnose_run_failure "{log}" "permuted seed 3" 110')
+    assert "before step 1 finished" in p.stdout
+    assert "environment imports fine" not in p.stdout
+    assert "OFFLOAD=1" in p.stdout
+
+
+def test_an_oom_from_an_earlier_launch_does_not_label_todays_failure(tmp_path):
+    """These logs are appended across relaunches. Only the tail may vote."""
+    log = tmp_path / "train.log"
+    log.write_text(CUBLAS_LOG + "\n" + ("filler\n" * 600)
+                   + "step:47 - global_seqlen: 8192\n"
+                   + "RuntimeError: something else entirely\n")
+    p = arms(f'diagnose_run_failure "{log}" "arm" 110')
+    assert p.returncode == 1, p.stdout
+    assert "died at step 47" in p.stdout
+
+
+def test_the_unsafe_levers_are_still_named_as_unsafe(tmp_path):
+    """Regression guard from task 26: the micro batch IS the treatment, and
+    expandable_segments kills vLLM's sleep mode."""
+    log = tmp_path / "train.log"
+    log.write_text(CUBLAS_LOG)
+    p = arms(f'diagnose_run_failure "{log}" "arm" 110')
+    assert "changes the" in p.stdout and "method" in p.stdout
+    assert "pytorch#147851" in p.stdout

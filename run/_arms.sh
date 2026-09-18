@@ -488,12 +488,34 @@ diagnose_startup_failure () {   # <log-file> <label>
 # It deliberately does NOT call env_preflight: a run that reached step N proved
 # the environment imports, and preflight starts ray, which costs ~20 s per
 # failed run in a queue that may be failing in a row (task 22).
+# CUDA reports one condition under several names. The allocator's own message
+# is only the most common: when a library handle cannot get its workspace the
+# failure surfaces as that library's ALLOC_FAILED instead. On 2026-09-17 a
+# seed-3 run died with
+#     RuntimeError: CUDA error: CUBLAS_STATUS_ALLOC_FAILED
+#                   when calling `cublasCreate(handle)`
+# inside loss.backward() -- textbook OOM, in the textbook frame -- and matched
+# neither string here, so the queue called it an ordinary crash and moved to
+# the next arm. The OFFLOAD=1 retry that exists for exactly this never fired.
+#
+# NOT_INITIALIZED is in the list for the same reason: cublasCreate reports the
+# handle it could not build, and after a run has already executed thousands of
+# matmuls an install problem is not what changed.
+OOM_RE=${OOM_RE:-'OutOfMemoryError|CUDA out of memory|CUBLAS_STATUS_ALLOC_FAILED|CUBLAS_STATUS_NOT_INITIALIZED|CUDNN_STATUS_ALLOC_FAILED|CUDNN_STATUS_NOT_INITIALIZED'}
+
+# Only the tail: these logs are appended across relaunches, and an OOM from a
+# launch three days ago must not label today's failure.
+OOM_TAIL=${OOM_TAIL:-400}
+
+log_says_oom () { tail -n "${OOM_TAIL}" "$1" 2>/dev/null | grep -qE "${OOM_RE}"; }
+
 oom_frame () {   # <log> -> "update_policy" | "compute_log_prob" | ""
     # The last verl frame before the allocator gave up says which peak blew.
     # They have different remedies, so guessing costs a 25 h run.
     local f
-    f="$(grep -oE '(update_policy|compute_log_prob|update_actor|forecast_h_togo)' "$1" \
-         2>/dev/null | tail -1)"
+    f="$(tail -n "${OOM_TAIL}" "$1" 2>/dev/null \
+         | grep -oE '(update_policy|compute_log_prob|update_actor|forecast_h_togo)' \
+         | tail -1)"
     case "${f}" in
         update_policy|update_actor) echo "update_policy" ;;
         compute_log_prob)           echo "compute_log_prob" ;;
@@ -509,19 +531,23 @@ diagnose_run_failure () {   # <log-file> <label> [steps]
     last="$(grep -o 'step:[0-9]* - global_seqlen' "${log}" 2>/dev/null | tail -1)"
     step="${last#step:}"; step="${step% - global_seqlen}"
 
-    # Never started: that is the other function's question, and it owns the
-    # environment check.
-    if [ -z "${step}" ]; then
-        diagnose_startup_failure "${log}" "${label}"
-        return 1
-    fi
-
-    if grep -qE 'OutOfMemoryError|CUDA out of memory' "${log}" 2>/dev/null; then
+    # OOM first, because a run can exhaust memory before finishing step 1 and
+    # still not have a startup problem. The 2026-09-17 seed-3 failure did
+    # exactly that: it passed step-0 validation, spent 7:48 in the first
+    # update, and died in loss.backward(). With no "step:N - global_seqlen"
+    # line yet, the old order sent it to the startup path, which answered
+    # "the environment imports fine, so this was specific to the run" -- true,
+    # useless, and it hid the one lever that helps.
+    if log_says_oom "${log}"; then
         frame="$(oom_frame "${log}")"
-        echo "[!] ${label}: CUDA OOM at step ${step}/${want}$([ "${frame}" != "" ] && echo " in ${frame}")."
+        echo "[!] ${label}: CUDA OOM $([ -n "${step}" ] \
+            && echo "at step ${step}/${want}" \
+            || echo "before step 1 finished")$([ "${frame}" != "" ] && echo " in ${frame}")."
         printf '    last lines of %s:\n' "${log}"
         tail -4 "${log}" 2>/dev/null | sed 's/^/      /'
-        echo "    The environment is fine -- it trained ${step} steps. This is a"
+        echo "    The environment is fine$([ -n "${step}" ] \
+            && echo " -- it trained ${step} steps" \
+            || echo " -- step-0 validation ran, which is thousands of matmuls"). This is a"
         echo "    memory ceiling, and the sequence lengths that reach it vary run"
         echo "    to run, so the same configuration can pass and then fail."
         echo
@@ -547,6 +573,13 @@ diagnose_run_failure () {   # <log-file> <label> [steps]
         echo "                                     it and the run dies at engine"
         echo "                                     construction (pytorch#147851)."
         return 2        # 2 = OOM, so a caller can retry differently
+    fi
+
+    # Not an OOM and it never reached step 1: now the startup path owns it,
+    # and it owns the environment check.
+    if [ -z "${step}" ]; then
+        diagnose_startup_failure "${log}" "${label}"
+        return 1
     fi
 
     echo "[!] ${label}: died at step ${step}/${want} -- not a startup failure."
