@@ -46,7 +46,14 @@
 # ---------------------------------------------------------------------------
 set -uo pipefail
 
-STEER_ROOT=${STEER_ROOT:-/workspace/entropy_collapse}
+# Derived from where this script lives, like every other launcher here, not
+# pinned to the path one pod happened to use. run_backbones.sh:255 calls this
+# with DELETE=1 after each finished run, so a stale absolute root is not a
+# missing upload: if the old checkout still exists the upload reads ITS
+# checkpoints and deletes those, and if it does not, the queue fills the disk
+# because nothing is ever uploaded and freed. An explicit STEER_ROOT still wins.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+STEER_ROOT=${STEER_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}
 cd "${STEER_ROOT}" || { echo "FATAL: no ${STEER_ROOT}"; exit 1; }
 
 CKPT_ROOT="${STEER_ROOT}/checkpoints/STEER-F"

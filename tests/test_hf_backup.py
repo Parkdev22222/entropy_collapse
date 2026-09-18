@@ -203,3 +203,28 @@ def test_an_unknown_run_is_a_clear_error(tmp_path):
     p = run(box, "no-such-run", tmp_path)
     assert p.returncode == 1
     assert "FATAL: no" in p.stdout
+
+
+def test_root_comes_from_the_script_not_a_pinned_path(tmp_path):
+    """The repo moved off /workspace on 2026-09-18 and this line did not.
+
+    run_backbones.sh:255 calls this with DELETE=1 after every finished run, so
+    a pinned absolute root is not merely a missing upload. If the old checkout
+    still exists the upload reads ITS checkpoints and deletes those; if it does
+    not, the queue never frees anything and fills the disk it is guarding.
+    """
+    src = (ROOT / "run" / "hf_backup.sh").read_text()
+    assert "STEER_ROOT:-/workspace/entropy_collapse" not in src
+    assert 'STEER_ROOT=${STEER_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}' in src
+
+
+def test_an_explicit_root_still_wins(tmp_path):
+    """Operators pass STEER_ROOT when the checkpoints live off the checkout."""
+    elsewhere = tmp_path / "elsewhere"
+    (elsewhere / "checkpoints" / "STEER-F").mkdir(parents=True)
+    p = subprocess.run(["bash", str(ROOT / "run" / "hf_backup.sh")],
+                       capture_output=True, text=True,
+                       env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path),
+                            "STEER_ROOT": str(elsewhere)})
+    assert "FATAL" not in p.stdout + p.stderr
+    assert p.returncode == 2          # usage, having found the root fine
