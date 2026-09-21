@@ -170,6 +170,46 @@ live_guard "${RUN}" || exit 1
 # resume, which a finished run will not do. This is the fastest way to get a
 # full volume back, and it needs no network.
 if [ "${PRUNE}" = "1" ]; then
+    # live_guard only WARNS about a run that never reached STEPS, and for an
+    # upload that is right: a crashed run's checkpoints are still worth
+    # keeping, and uploading adds without taking away. Prune is the opposite.
+    # What it deletes -- the optimizer and extra state -- is exactly what lets
+    # an unfinished run resume, so the same warning here costs the hours
+    # already spent. On 2026-09-21 it cost eighteen: a 40/110 run was pruned
+    # by a loop over every run, and step 40 stopped being a resume point.
+    #
+    # A finished run cannot lose anything this way, so the stricter test costs
+    # nothing where prune is meant to be used.
+    # Fail closed. If _arms.sh did not load, train_log_done is undefined and a
+    # `command -v` guard would silently skip the check -- on a path whose whole
+    # job is deletion. Not knowing whether a run is finished is a reason to
+    # stop, not to proceed.
+    prune_ok=1
+    if ! command -v train_log_done >/dev/null 2>&1; then
+        prune_ok=0; why_not="cannot tell: train_log_done is unavailable (${STEER_ROOT}/run/_arms.sh did not load)"
+    elif ! train_log_done "${LOG_DIR}" "${RUN}" "${STEPS}"; then
+        prune_ok=0; why_not="never reached step ${STEPS}"
+    fi
+    if [ "${prune_ok}" = "0" ] && [ "${FORCE:-0}" != "1" ]; then
+        last="$(grep -o 'step:[0-9]* - global_seqlen' \
+                  "${LOG_DIR}/train-${RUN}.log" 2>/dev/null | tail -1)"
+        last="${last#step:}"; last="${last% - global_seqlen}"
+        echo "REFUSE: '${RUN}' -- ${why_not}$([ -n "${last}" ] \
+            && echo " (last step: ${last})")." >&2
+        echo "        Pruning deletes the optimizer state, which is the only" >&2
+        echo "        thing that lets an unfinished run resume. Deleting it" >&2
+        echo "        throws away every step already trained." >&2
+        echo >&2
+        echo "        Finish it first, or FORCE=1 if you accept restarting" >&2
+        echo "        from step 0. To reclaim space without that cost, prune" >&2
+        echo "        the runs that ARE finished:" >&2
+        for d in "${CKPT_ROOT}"/*/; do
+            d="$(basename "${d}")"
+            train_log_done "${LOG_DIR}" "${d}" "${STEPS}" 2>/dev/null \
+                && echo "          ${d}" >&2
+        done
+        exit 1
+    fi
     echo "=========================================================="
     echo " prune   ${RUN}  (keeping actor/huggingface, dropping the rest)"
     echo "=========================================================="

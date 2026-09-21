@@ -250,6 +250,14 @@ def test_prune_does_not_make_the_run_look_live(tmp_path):
         os.utime(path, (old, old))
     os.utime(run_dir, (old, old))
 
+    # A finished log, or the completion guard below refuses before we get to
+    # test the timestamp at all.
+    logs = tmp_path / "logs" / "experiments"
+    logs.mkdir(parents=True, exist_ok=True)
+    (logs / "train-arun.log").write_text(
+        "".join(f"step:{i} - global_seqlen: 100\n" for i in range(1, 111)))
+    (tmp_path / "run").symlink_to(ROOT / "run")
+
     p = subprocess.run(["bash", str(ROOT / "run" / "hf_backup.sh"), "arun"],
                        capture_output=True, text=True,
                        env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path),
@@ -259,3 +267,88 @@ def test_prune_does_not_make_the_run_look_live(tmp_path):
     assert (ckpt / "huggingface" / "model.safetensors").exists(), "prune ate the eval copy"
     assert abs(ckpt.stat().st_mtime - old) < 2, (
         "prune left a fresh mtime, so the liveness guard will refuse this run")
+
+
+def _ckpt(tmp_path, run, step, *, with_optim=True, backdate=True):
+    d = tmp_path / "checkpoints" / "STEER-F" / run / f"global_step_{step}" / "actor"
+    (d / "huggingface").mkdir(parents=True)
+    (d / "huggingface" / "model.safetensors").write_bytes(b"w")
+    if with_optim:
+        (d / "optim_world_size_2_rank_0.pt").write_bytes(b"o" * 4096)
+    if backdate:
+        old = 10_000_000
+        root = tmp_path / "checkpoints" / "STEER-F" / run
+        for path in sorted(root.rglob("*"), reverse=True):
+            os.utime(path, (old, old))
+        os.utime(root, (old, old))
+    return d
+
+
+def _log(tmp_path, run, last_step):
+    d = tmp_path / "logs" / "experiments"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"train-{run}.log").write_text(
+        "".join(f"step:{i} - global_seqlen: 100\n" for i in range(1, last_step + 1)))
+
+
+def _prune(tmp_path, run, **env):
+    # hf_backup.sh:71 sources ${STEER_ROOT}/run/_arms.sh, and train_log_done
+    # lives there. Without it the fixture would exercise a path the real box
+    # never takes.
+    link = tmp_path / "run"
+    if not link.exists():
+        link.symlink_to(ROOT / "run")
+    e = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path),
+         "STEER_ROOT": str(tmp_path), "PRUNE": "1"}
+    e.update(env)
+    return subprocess.run(["bash", str(ROOT / "run" / "hf_backup.sh"), run],
+                          capture_output=True, text=True, env=e)
+
+
+def test_prune_refuses_an_unfinished_run(tmp_path):
+    """2026-09-21, and it cost eighteen hours.
+
+    live_guard only WARNS when a run never reached STEPS, which is right for an
+    upload -- a crashed run's checkpoints are worth keeping and uploading takes
+    nothing away. Prune is the opposite: what it deletes is precisely what lets
+    an unfinished run resume. A 40/110 run was pruned by a loop over every run,
+    and step 40 stopped being a resume point.
+    """
+    d = _ckpt(tmp_path, "arun", 40)
+    _log(tmp_path, "arun", 40)                      # 40 of 110
+    p = _prune(tmp_path, "arun")
+    assert p.returncode == 1, p.stdout + p.stderr
+    assert "never reached step 110" in p.stdout + p.stderr
+    assert (d / "optim_world_size_2_rank_0.pt").exists(), "prune destroyed the resume point"
+
+
+def test_prune_still_works_on_a_finished_run(tmp_path):
+    d = _ckpt(tmp_path, "brun", 110)
+    _log(tmp_path, "brun", 110)
+    p = _prune(tmp_path, "brun")
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert not (d / "optim_world_size_2_rank_0.pt").exists()
+    assert (d / "huggingface" / "model.safetensors").exists()
+
+
+def test_force_still_lets_you_prune_an_unfinished_run(tmp_path):
+    d = _ckpt(tmp_path, "crun", 40)
+    _log(tmp_path, "crun", 40)
+    p = _prune(tmp_path, "crun", FORCE="1")
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert not (d / "optim_world_size_2_rank_0.pt").exists()
+
+
+def test_prune_refuses_when_it_cannot_tell(tmp_path):
+    """No _arms.sh means no train_log_done, and a `command -v` guard would skip
+    the check entirely -- on the one path whose job is deletion. Not knowing is
+    a reason to stop."""
+    d = _ckpt(tmp_path, "drun", 40)
+    _log(tmp_path, "drun", 40)
+    p = subprocess.run(["bash", str(ROOT / "run" / "hf_backup.sh"), "drun"],
+                       capture_output=True, text=True,
+                       env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path),
+                            "STEER_ROOT": str(tmp_path), "PRUNE": "1"})
+    assert p.returncode == 1, p.stdout + p.stderr
+    assert "cannot tell" in p.stdout + p.stderr
+    assert (d / "optim_world_size_2_rank_0.pt").exists()
