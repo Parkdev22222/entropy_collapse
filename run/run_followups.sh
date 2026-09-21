@@ -44,7 +44,7 @@ cd "${ROOT}" || { echo "FATAL: cannot cd to ${ROOT}" >&2; exit 1; }
 # shellcheck source=run/_arms.sh
 . "${ROOT}/run/_arms.sh"
 
-ARMS=${ARMS:-"lam0-tree oracle grpo-long lam0.1 lam0.5 xclip-signed xclip-steer rloo-signed rloo-steer opo-signed opo-steer"}
+ARMS=${ARMS:-"lam0-tree oracle wmin-steer grpo-long lam0.1 lam0.5 xclip-signed xclip-steer rloo-signed rloo-steer opo-signed opo-steer"}
 SEED=${SEED:-1}
 STEPS=${STEPS:-110}
 LONG_STEPS=${LONG_STEPS:-200}      # grpo-long only: run past the wall-clock crossing
@@ -78,6 +78,10 @@ arm_spec () {   # <arm>
         xclip-steer)  echo "plain STEERF_LAM=0 -- ${XCLIP}" ;;
         rloo-steer)   echo "plain STEERF_LAM=0 -- algorithm.adv_estimator=rloo" ;;
         opo-steer)    echo "plain STEERF_LAM=0 -- algorithm.adv_estimator=opo"  ;;
+        # lambda=0 is stock STEER, so this is the base method at the damping
+        # strength its own released script uses. run_steerf.sh:201 reads
+        # TOKEN_WEIGHT_MIN, so nothing else has to change.
+        wmin-steer)   echo "plain STEERF_LAM=0 TOKEN_WEIGHT_MIN=0.8" ;;
         *) return 1 ;;
     esac
 }

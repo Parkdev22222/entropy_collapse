@@ -1016,9 +1016,13 @@ requiring the step-$0$ validation scores to agree.
 The forecaster uses $\kappa = 2$ heads with discount $\gamma_H = 0.7$ and the
 per-head calibration of Eq.~\eqref{eq:a3}. The combination uses $\lambda = 0.25$,
 RMS normalization, clip $c = 1.0$, and the sibling-prefix baseline. The weight map
-is the base method's exponential map of Eq.~\eqref{eq:steermap} with
-$\lambda_{\min} = 0.7$, unchanged and un-rescaled, so weights land in $[0.7, 1]$ and
-can only attenuate.\footnote{Our implementation exposes an optional reshaping of
+is the base method's exponential map of Eq.~\eqref{eq:steermap}, taken
+un-rescaled, at $\lambda_{\min} = 0.7$, so weights land in $[0.7, 1]$ and can only
+attenuate. The released configuration of the base method sets $\lambda_{\min} = 0.8$;
+every other value in that launcher matches it. Ours therefore attenuates the
+extreme-$|\Om|$ tokens by up to $30\%$ where theirs stops at $20\%$, and
+Table~\ref{tab:followups} carries an arm at the released value so that the
+difference is measured rather than assumed.\footnote{Our implementation exposes an optional reshaping of
 $\Omt$ before this map (winsorizing or rank-transforming it); every run reported
 here uses the identity setting, so the base method's map sees exactly what it would
 have seen.} The tree sampler uses a single root, cuts at depths
@@ -1484,6 +1488,9 @@ $\lambda = 0$, tree & tree only & \num{Rlamzeroacc} & \num{Rlamzeromaj} \\
 \multicolumn{4}{@{}l}{\emph{the forecaster, replaced by what the trainer already has}} \\
 \textsc{oracle} & no heads & \num{Roracleacc} & \num{Roraclemaj} \\
 \midrule
+\multicolumn{4}{@{}l}{\emph{the base method at its released damping strength}} \\
+\textsc{steer}, $\lambda_{\min}{=}0.8$ & weaker & \num{Rwminsteeracc} & \num{Rwminsteermaj} \\
+\midrule
 \multicolumn{4}{@{}l}{\emph{relaxed ratio clipping} ($\epsilon_{\mathrm{hi}}{=}5$, $\epsilon_{\mathrm{lo}}{=}0.99$)} \\
 STEER-F        & --- & \num{Rxclipsignedacc} & \num{Rxclipsignedmaj} \\
 \textsc{steer} & --- & \num{Rxclipsteeracc}  & \num{Rxclipsteermaj}  \\
@@ -1506,6 +1513,17 @@ tuned on these runs, and the sweep exists to say whether the result rests on a k
 edge. A flat response across $0.1$--$0.5$ would say the method is insensitive to it;
 a peak at $0.25$ with both neighbours below would say it is a tuned quantity and must
 be reported as one.
+
+\paragraph{The damping strength.} We measure \textsc{steer} below GRPO by
+$\num{Csteergrpoacc}$ over $\num{Nsteergrpo}$ seeds, which the base method's own
+results contradict. The one configuration difference we have found is
+$\lambda_{\min}$: $0.7$ here against $0.8$ in the released script, so our
+\textsc{steer} arm applies one and a half times their maximum attenuation. This
+arm runs $\lambda = 0$ --- stock \textsc{steer} --- at their value, and separates
+a failure to reproduce from an over-damped control. Note what it cannot settle on
+its own: the STEER-F arms also run at $0.7$, so a difference here would mean the
+$\lambda_{\min}$ shared by both sides of every contrast is not neutral, and the
+comparison would have to be re-based rather than corrected.
 
 \paragraph{The sampler.} This is the cell no other arm supplies. Tree rollouts make a
 group share prefixes, which changes the GRPO advantage estimate itself, quite apart

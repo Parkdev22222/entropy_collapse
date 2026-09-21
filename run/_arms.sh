@@ -234,6 +234,16 @@ run_name_for () {   # <arm> <seed>  -> the trainer's experiment_name
         rloo-steer)   echo "steer-${MODEL_TAG}-s$2-rloo" ;;
         opo-signed)   echo "steer-f-${MODEL_TAG}-s$2-tree-rollout-opo" ;;
         opo-steer)    echo "steer-${MODEL_TAG}-s$2-opo" ;;
+        # The released configuration's damping strength. run/run_exp.sh in the
+        # base method's repository sets token_weight_min=0.8; ours defaults to
+        # 0.7 (run_steerf.sh:201), so our STEER arm attenuates the extreme-
+        # |Omega| tokens by up to 30% where theirs stops at 20%. Everything
+        # else in that launcher already matches their script line for line.
+        # We measure STEER below GRPO by -.0101 over three seeds, which the
+        # base method's own results contradict, and 1.5x their damping is the
+        # one difference that could produce it. This arm separates "we cannot
+        # reproduce it" from "we over-damped".
+        wmin-steer)   echo "steer-${MODEL_TAG}-s$2-wmin08" ;;
         # The compute-matched control. STEER-F costs ~1.75x GRPO per step, so
         # "is the gain worth the wall clock" is only answered by giving GRPO the
         # same wall clock -- 200 steps covers a ratio up to ~1.8. The analysis

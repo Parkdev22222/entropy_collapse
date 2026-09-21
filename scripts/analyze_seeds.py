@@ -87,6 +87,8 @@ FOLLOWUP_ARMS = {
     "rloo-steer":   "rloosteer",
     "opo-signed":   "oposigned",
     "opo-steer":    "oposteer",
+    # Stock STEER at the released token_weight_min=0.8 rather than our 0.7.
+    "wmin-steer":   "wminsteer",
 }
 CONTRASTS = [("signed", "grpo"), ("signed", "steer"), ("signed", "uniform"),
              ("signed", "permuted"), ("steer", "grpo"), ("uniform", "steer")]
@@ -379,6 +381,7 @@ def main(argv=None) -> int:
             "rloo-steer": f"steer-{t}-s{seed}-rloo",
             "opo-signed": f"steer-f-{t}-s{seed}-tree-rollout-opo",
             "opo-steer": f"steer-{t}-s{seed}-opo",
+            "wmin-steer": f"steer-{t}-s{seed}-wmin08",
         }[arm]
 
     def reached(path: Path, want: int) -> bool:

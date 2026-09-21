@@ -33,7 +33,8 @@ DONE_LINE = "step:110 - global_seqlen/min:2388866.000 - actor/entropy:0.121\n"
 
 CAMPAIGN = ["grpo", "steer", "permuted", "signed", "uniform"]
 FOLLOWUPS = ["lam0.1", "lam0.5", "lam0-tree", "xclip-signed", "xclip-steer",
-             "rloo-signed", "rloo-steer", "opo-signed", "opo-steer"]
+             "rloo-signed", "rloo-steer", "opo-signed", "opo-steer",
+             "wmin-steer"]
 
 
 def _bash(script: str) -> str:
@@ -181,3 +182,36 @@ def test_the_analyser_and_the_queue_agree_on_every_run_name():
         assert mine, arm
         expected = mine.group(1).replace("{t}", "Qwen2.5-Math-1.5B").replace("{seed}", "1")
         assert theirs == expected, f"{arm}: bash {theirs!r} vs python {expected!r}"
+
+
+def test_the_released_damping_arm_is_stock_steer_at_their_value():
+    """2026-09-21. We measure STEER below GRPO by -.0101 over three seeds,
+    which the base method's own published results contradict.
+
+    Reading the released repository against ours found the weighting function
+    identical line for line -- f_x, advantage/old_prob, the symmetric abs(),
+    the exponential map and its 0.02 floor, the signature defaults -- and one
+    configuration difference: run/run_exp.sh there sets token_weight_min=0.8
+    where run_steerf.sh:201 defaults to 0.7. Ours therefore attenuates the
+    extreme-|Omega| tokens by up to 30% against their 20%.
+
+    This arm must be stock STEER (lambda = 0) at their value and nothing else:
+    a lambda that slipped through would make it a STEER-F arm wearing the name,
+    and the table would answer a different question than it asks.
+    """
+    import re
+    src = (REPO / "run" / "run_followups.sh").read_text()
+    m = re.search(r"wmin-steer\)\s*echo\s+'?\"([^\"]+)\"", src)
+    assert m, "run_followups.sh has no wmin-steer spec"
+    spec = set(m.group(1).split())
+    assert spec == {"plain", "STEERF_LAM=0", "TOKEN_WEIGHT_MIN=0.8"}, spec
+
+
+def test_the_launcher_actually_reads_token_weight_min():
+    """The spec is only worth anything if run_steerf.sh honours the variable;
+    otherwise the arm trains at 0.7 under a name that says 0.8."""
+    out = subprocess.run(["git", "show", "origin/paper:run/run_steerf.sh"],
+                         capture_output=True, text=True, cwd=str(REPO)).stdout
+    if not out:
+        pytest.skip("origin/paper is not fetched in this checkout")
+    assert "token_weight_min=${TOKEN_WEIGHT_MIN:-0.7}" in out
