@@ -98,6 +98,35 @@ last_step_in () {   # <file> -> the highest optimisation step it recorded
     grep -o 'step:[0-9]* - global_seqlen' "$1" 2>/dev/null \
         | grep -o '[0-9]\+' | sort -n | tail -1
 }
+# A log only ever grows, and it grows in whole lines. Two numbers say whether a
+# copy is the same record or a damaged one, and the step count says neither.
+n_lf ()    { tr -dc '\n' < "$1" 2>/dev/null | wc -c | tr -d ' '; }
+n_bytes () { wc -c < "$1" 2>/dev/null | tr -d ' '; }
+
+# Why this exists: on 2026-09-21 a push replaced train-grpo-<tag>-s4.log with a
+# copy of itself whose every newline had become a carriage return -- 4057 LF and
+# 133 CR became 0 LF and 4194 CR. Both copies reached step 110, so the clobber
+# test below saw nothing to object to and overwrote the good one. The data
+# survived (Python's splitlines() cuts on \r too, so analyze_seeds.py still read
+# the run) but these logs are the ledger every number in the manuscript is
+# recomputed from, and a path that silently degrades them is the defect.
+degraded () {   # <incoming> <committed> -> prints why the incoming copy is worse
+    local mine_lf theirs_lf mine_b theirs_b
+    mine_lf="$(n_lf "$1")";     theirs_lf="$(n_lf "$2")"
+    mine_b="$(n_bytes "$1")";   theirs_b="$(n_bytes "$2")"
+    # Line endings mangled: the committed copy has real lines and ours lost them.
+    if [ "${theirs_lf:-0}" -gt 100 ] \
+       && [ "$(( mine_lf * 2 ))" -lt "${theirs_lf:-0}" ]; then
+        echo "line endings: ours has ${mine_lf} newline(s), the branch has ${theirs_lf}"
+        return 0
+    fi
+    # Truncated: append-only means a later copy of the same run cannot shrink.
+    if [ "${mine_b:-0}" -lt "${theirs_b:-0}" ]; then
+        echo "truncated: ours is ${mine_b} bytes, the branch has ${theirs_b}"
+        return 0
+    fi
+    return 1
+}
 # run name from the file name, so train_log_done and trainer_pid_for can be
 # asked about it. train-<run>.log and the recovery chain's train-<run>_<tag>.log.
 run_of () {   # <path> -> run name
@@ -375,7 +404,7 @@ git -C "${WORKTREE}" rebase -q "origin/${BRANCH}" || {
 
 
 mkdir -p "${WORKTREE}/logs/experiments"
-staged=(); clobber=()
+staged=(); clobber=(); damaged=()
 for f in "${take[@]}"; do
     dest="${WORKTREE}/logs/experiments/$(basename "${f}")"
     if [ -f "${dest}" ]; then
@@ -383,6 +412,13 @@ for f in "${take[@]}"; do
         theirs="$(last_step_in "${dest}")"; theirs=${theirs:-0}
         if [ "${theirs}" -gt "${mine}" ] && [ "${FORCE}" != "1" ]; then
             clobber+=("$(basename "${f}") ours=${mine} theirs=${theirs}")
+            continue
+        fi
+        # Same step, and still not the same record. Checked separately because
+        # the step test above passes exactly when both copies finished.
+        if [ "${FORCE}" != "1" ] && why="$(degraded "${f}" "${dest}")"; then
+            clobber+=("$(basename "${f}") -- ${why}")
+            damaged+=("$(basename "${f}")")
             continue
         fi
     fi
@@ -395,6 +431,16 @@ if [ ${#clobber[@]} -gt 0 ]; then
     for c in "${clobber[@]}"; do printf '   %s\n' "${c}"; done
     echo " Yours are almost certainly carcasses of a start that failed here."
     echo " --force overwrites anyway."
+fi
+if [ ${#damaged[@]} -gt 0 ]; then
+    echo
+    echo " Those are not shorter runs -- they are damaged copies of the same"
+    echo " run. The branch has the intact one, which is what this branch is"
+    echo " for. Restore each from it and the next publish is a no-op:"
+    for d in "${damaged[@]}"; do
+        printf '   git show origin/%s:logs/experiments/%s > %s/%s\n' \
+            "${BRANCH}" "${d}" "${LOG_DIR}" "${d}"
+    done
 fi
 if [ ${#staged[@]} -eq 0 ]; then
     echo

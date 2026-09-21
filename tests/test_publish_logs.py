@@ -484,3 +484,100 @@ def test_the_users_own_tree_is_still_never_reset():
     user's real tree and must be refused, not cleaned."""
     src = (ROOT / "run" / "publish_logs.sh").read_text()
     assert 'this script will not reset it' in src
+
+
+# ----------------------------------- a copy of the same run, degraded (09-21)
+def blob_bytes(origin, path):
+    """The blob as stored. `text=True` would translate \r to \n on the way
+    back, which is exactly the difference these tests are about."""
+    return subprocess.run(["git", "show", f"paper:{path}"],
+                          capture_output=True, cwd=str(origin)).stdout
+
+
+def _second_box(tmp_path, origin):
+    other = tmp_path / "pod_dmg"
+    subprocess.run(["git", "clone", str(origin), str(other)], check=True,
+                   capture_output=True)
+    for k, v in (("user.email", "t@t"), ("user.name", "t")):
+        sh(["git", "config", k, v], other)
+    shutil.copytree(ROOT / "run", other / "run")
+    sh(["git", "checkout", "-q", "-b", "work"], other)
+    logs2 = other / "logs" / "experiments"
+    logs2.mkdir(parents=True, exist_ok=True)
+    return other, logs2
+
+
+def test_a_copy_whose_newlines_became_carriage_returns_is_refused(box, tmp_path):
+    """2026-09-21, and the step test could not see it.
+
+    A push replaced train-grpo-<tag>-s4.log with a copy of itself whose every
+    newline had become a carriage return: 4057 LF and 133 CR became 0 LF and
+    4194 CR. Both copies reached step 110, so `theirs > mine` was false and the
+    good one was overwritten. The data survived -- Python's splitlines() cuts
+    on \\r too -- but these logs are the ledger every manuscript number is
+    recomputed from, and grep, wc and awk all see one enormous line.
+    """
+    pod, origin, logs = box
+    make_log(logs, f"grpo-{TAG}-s4", 110)
+    assert run_publish(pod, logs, "--push").returncode == 0
+
+    other, logs2 = _second_box(tmp_path, origin)
+    good = (logs / f"train-grpo-{TAG}-s4.log").read_text()
+    (logs2 / f"train-grpo-{TAG}-s4.log").write_text(good.replace("\n", "\r"))
+
+    p = sh(["bash", SCRIPT, "--push"], other, LOG_DIR=str(logs2))
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert "line endings" in p.stdout, p.stdout
+    assert "git show origin/paper" in p.stdout, "no recovery command offered"
+
+    kept = blob_bytes(origin, f"logs/experiments/train-grpo-{TAG}-s4.log")
+    assert kept.count(b"\n") > 100, "the intact copy was overwritten anyway"
+
+
+def test_a_truncated_copy_of_the_same_run_is_refused(box, tmp_path):
+    """Logs are append-only, so a later copy of a run cannot be smaller. One
+    that is has been cut short in transit, whatever step it still mentions."""
+    pod, origin, logs = box
+    make_log(logs, f"grpo-{TAG}-s4", 110)
+    assert run_publish(pod, logs, "--push").returncode == 0
+
+    other, logs2 = _second_box(tmp_path, origin)
+    good = (logs / f"train-grpo-{TAG}-s4.log").read_text()
+    # Same final step, half the bytes: the tail survived, the body did not.
+    (logs2 / f"train-grpo-{TAG}-s4.log").write_text(good[len(good) // 2:])
+
+    p = sh(["bash", SCRIPT, "--push"], other, LOG_DIR=str(logs2))
+    assert "truncated" in p.stdout, p.stdout
+    kept = blob_bytes(origin, f"logs/experiments/train-grpo-{TAG}-s4.log")
+    assert len(kept) >= len(good) - 2, "the intact copy was overwritten anyway"
+
+
+def test_a_log_that_genuinely_grew_still_publishes(box, tmp_path):
+    """The guard must not stop the normal case: a run that continued."""
+    pod, origin, logs = box
+    make_log(logs, f"grpo-{TAG}-s4", 40)
+    assert run_publish(pod, logs, "--push").returncode == 0
+
+    other, logs2 = _second_box(tmp_path, origin)
+    make_log(logs2, f"grpo-{TAG}-s4", 110)
+
+    p = sh(["bash", SCRIPT, "--push"], other, LOG_DIR=str(logs2))
+    assert p.returncode == 0, p.stdout + p.stderr
+    kept = sh(["git", "show", f"paper:logs/experiments/train-grpo-{TAG}-s4.log"],
+              origin).stdout
+    assert "step:110" in kept, "a longer run must overwrite a shorter one"
+
+
+def test_force_still_overwrites_a_degraded_copy(box, tmp_path):
+    pod, origin, logs = box
+    make_log(logs, f"grpo-{TAG}-s4", 110)
+    assert run_publish(pod, logs, "--push").returncode == 0
+
+    other, logs2 = _second_box(tmp_path, origin)
+    good = (logs / f"train-grpo-{TAG}-s4.log").read_text()
+    (logs2 / f"train-grpo-{TAG}-s4.log").write_text(good.replace("\n", "\r"))
+
+    p = sh(["bash", SCRIPT, "--push", "--force"], other, LOG_DIR=str(logs2))
+    assert p.returncode == 0, p.stdout + p.stderr
+    kept = blob_bytes(origin, f"logs/experiments/train-grpo-{TAG}-s4.log")
+    assert kept.count(b"\n") < 10, "--force must still overwrite"
