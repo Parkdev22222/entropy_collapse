@@ -1761,6 +1761,24 @@ difference against. A forecaster whose error did not grow with $k$ would test
 the idea more sharply; a sequential forecaster is the obvious comparison and we
 have not run it.
 
+\paragraph{One hyperparameter was selected on the method and applied to its
+baseline.} $\lambda_{\min}$, the floor of the weight map, is $0.7$ throughout,
+chosen because it was best for STEER-F; the base method's released script uses
+$0.8$. The base method therefore appears here at a damping strength picked for the
+method it controls for, and at $1.5$ times the maximum attenuation of its own
+default, which is the most likely reason we measure it below GRPO where its
+authors do not. We did not re-tune $\lambda_{\min}$ per arm, and a reader who
+wants each method at its own best setting will not find it here.
+
+What this does not reach is the claim the paper makes. All four damped arms carry
+the same $\lambda_{\min}$, so it cancels between any two of them, and the
+contrasts that separate the forecast's value from its apparatus --- STEER-F
+against \textsc{uniform} and against \textsc{permuted} --- hold it fixed along
+with everything else. The two contrasts it does reach, STEER-F $-$ \textsc{steer}
+and \textsc{steer} $-$ GRPO, are reported with the confound stated;
+Section~\ref{sec:res:ablate} adds the base method at its released value so the
+reproduction question can be read on its own.
+
 \paragraph{The support is small by construction.}
 Section~\ref{sec:tree} bounds the fraction of positions carrying a non-zero $\AH$ at
 $2(n-1)/T$, on the order of a percent for our settings. Whether the effect scales
