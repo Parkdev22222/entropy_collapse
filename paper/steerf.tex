@@ -1186,8 +1186,11 @@ STEER-F retains among the least and is first.
 \subsection{Does the forecast's value matter?}
 \label{sec:res:contrasts}
 
-Table~\ref{tab:contrast} pairs the arms step by step over the converged window and
-reports the mean difference together with a paired $t$ over the eight points.
+Table~\ref{tab:contrast} averages each arm over its converged window, pairs the
+arms within a seed, and reports the mean difference together with a paired $t$ on
+those seed-level differences. The step-by-step version of this statistic, which the
+single-seed draft reported, is in Appendix~\ref{sec:appendix-within}; it answers a
+question about one trajectory rather than about re-running.
 
 \begin{table}[t]
 \centering
@@ -1214,14 +1217,23 @@ common to all five arms. A contrast's $n$ is the smaller of its two arms' seed c
 \label{tab:contrast}
 \end{table}
 
-The block structure is the result. Every contrast involving $\AH$ separates; no
-contrast among the arms without it does. In particular \textsc{uniform} runs the
-entire apparatus --- tree sampler, forecaster, support, weight map --- and differs
-from \textsc{steer} by $-.0017$ ($t = -0.62$). Turning the machinery on buys
-nothing. \textsc{permuted} keeps the machinery \emph{and} the magnitudes of $\AH$
-and destroys only the pairing between a branch and its score; it recovers about a
-quarter of the gain ($+.0040$ of $+.0165$) and the rest requires the pairing to be
-correct.
+The block structure is what the design was built to expose. Every contrast that
+changes the \emph{value} of $\AH$ is positive; the one that leaves it alone is not
+distinguishable from zero. \textsc{uniform} runs the entire apparatus --- tree
+sampler, forecaster, support, weight map --- and differs from \textsc{steer} by
+$\num{Cuniformsteeracc}$ ($t = \num{Tuniformsteeracc}$ over
+$\num{Nuniformsteer}$ seeds): turning the machinery on and feeding it a constant
+buys nothing. \textsc{permuted} keeps the machinery \emph{and} the magnitudes of
+$\AH$ and destroys only the pairing between a branch and its score, and STEER-F
+still exceeds it by $\num{Csignedpermutedacc}$.
+
+We state the signs, not significance. At the seed counts reached so far --- the
+headline contrast rests on $\num{Nsignedgrpo}$ --- no accuracy contrast in
+Table~\ref{tab:contrast} clears a conventional threshold, and the two rows with
+$n = 1$ carry no $t$ at all. What the table shows is that the sign is the same
+wherever $\AH$ carries information and absent where it does not;
+Section~\ref{sec:res:seeds} states what the completed campaign is powered to
+detect, and the pre-registration fixes the test before the remaining seeds land.
 
 This is the contrast the design was built for. A comparison of STEER-F against
 \textsc{steer} alone changes two things at once, and cannot separate the forecast
@@ -1234,15 +1246,19 @@ The majority-vote gain decomposes into a part explained by per-sample accuracy a
 part explained by the sample set's structure:
 %
 \begin{equation*}
-\underbrace{+.0386}_{\Delta\mathrm{maj}}
-=\underbrace{+.0145}_{\Delta\mathrm{acc}\ (38\%)}
-+\underbrace{+.0241}_{\Delta\mathrm{uplift}\ (62\%)},
+\underbrace{\num{Csignedgrpomaj}}_{\Delta\mathrm{maj}}
+=\underbrace{\num{Csignedgrpoacc}}_{\Delta\mathrm{acc}}
++\underbrace{\num{Csignedgrpouplift}}_{\Delta\mathrm{uplift}},
 \end{equation*}
 %
-against GRPO, with the uplift term at $t = 4.82$; against \textsc{steer} the uplift
-term is $+.0200$ ($t = 3.26$). Nearly two thirds of the improvement is not that
-individual samples are more often right, but that the right ones agree with each
-other more and the wrong ones agree less.
+against GRPO; against \textsc{steer} the uplift term is
+$\num{Csignedsteeruplift}$ ($t = \num{Tsignedsteeruplift}$ over
+$\num{Nsignedsteer}$ seeds). Against GRPO roughly two thirds of the improvement is
+not that individual samples are more often right, but that the right ones agree with
+each other more and the wrong ones agree less. The two backbones of that split are
+measured on one seed so far, and the split itself is the claim to re-check as the
+remaining seeds arrive: against \textsc{steer} the same term is smaller and well
+inside its own spread.
 
 Where that structural change comes from is a separate question, and the arm that
 answers it finished after this section was first written. \textsc{uniform} runs the
