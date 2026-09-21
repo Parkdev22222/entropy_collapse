@@ -281,10 +281,30 @@ fi
 
 # --- the worktree -----------------------------------------------------------
 echo
+fetched=0
 for i in 1 2 3 4; do
-    git fetch origin "${BRANCH}" && break
+    if git fetch origin "${BRANCH}"; then fetched=1; break; fi
     echo "fetch failed, retry ${i}"; sleep $(( 2 ** i ))
 done
+# Four failed fetches is not a flaky network to shrug at. Carrying on rebases
+# onto a stale ref and reports whatever goes wrong next, which on 2026-09-21
+# meant a full disk ("Disk quota exceeded" on every fetch) surfacing three
+# steps later as "You have unstaged changes" -- and the advice printed for
+# THAT is to run the command that had just silently failed for the same
+# reason. Stop where the real error is.
+if [ "${fetched}" != "1" ]; then
+    echo >&2
+    echo "REFUSE: could not fetch origin/${BRANCH} after 4 tries." >&2
+    echo "        The training tree is untouched and nothing was committed." >&2
+    if ! df_out="$(df -h "${ROOT}" 2>/dev/null | tail -1)"; then df_out=""; fi
+    [ -n "${df_out}" ] && echo "        disk: ${df_out}" >&2
+    echo "        If the errors above say 'Disk quota exceeded' or 'No space" >&2
+    echo "        left on device', free space before retrying -- git needs room" >&2
+    echo "        to unpack objects. The fastest reclaim that uploads nothing:" >&2
+    echo "          for r in \$(ls -1 checkpoints/STEER-F); do" >&2
+    echo "            PRUNE=1 bash run/hf_backup.sh \"\$r\"; done" >&2
+    exit 1
+fi
 # If this checkout is ALREADY on the target branch there is nothing to switch,
 # so a worktree would only fail ("'paper' is already used by worktree at ...").
 # Use the tree itself -- but not while a trainer is reading it, because the
@@ -316,7 +336,20 @@ fi
 # already on ${BRANCH}, and it is the user's real tree -- resetting it would
 # throw away whatever they have in progress.
 if [ "${WORKTREE}" != "${ROOT}" ]; then
-    git -C "${WORKTREE}" reset -q --hard HEAD 2>/dev/null || true
+    # Not `|| true`: reset --hard WRITES files, so it is the first thing a full
+    # disk kills, and swallowing that turns "no space" into "unstaged changes"
+    # at the rebase below -- whose advice is to run this very command.
+    if ! reset_err="$(git -C "${WORKTREE}" reset -q --hard HEAD 2>&1)"; then
+        echo "REFUSE: could not reset the scratch worktree ${WORKTREE}." >&2
+        printf '        %s\n' "${reset_err}" >&2
+        case "${reset_err}" in
+            *"Disk quota exceeded"*|*"No space left"*)
+                echo "        That is a full disk, not a git problem. Free space first:" >&2
+                echo "          for r in \$(ls -1 checkpoints/STEER-F); do" >&2
+                echo "            PRUNE=1 bash run/hf_backup.sh \"\$r\"; done" >&2 ;;
+        esac
+        exit 1
+    fi
     git -C "${WORKTREE}" clean -qfd logs/experiments 2>/dev/null || true
 elif ! git -C "${WORKTREE}" diff --quiet || ! git -C "${WORKTREE}" diff --cached --quiet; then
     echo "REFUSE: ${WORKTREE} has uncommitted changes and it is your working" >&2

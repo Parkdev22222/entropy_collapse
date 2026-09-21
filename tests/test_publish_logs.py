@@ -458,3 +458,29 @@ def test_a_finished_arm_is_not_called_live_by_a_sibling(box):
         assert f"train-{base}-lam0.log" in p.stdout
     finally:
         fake.kill(); fake.wait()
+
+
+def test_a_failed_fetch_stops_at_the_real_error(tmp_path):
+    """2026-09-21: every fetch retry printed 'Disk quota exceeded', the script
+    carried on, and the user saw 'You have unstaged changes' from the rebase
+    three steps later -- whose printed advice is `reset --hard HEAD`, the very
+    command that had just failed for the same reason. A circle."""
+    src = (ROOT / "run" / "publish_logs.sh").read_text()
+    assert 'fetched=0' in src
+    assert 'could not fetch origin/${BRANCH} after 4 tries' in src
+    assert 'Disk quota exceeded' in src
+
+
+def test_the_scratch_reset_does_not_swallow_its_own_failure():
+    """reset --hard WRITES files, so it is the first casualty of a full disk.
+    `2>/dev/null || true` made that invisible."""
+    src = (ROOT / "run" / "publish_logs.sh").read_text()
+    assert 'git -C "${WORKTREE}" reset -q --hard HEAD 2>/dev/null || true' not in src
+    assert 'could not reset the scratch worktree' in src
+
+
+def test_the_users_own_tree_is_still_never_reset():
+    """Regression guard from task 27: when WORKTREE == ROOT the checkout is the
+    user's real tree and must be refused, not cleaned."""
+    src = (ROOT / "run" / "publish_logs.sh").read_text()
+    assert 'this script will not reset it' in src
