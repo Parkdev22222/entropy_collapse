@@ -184,3 +184,67 @@ channel matters wherever the rollout distribution has branch points that differ
 in what they lead to, which is a property of the task rather than of the
 pre-training corpus. A **split** result (2 of 4) is reported as a limit on
 generality.
+
+---
+
+## 9. The branch-point entropy reading (added 2026-09-21, **after** the aggregate test failed)
+
+Everything above §8 was written before the runs it governs. **This section was
+not.** It is added after §6's aggregate-entropy condition was checked against the
+completed seeds and **came out against us**, and it is marked as such rather than
+folded into the text above.
+
+What that means concretely: this section **justifies nothing about the seeds
+already collected**. It binds only the seeds not yet in hand. The manuscript
+reports the branch-level reading as exploratory for exactly this reason
+(§12.6), and that does not change if the remaining seeds agree with it.
+
+### What actually happened to §6's third bullet
+
+The pre-registration's unit is the seed, with arms paired within a seed, so the
+"orders the arms the same way" condition is settled by the paired contrasts, not
+by ranking five arm means:
+
+| aggregate contrast | n | Δentropy | Δacc | |
+|---|---|---|---|---|
+| `STEER − GRPO` | 3 | −.0487 | −.0101 | same direction |
+| `STEER-F − STEER` | 2 | +.0101 | +.0135 | same direction |
+| `STEER-F − GRPO` | **1** | −.0281 | +.0145 | dissociated |
+
+Two of three move together; the one that comes apart has a single seed under it.
+**The dissociation claim as pre-registered is recorded as failed.**
+
+Ranking the arm means does not rescue it. The rank correlation between converged
+entropy and converged accuracy comes out with a *different sign* depending on
+whether each arm is averaged over the seeds common to all five arms
+(`--balanced`, what the manuscript's Table 1 shows) or over its own seeds, which
+differ in number mid-campaign. A statistic whose sign turns on that choice is not
+one a falsification condition can be settled with at this seed count.
+
+### Registered now, before the remaining seeds
+
+- **Quantity:** `steerf/branch_entropy` — entropy at the positions where `A_H`
+  can be non-zero. The trainer already logs it; `scripts/analyze_seeds.py` emits
+  `brentropy`, `nbrentropy`, `brgap` per seed.
+- **Primary contrast:** `STEER-F − permuted`, **paired by seed**. That pair shares
+  λ, λ_min, the sampler and the *magnitudes* of `A_H`, and differs only in whether
+  a branch is paired with its own score.
+- **Secondary:** `STEER-F − uniform`, paired by seed.
+- **The narrow claim:** a branch-point entropy contrast near zero can accompany an
+  accuracy contrast away from zero — what separates the arms is *which sibling*
+  the budget is spent on, not how large the budget is.
+
+### What would falsify the narrow claim
+
+Stated before the remaining seeds land, so it cannot be renegotiated after.
+
+1. If the branch-point contrast **tracks** the accuracy contrast in sign and
+   magnitude across seeds the way the aggregate contrasts above do, the
+   branch-level split is the aggregate statistic in a smaller window and the
+   narrow claim fails with the wide one.
+2. If STEER-F keeps the **lowest** branch-point entropy and the **smallest**
+   branch-to-non-branch gap of the three tree arms — which is what the seeds in
+   hand already show (`.1446`/`.0231` against `.1512`/`.0314` for permuted and
+   `.1777`/`.0399` for uniform) — then reading this method as "preserving
+   diversity where it matters" is **refused outright**, and the manuscript says
+   so in those words rather than softening the claim to fit.

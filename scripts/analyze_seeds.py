@@ -58,6 +58,16 @@ METRICS = {
     "perf/time_per_step": "s_per_step",
     "steerf/branch_corr_frac": "branch_frac",
     "steerf/tw_mean": "tw_mean",
+    # Entropy split by whether A_H can be non-zero at the position. The
+    # aggregate actor/entropy above is dominated by the ~90% of tokens that are
+    # not branch points, so it cannot see an intervention that only acts on
+    # them -- and Section 9.3 says A_H sums to zero over a sibling set, so it
+    # redistributes a branch point's entropy among siblings rather than adding
+    # any. Reading the aggregate alone therefore tests a claim the method never
+    # made. These three read the branch positions directly.
+    "steerf/branch_entropy": "brentropy",
+    "steerf/nonbranch_entropy": "nbrentropy",
+    "steerf/branch_entropy_gap": "brgap",
 }
 DERIVED = {"uplift": lambda r: r["maj"] - r["acc"]}
 
@@ -505,7 +515,8 @@ def main(argv=None) -> int:
         def seeds_of(arm):
             return sorted(per_seed.get(arm, {}))
 
-    cols = ["acc", "maj", "uplift", "entropy", "resp_len", "s_per_step",
+    cols = ["acc", "maj", "uplift", "entropy", "brentropy", "nbrentropy",
+            "brgap", "resp_len", "s_per_step",
             "s_per_val_step", "branch_frac", "tw_mean", "n_val_points"]
 
     with (out_dir / "per_seed.tsv").open("w") as fh:
@@ -543,7 +554,8 @@ def main(argv=None) -> int:
             shared = sorted(set(per_seed.get(a, {})) & set(per_seed.get(b, {})))
             if not shared:
                 continue
-            for metric in ("acc", "maj", "uplift", "entropy"):
+            for metric in ("acc", "maj", "uplift", "entropy",
+                           "brentropy", "nbrentropy", "brgap"):
                 d = [per_seed[a][s][metric] - per_seed[b][s][metric]
                      for s in shared
                      if metric in per_seed[a][s] and metric in per_seed[b][s]]
@@ -683,7 +695,8 @@ def main(argv=None) -> int:
                 fh.write(mac(f"S{arm}{c}", (max(v) - min(v)) if len(v) > 1 else None))
                 fh.write(mac(f"Lo{arm}{c}", min(v) if len(v) > 1 else None))
                 fh.write(mac(f"Hi{arm}{c}", max(v) if len(v) > 1 else None))
-            for c in ("acc", "maj", "uplift", "entropy"):
+            for c in ("acc", "maj", "uplift", "entropy",
+                      "brentropy", "nbrentropy", "brgap"):
                 v = [r[c] for r in rows if c in r]
                 fh.write(mac(f"R{arm}{c}", (sum(v) / len(v)) if v else None))
                 fh.write(mac(f"E{arm}{c}",

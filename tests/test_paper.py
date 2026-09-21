@@ -103,7 +103,22 @@ def emittable_names():
     arms = re.search(r"MAIN_ARMS = \[([^\]]*)\]", src).group(1)
     arms = re.findall(r'"([a-z-]+)"', arms)
     stems = re.findall(r'"[a-z0-9.-]+":\s*"([a-z]+)"', src)
-    metrics = ["acc", "maj", "uplift", "entropy"]
+    # The metric list is read out of the emitter, not restated here. A copy
+    # kept in this file goes stale in silence: on 2026-09-21 analyze_seeds.py
+    # gained the branch-point entropy split, and the four names hardcoded here
+    # reported its eight new slots as cells no run could ever fill -- the very
+    # failure this test exists to catch, produced by the test itself. Every
+    # tuple the emitter loops a metric over that mentions entropy counts.
+    metrics = sorted({
+        m
+        for tup in re.findall(
+            r'for (?:c|metric) in \(\s*("[a-z_]+"(?:\s*,\s*"[a-z_]+")*)\s*\)',
+            src, re.S)
+        if '"entropy"' in tup
+        for m in re.findall(r'"([a-z_]+)"', tup)
+    })
+    assert "entropy" in metrics and "brentropy" in metrics, \
+        f"the emitter's metric tuple was not found; got {metrics}"
     pairs = re.findall(r'\("([a-z]+)", "([a-z]+)"\)', src)
 
     names = {"Nseeds", "Plateaulo", "Plateauhi", "STDaime", "SEaime", "Wseed",
