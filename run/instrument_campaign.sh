@@ -20,6 +20,20 @@
 #      actor/seq_entropy -- the real trajectory entropy rather than
 #      entropy-divided-by-length.
 #
+#   4. steer_f/monitors.py gains four keys on the a_h != 0 support:
+#      support_entropy / nonsupport_entropy / support_entropy_gap /
+#      support_frac. The existing branch_entropy keys are NOT touched.
+#      Why the new keys are needed: branch_token_entropy splits on the top
+#      DECILE of A_H (top_frac=0.1, never overridden at the call site), while
+#      the positions the correction reaches are branch_corr_frac ~= .012. A_H
+#      is exactly zero wherever a rollout is its own only sibling, so the rest
+#      of that decile is the tie-break among zeros -- measured, 94% of the
+#      bucket, taken as a contiguous index slab rather than a random sample.
+#      `a_h != 0` is the predicate omega_tilde.branch_weight_correction itself
+#      uses, so the new split covers what the method touches and nothing else.
+#      Why branch_entropy is left alone: seeds already finished logged it, and
+#      redefining a key mid-campaign makes those runs incomparable.
+#
 # Every edit is idempotent: running twice changes nothing the second time.
 
 set -uo pipefail
@@ -53,8 +67,28 @@ except Exception:
 PY
 )"
 
+# steer_f is taken from the donor branch on a pod (run/bootstrap_pod.sh:35-51):
+# this branch carries a steer_f of a different lineage, and patching that one
+# would change nothing the trainer runs. Match on a donor-only marker rather
+# than on the path, so a wrong-lineage checkout is skipped and said out loud.
+MON="$(python3 - <<'MONPY' 2>/dev/null
+# find_spec locates the package without executing monitors.py, which on a
+# machine missing torch or a sibling module would otherwise raise and hide a
+# file that is sitting right there.
+import importlib.util, os
+try:
+    sp = importlib.util.find_spec("steer_f")
+    d = list(sp.submodule_search_locations)[0] if sp else ""
+    f = os.path.join(d, "monitors.py") if d else ""
+    print(f if f and os.path.exists(f) else "")
+except Exception:
+    print("")
+MONPY
+)"
+
 say "root : ${ROOT}"
 say "verl : ${RT:-<not importable>}"
+say "steer_f monitors : ${MON:-<not importable>}"
 say ""
 
 # ------------------------------------------------------------------ 1 + 2
@@ -92,6 +126,25 @@ elif grep -qE '^\s*#\s*seq_entropy_agg\s*=' "${RT}"; then
     need "SEQ_ENTROPY"  "seq_entropy_agg is commented out"
 else
     bad "neither an active nor a commented seq_entropy_agg line found"
+fi
+say ""
+
+# ---------------------------------------------------------------------- 4
+say "steer_f monitors.py"
+if [ -z "${MON}" ]; then
+    printf '  [skip]   steer_f is not importable here; support_entropy left unchecked\n'
+    [ "${rc}" -eq 0 ] && rc=1
+elif ! grep -q '_top_k_selection' "${MON}"; then
+    printf '  [skip]   this steer_f is the other lineage (no _top_k_selection).\n'
+    printf '           Run this on a pod, after run/bootstrap_pod.sh has put the\n'
+    printf "           donor's steer_f in place.\n"
+    [ "${rc}" -eq 0 ] && rc=1
+elif grep -q 'steerf/support_entropy' "${MON}"; then
+    ok "support-restricted entropy already logged"
+elif grep -q 'steerf/a_h_std' "${MON}"; then
+    need "SUPPORT_ENTROPY"  "branch_token_entropy splits on the top decile only"
+else
+    bad "branch_token_entropy does not look as expected -- inspect by hand"
 fi
 say ""
 
@@ -143,6 +196,41 @@ PYEOF
         sed -i -E 's/(\+\+trainer\.save_best_only=)(True|False)/\1${SAVE_BEST_ONLY:-False}/' "${RS}"
         ok "save_best_only is now \${SAVE_BEST_ONLY:-False}"
         ;;
+    SUPPORT_ENTROPY)
+        [ -f "${MON}.bak.${stamp}" ] || cp -p "${MON}" "${MON}.bak.${stamp}"
+        python3 - "${MON}" <<'MONEOF'
+import sys
+p = sys.argv[1]
+s = open(p, encoding="utf-8").read()
+assert "steerf/support_entropy" not in s, "already applied"
+anchor = '    other = float(ent_v[~is_branch].mean()) if int((~is_branch).sum()) > 0 else float("nan")'
+assert anchor in s, "the branch/non-branch split is not where this patch expects it"
+block = anchor + """
+
+    # The split above is a fixed top DECILE of A_H. The positions the
+    # correction actually reaches are `a_h != 0` -- the same predicate
+    # omega_tilde.branch_weight_correction applies -- and that is about an
+    # eightieth of the tokens, an eighth of the decile. A_H is exactly zero
+    # wherever a rollout has become its own only sibling, so the remainder of
+    # the decile is torch.topk's tie-break among those zeros, which takes a
+    # contiguous index slab rather than a random sample. Anything read off the
+    # decile keys is therefore mostly positional. These four are not.
+    sup = a_v != 0
+    n_sup = int(sup.sum())
+    sup_e = float(ent_v[sup].mean()) if n_sup > 0 else float("nan")
+    nsup_e = float(ent_v[~sup].mean()) if int((~sup).sum()) > 0 else float("nan")"""
+s = s.replace(anchor, block, 1)
+key = '        "steerf/a_h_std": float(a_v.std(unbiased=False)),'
+assert key in s, "the a_h_std key is not where this patch expects it"
+s = s.replace(key, key + """
+        "steerf/support_entropy": sup_e,
+        "steerf/nonsupport_entropy": nsup_e,
+        "steerf/support_entropy_gap": sup_e - nsup_e,
+        "steerf/support_frac": n_sup / n,""", 1)
+open(p, "w", encoding="utf-8").write(s)
+MONEOF
+        ok "added the support-restricted entropy keys (backup ${MON}.bak.${stamp})"
+        ;;
     SEQ_ENTROPY)
         [ -f "${RT}.bak.${stamp}" ] || cp -p "${RT}" "${RT}.bak.${stamp}"
         sed -i -E 's/^(\s*)#\s*(seq_entropy_agg\s*=)/\1\2/; s/^(\s*)#\s*("actor\/seq_entropy")/\1\2/' "${RT}"
@@ -161,6 +249,10 @@ done
 if [ -n "${RT}" ]; then
     if python3 -m py_compile "${RT}" 2>/dev/null; then ok "ray_trainer.py compiles"
     else bad "ray_trainer.py no longer compiles -- restore ${RT}.bak.${stamp}"; fi
+fi
+if [ -n "${MON}" ]; then
+    if python3 -m py_compile "${MON}" 2>/dev/null; then ok "monitors.py compiles"
+    else bad "monitors.py no longer compiles -- restore ${MON}.bak.${stamp}"; fi
 fi
 
 say ""

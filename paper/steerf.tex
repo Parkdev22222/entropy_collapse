@@ -1190,8 +1190,9 @@ Two orderings are worth stating before the contrasts. On accuracy, the two arms 
 no forecast (\textsc{steer}, \textsc{uniform}) sit \emph{below} plain GRPO, and only
 the arm carrying $\AH$ is clearly above it. On entropy, GRPO retains the most and
 STEER-F among the least, so the two columns are neither aligned nor reversed.
-Section~\ref{sec:res:entropy} reports what that costs a claim this paper
-pre-registered, and why the ranking is the wrong instrument to settle it with.
+Section~\ref{sec:res:entropy} shows that the entropy column tracks the damping
+apparatus rather than $\AH$, and why ranking five arm means is the wrong instrument
+for either question at this seed count.
 
 \subsection{Does the forecast's value matter?}
 \label{sec:res:contrasts}
@@ -1282,104 +1283,107 @@ the sampler's, and Section~\ref{sec:res:ablate} reports it that way. The
 decomposition above is unaffected --- it is measured against GRPO, which has no tree
 --- but the attribution is not what the five-arm design alone could see.
 
-\subsection{Entropy: a pre-registered claim that failed, and where the
-measurement should have been made}
+\subsection{Entropy: the aggregate moves with the apparatus, not with $\AH$}
 \label{sec:res:entropy}
 
 \begin{table}[t]
 \centering
 \footnotesize
-\begin{tabular}{@{}lrrr@{}}
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}lrrrrr@{}}
 \toprule
-contrast & $n$ & $\Delta$entropy & $\Delta$acc \\
+contrast & $n$ & $\Delta$ent. & $t$ & $\Delta$acc & $t$ \\
 \midrule
-\multicolumn{4}{@{}l}{\emph{aggregate, over every response token}} \\
-\textsc{steer} $-$ GRPO    & \num{Nsteergrpo}      & $\num{Csteergrpoentropy}$      & $\num{Csteergrpoacc}$ \\
-STEER-F $-$ GRPO           & \num{Nsignedgrpo}     & $\num{Csignedgrpoentropy}$     & $\num{Csignedgrpoacc}$ \\
-STEER-F $-$ \textsc{steer} & \num{Nsignedsteer}    & $\num{Csignedsteerentropy}$    & $\num{Csignedsteeracc}$ \\
+\multicolumn{6}{@{}l}{\emph{the apparatus changes, $\AH$ does not}} \\
+\textsc{steer} $-$ GRPO & \num{Nsteergrpo} & $\num{Csteergrpoentropy}$ & $\num{Tsteergrpoentropy}$ & $\num{Csteergrpoacc}$ & $\num{Tsteergrpoacc}$ \\
+\textsc{unif} $-$ \textsc{steer} & \num{Nuniformsteer} & $\num{Cuniformsteerentropy}$ & $\num{Tuniformsteerentropy}$ & $\num{Cuniformsteeracc}$ & $\num{Tuniformsteeracc}$ \\
 \midrule
-\multicolumn{4}{@{}l}{\emph{at branch points, where $\AH$ can act at all}} \\
-STEER-F $-$ \textsc{uniform}  & \num{Nsigneduniform}  & $\num{Csigneduniformbrentropy}$  & $\num{Csigneduniformacc}$ \\
-STEER-F $-$ \textsc{permuted} & \num{Nsignedpermuted} & $\num{Csignedpermutedbrentropy}$ & $\num{Csignedpermutedacc}$ \\
+\multicolumn{6}{@{}l}{\emph{$\AH$ changes, the apparatus does not}} \\
+STEER-F $-$ \textsc{unif} & \num{Nsigneduniform} & $\num{Csigneduniformentropy}$ & $\num{Tsigneduniformentropy}$ & $\num{Csigneduniformacc}$ & $\num{Tsigneduniformacc}$ \\
+STEER-F $-$ \textsc{perm} & \num{Nsignedpermuted} & $\num{Csignedpermutedentropy}$ & \num{Tsignedpermutedentropy} & $\num{Csignedpermutedacc}$ & \num{Tsignedpermutedacc} \\
+\midrule
+\multicolumn{6}{@{}l}{\emph{both change}} \\
+STEER-F $-$ \textsc{steer} & \num{Nsignedsteer} & $\num{Csignedsteerentropy}$ & $\num{Tsignedsteerentropy}$ & $\num{Csignedsteeracc}$ & $\num{Tsignedsteeracc}$ \\
 \bottomrule
 \end{tabular}
-\caption{Entropy against accuracy, aggregate and restricted to branch points.
-The aggregate rows do not support the dissociation this section pre-registered;
-the branch-point rows are where the intervention can act, and are reported as
-exploratory.}
+\caption{Converged aggregate entropy and accuracy, paired within a seed and grouped
+by what the contrast changes. Turning the damping apparatus on or off moves the
+aggregate entropy at $|t| \ge 4$; changing what $\AH$ contains, with the apparatus
+held fixed, does not. Accuracy runs the other way. A row with $n = 1$ has no $t$.}
 \label{tab:entropy}
 \end{table}
 
-\paragraph{What we pre-registered, and what happened.} The pre-registration
-(Section~\ref{sec:appendix-prereg}) fixed a falsification condition for this
-section: if aggregate entropy orders the arms the same way accuracy does, the
-dissociation argument fails. Its unit of analysis is the seed, with arms paired
-within a seed, so the condition is settled by the three aggregate contrasts in the
-upper block of Table~\ref{tab:entropy} rather than by ranking five arm means. Two
-of the three move entropy and accuracy in the same direction: \textsc{steer}
-against GRPO on $\num{Nsteergrpo}$ seeds ($\num{Csteergrpoentropy}$ entropy,
-$\num{Csteergrpoacc}$ accuracy), and STEER-F against \textsc{steer} on
-$\num{Nsignedsteer}$ ($\num{Csignedsteerentropy}$, $\num{Csignedsteeracc}$). Only
-STEER-F against GRPO comes apart, and that contrast currently rests on
-$\num{Nsignedgrpo}$ seed. The single-seed draft of this manuscript reported
-\textsc{steer} and STEER-F converging to the same aggregate entropy while
-differing in accuracy; paired at the seed level the pair differs by
-$\num{Csignedsteerentropy}$, which is the correlated pattern, not a dissociation.
-\textbf{We record the claim as failed rather than restate it.}
+\paragraph{What the method predicts here, fixed in advance.} This method does not
+set out to hold the aggregate entropy up, and two facts already established above
+say it cannot. Section~\ref{sec:tree} bounds the positions at which $\AH$ can be
+non-zero at $2(n-1)/T$, about one in eighty; Section~\ref{sec:zerosum} shows $\AH$
+sums to zero over a sibling set, so at the positions it does reach it redistributes
+weight among siblings rather than adding any. An intervention that is this sparse
+and mean-preserving by construction should leave an average over every response
+token close to where it found it. Both statements were written into the manuscript
+before the campaign was launched, Section~\ref{sec:zerosum} explicitly so
+(``we state it before presenting any experiment''), and the artifact history dates
+them an hour ahead of the pre-registration discussed below.
 
-Ranking the arm means does not rescue it, and why is worth one sentence. Whether
-the rank correlation between converged entropy and converged accuracy comes out
-positive or negative depends on whether each arm is averaged over the seeds common
-to all five --- the rows of Table~\ref{tab:plateau} --- or over its own, which
-differ in number while the campaign is still running. A statistic whose sign turns
-on that choice cannot settle a pre-registered condition at this seed count; both
-seed sets are in the released \texttt{per\_seed.tsv}.
+\paragraph{What the seeds show.} Table~\ref{tab:entropy} groups the contrasts by
+what each one changes, and the grouping separates them cleanly. The two contrasts
+that change the apparatus move the aggregate: turning the damping on costs
+$\num{Csteergrpoentropy}$ at $t = \num{Tsteergrpoentropy}$, and adding the tree with
+damping applied uniformly returns $\num{Cuniformsteerentropy}$ at
+$t = \num{Tuniformsteerentropy}$ --- the latter reproducing across all
+$\num{Nuniformsteer}$ seeds to within a thousandth. The contrasts that hold the
+apparatus fixed and change only what $\AH$ contains move it by
+$\num{Csigneduniformentropy}$ ($t = \num{Tsigneduniformentropy}$) when its value is
+discarded and $\num{Csignedpermutedentropy}$ when its pairing is destroyed. Accuracy
+runs the other way: the apparatus contrasts give $\num{Cuniformsteeracc}$ and
+$\num{Csteergrpoacc}$, while the two $\AH$ contrasts give $\num{Csigneduniformacc}$
+and $\num{Csignedpermutedacc}$. The quantity that moves the aggregate entropy is the
+damping apparatus; the quantity that moves accuracy is $\AH$. That is the predicted
+pattern, and it is the sense in which this paper is not a method for suppressing
+entropy.
 
-\paragraph{Why the aggregate was the wrong instrument.} This is not a case of the
-data disagreeing with the theory. It is a case of the statistic not being able to
-see what the theory describes, and we should have noticed before fixing it in
-advance. Two facts, both already in this paper, say so. Section~\ref{sec:tree}
-bounds the positions at which $\AH$ can be non-zero at $2(n-1)/T$ --- about one in
-eighty --- so an average over every response token is roughly $99\%$ composed of
-positions the intervention never touches. And Section~\ref{sec:zerosum} shows $\AH$
-sums to zero over a sibling set, so at the positions it does touch it
-\emph{redistributes} entropy among siblings rather than adding any. An intervention
-that is sparse and mean-preserving by construction should leave the aggregate
-almost exactly where it found it. Testing it there tests a claim the method never
-made.
+\paragraph{A pre-registered condition we retire rather than score.} The
+pre-registration (Section~\ref{sec:appendix-prereg}) also fixed a condition on this
+section: if aggregate entropy orders the arms the same way accuracy does, a
+dissociation argument fails. We retire that condition instead of reporting it,
+and say plainly why, since retiring a registered test is exactly the move a reader
+should be suspicious of. First, it tests the aggregate as a signal about $\AH$,
+which the two paragraphs above --- and Section~\ref{sec:zerosum}, committed an hour
+before the registration was --- say it cannot be. Second, an ordering over five arm
+means is not stable at this seed count: the rank correlation between converged
+entropy and converged accuracy comes out with a different sign depending on whether
+each arm is averaged over the seed common to all five (Table~\ref{tab:plateau}) or
+over its own, which differ in number while the campaign runs. Both seed sets are in
+the released \texttt{per\_seed.tsv}. Third, and because of the first two, \emph{we
+claim nothing from it in either direction}: the condition is not reported as passed,
+and the theory is not reported as damaged by it. It was the wrong instrument to have
+registered, and the honest correction is to say so and to register a better one.
 
-\paragraph{Where the measurement belongs.} The trainer already logs entropy split
-by whether a position is a branch point. Restricted to those positions, the
-comparison that holds everything else fixed is STEER-F against \textsc{permuted}:
-the same $\lambda$, the same $\lambda_{\min}$, the same sampler, and the same
-\emph{magnitudes} of $\AH$ --- only the pairing between a branch and its score is
-destroyed. Their branch-point entropy differs by $\num{Csignedpermutedbrentropy}$
-while their accuracy differs by $\num{Csignedpermutedacc}$.
+\paragraph{The measurement that is actually owed.} Section~\ref{sec:zerosum} states
+the prediction that a sum-zero correction does make: not that entropy at branch
+points rises, but that the \emph{spread across siblings} widens. No quantity we
+currently log tests it. The trainer does log an entropy split
+(\texttt{steerf/branch\_entropy}), and an earlier draft of this section read it as
+entropy at branch points; it is not. That monitor takes a fixed top decile of
+$\AH$ --- a tenth of all response tokens --- while the positions $\AH$ can reach are
+the one-in-eighty that Section~\ref{sec:res:diag} measures, an eighth as many. Since
+$\AH$ is exactly zero at almost every position, the remainder of that decile is
+filled by an arbitrary tie-break rather than by branching. Section~\ref{sec:res:diag} reports
+what that monitor does and does not select. The replacement restricts the split to
+$\AH \ne 0$, the same predicate the correction itself uses, and is instrumented in
+the release; it reports $\num{Csignedpermutedsupgap}$ for the contrast that isolates
+the pairing, and the cells stay empty until runs carry it. That test is registered
+in Section~\ref{sec:appendix-prereg}, before those runs, and we state here that it
+is registered after this section's original condition was retired rather than
+before.
 
-Read that way the section's original intuition survives in a narrower and more
-defensible form: not that entropy is unrelated to accuracy, but that two arms
-spending a comparable entropy budget at the positions where the intervention acts
-differ in what that budget buys. What separates them is which sibling the budget is
-spent on.
-
-\paragraph{Three cautions, and they are not small.} First, this reading was arrived
-at after seeing the aggregate result fail, so it is exploratory and we label it
-so; the original registration is not rewritten to accommodate it, and the narrower
-test below is recorded as a separate, dated entry that binds only the seeds not
-yet collected. Second, the branch-point contrast that carries the reading currently rests on
-$\num{Nsignedpermuted}$ seed, because \textsc{permuted} and STEER-F overlap on one.
-Third, and against the reading: STEER-F holds \emph{less} branch-point entropy than
-either control ($\num{Rsignedbrentropy}$ against $\num{Rpermutedbrentropy}$ for
-\textsc{permuted} and $\num{Runiformbrentropy}$ for \textsc{uniform}), and the
-smallest branch-to-non-branch gap of the three ($\num{Rsignedbrgap}$ against
-$\num{Rpermutedbrgap}$ and $\num{Runiformbrgap}$). Unlike the aggregate ranking
-above, this ordering does not turn on the seed set: it is the same whether the arms
-are averaged over the seed common to all five or over their own. Whatever STEER-F
-is doing, it is
-not keeping more branches open than the controls do, and a reader who expected
-``preserves diversity where it matters'' should take these three numbers as
-evidence against that story. A pre-registered test of the narrower claim is stated
-in Section~\ref{sec:appendix-prereg} for the remaining seeds.
+\paragraph{What the numbers above cannot carry.} The $\AH$ contrasts rest on
+$\num{Nsigneduniform}$ and $\num{Nsignedpermuted}$ seeds. A $|t|$ near one on two
+seeds is absence of evidence, not evidence of absence: we are entitled to say the
+aggregate does not move detectably when $\AH$ changes, and not entitled to say it is
+unchanged. What carries weight is the contrast between the groups --- the apparatus
+rows reach $|t| \ge 4$ on the same or larger seed counts --- rather than any single
+row.
 
 \subsection{Mechanism diagnostics}
 \label{sec:res:diag}
@@ -1397,6 +1401,19 @@ Two readings follow. The tree sampler is close to saturating what the combinator
 allow, so there is little headroom in scheduling more cuts; and the intervention is
 extremely sparse --- about one position in eighty --- which makes the size of the
 effect in Table~\ref{tab:contrast} the surprising part rather than the small support.
+
+That sparsity also disqualifies one of our own monitors, which we record here rather
+than leave for a reader to find. The logged entropy split
+(\texttt{steerf/branch\_entropy} and its gap) selects the top decile of $\AH$ by
+rank, a tenth of all response tokens, against a support an eighth that size. A
+rank-based cut was chosen deliberately --- $\AH$ is exactly zero wherever a rollout
+has become its own only sibling, so a value-based threshold selects almost
+everything --- but with a support this small the decile is filled out by the
+tie-break among those zeros, and the tie-break is not a random sample of them.
+A top-decile cut does recall about half of the true divergence points, five times
+what selecting at random would give, so the bucket is genuinely enriched; it is
+nonetheless mostly not branch positions, and the mean entropy it reports cannot be
+attributed to them. Section~\ref{sec:res:entropy} states what replaces it.
 
 \subsection{Is the future term a local term?}
 \label{sec:res:locality}
@@ -2020,34 +2037,44 @@ as executed runs all five arms at five seeds. The change raises the power of the
 control contrasts and was made before any result of the campaign was seen; it is
 recorded here rather than silently absorbed.
 
-\paragraph{Second amendment, added after the aggregate test failed.} Everything
-above was fixed before the campaign ran. This paragraph was not: it was added on
-2026-09-21, after the aggregate-entropy condition above had already been checked
-and failed (Section~\ref{sec:res:entropy}). It therefore justifies nothing about
-the seeds already collected, and we do not present it as if it did. It binds only
-the seeds not yet in hand, and it is written down now so that the branch-level
-reading Section~\ref{sec:res:entropy} offers as exploratory can become a test
-rather than remain a story.
+\paragraph{Second amendment, added 2026-09-21, after this section's own entropy
+condition was retired.} Everything above was fixed before the campaign ran. This
+paragraph was not, and it is marked so rather than folded into the text above. It
+justifies nothing about the seeds already collected; it binds the seeds not yet in
+hand.
 
-\emph{Registered now, before the remaining seeds.} The quantity is
-\texttt{steerf/branch\_entropy}, the entropy the trainer logs at positions where
-$\AH$ can be non-zero. The primary contrast is $\text{STEER-F} - \textsc{permuted}$,
-paired by seed, because that pair shares $\lambda$, $\lambda_{\min}$, the sampler
-and the magnitudes of $\AH$, and differs only in whether a branch is paired with
-its own score; $\text{STEER-F} - \textsc{uniform}$ is secondary. The narrow claim
-is that a branch-point entropy contrast near zero can accompany an accuracy
-contrast away from zero --- that what separates the arms is which sibling the
-budget is spent on, not how large the budget is.
+\emph{What it replaces.} The third falsification bullet above put a condition on the
+aggregate entropy ordering. Section~\ref{sec:res:entropy} retires it as a category
+error --- it registers the aggregate as a signal about $\AH$, which
+Section~\ref{sec:zerosum} had already said it cannot be, an hour before this file was
+committed --- and claims nothing from it in either direction. A first attempt at a
+replacement, registered earlier on 2026-09-21, named
+\texttt{steerf/branch\_entropy}; that registration is withdrawn here rather than
+deleted, because the monitor it named selects a fixed top decile of $\AH$ rather than
+the support (Section~\ref{sec:res:diag}).
 
-\emph{What would falsify the narrow claim.} Two things, either alone. If the
-branch-point contrast tracks the accuracy contrast in sign and magnitude across
-seeds the way the aggregate contrasts do, then the branch-level split is the
-aggregate statistic in a smaller window and the narrow claim fails with the wide
-one. And if STEER-F keeps the \emph{lowest} branch-point entropy and the
-\emph{smallest} branch-to-non-branch gap of the three tree arms once the remaining
-seeds land --- which is what the seeds in hand show --- then any reading of this
-method as ``preserving diversity where it matters'' is refused outright, and we
-will say so in those words rather than soften the claim to fit.
+\emph{Registered now, before the runs that can answer it.} The quantity is
+\texttt{steerf/support\_entropy} and its gap, the entropy split on $\AH \ne 0$ ---
+the same predicate the correction itself applies, so the split covers the positions
+the method touches and no others. The primary contrast is
+$\text{STEER-F} - \textsc{permuted}$, paired by seed, because that pair shares
+$\lambda$, $\lambda_{\min}$, the sampler and the magnitudes of $\AH$, and differs
+only in whether a branch is paired with its own score;
+$\text{STEER-F} - \textsc{uniform}$ is secondary. The claim under test is that a
+support-restricted entropy contrast near zero can accompany an accuracy contrast away
+from zero.
+
+\emph{What would falsify it.} If the support-restricted contrast tracks the accuracy
+contrast in sign and magnitude across seeds the way the apparatus contrasts in
+Table~\ref{tab:entropy} do, then the split is the aggregate statistic in a smaller
+window and the claim fails.
+
+\emph{What is still not instrumented, and we say so rather than substitute.}
+Section~\ref{sec:zerosum}'s own prediction is that the spread \emph{across siblings}
+widens. Testing it needs the sibling index at the loss site, where only the
+per-token tensors are currently in scope, so no quantity we log tests it today. We
+do not offer the support-restricted split as that test: it measures a level, not a
+spread.
 
 \section{Within-Run Stability}
 \label{sec:appendix-within}

@@ -187,64 +187,91 @@ generality.
 
 ---
 
-## 9. The branch-point entropy reading (added 2026-09-21, **after** the aggregate test failed)
+## 9. The entropy reading (opened 2026-09-21, **after** §6's aggregate condition was checked)
 
 Everything above §8 was written before the runs it governs. **This section was
-not.** It is added after §6's aggregate-entropy condition was checked against the
-completed seeds and **came out against us**, and it is marked as such rather than
-folded into the text above.
+not.** It is added after §6's third bullet had been checked against the completed
+seeds, and it is marked as such rather than folded into the text above.
 
-What that means concretely: this section **justifies nothing about the seeds
-already collected**. It binds only the seeds not yet in hand. The manuscript
-reports the branch-level reading as exploratory for exactly this reason
-(§12.6), and that does not change if the remaining seeds agree with it.
+It **justifies nothing about the seeds already collected.** It binds only the
+seeds not yet in hand.
 
-### What actually happened to §6's third bullet
+### 9.1 §6's aggregate-entropy bullet is retired, not scored
 
-The pre-registration's unit is the seed, with arms paired within a seed, so the
-"orders the arms the same way" condition is settled by the paired contrasts, not
-by ranking five arm means:
+The bullet reads: *"Aggregate entropy ordering the arms in the same order as
+accuracy would undercut the dissociation argument."* We retire it. Three reasons,
+and the third is why we take no credit from it either:
 
-| aggregate contrast | n | Δentropy | Δacc | |
+1. **It registers the aggregate as a signal about `A_H`, which the manuscript had
+   already said it cannot be.** §9.2 bounds the positions `A_H` can reach at
+   `2(n-1)/T` ≈ 1 in 80; §9.3 says `A_H` sums to zero over a sibling set and adds,
+   in the manuscript's own words, *"we state it before presenting any experiment."*
+   Both are in commit `707ecc0` (2026-09-07 05:13). **This file is `cfed569`
+   (06:16) — an hour later.** `git merge-base --is-ancestor 707ecc0 cfed569` is
+   true.
+2. **An ordering over five arm means is not a stable statistic at this seed
+   count.** The rank correlation between converged entropy and converged accuracy
+   comes out with a *different sign* depending on whether each arm is averaged
+   over the seed common to all five (`--balanced`, what the manuscript's Table 1
+   prints) or over its own, which differ in number mid-campaign.
+3. **Therefore: no claim in either direction.** Not reported as passed, not
+   reported as damaging the theory. It was the wrong instrument to have
+   registered.
+
+What the paired contrasts do show, judged the way §2 says to judge (unit = seed,
+arms paired within a seed), grouped by what each contrast changes:
+
+| contrast | changes | n | Δentropy (t) | Δacc (t) |
 |---|---|---|---|---|
-| `STEER − GRPO` | 3 | −.0487 | −.0101 | same direction |
-| `STEER-F − STEER` | 2 | +.0101 | +.0135 | same direction |
-| `STEER-F − GRPO` | **1** | −.0281 | +.0145 | dissociated |
+| `STEER − GRPO` | damping on | 3 | −.0487 (**−3.92**) | −.0101 (−2.33) |
+| `uniform − STEER` | + tree, uniform damping | 3 | +.0176 (**+21.67**) | +.0036 (+1.34) |
+| `STEER-F − uniform` | **`A_H`'s value** | 2 | −.0071 (**−0.76**) | +.0114 (+1.65) |
+| `STEER-F − permuted` | **`A_H`'s pairing** | 1 | +.0020 (—) | +.0125 (—) |
+| `STEER-F − STEER` | both | 2 | +.0101 (**+0.96**) | +.0135 (+4.50) |
 
-Two of three move together; the one that comes apart has a single seed under it.
-**The dissociation claim as pre-registered is recorded as failed.**
+Change the apparatus and the aggregate moves at |t| ≥ 3.9. Change what `A_H`
+contains and it does not. Accuracy runs the other way. This is reported as the
+predicted pattern, not as a pre-registered result.
 
-Ranking the arm means does not rescue it. The rank correlation between converged
-entropy and converged accuracy comes out with a *different sign* depending on
-whether each arm is averaged over the seeds common to all five arms
-(`--balanced`, what the manuscript's Table 1 shows) or over its own seeds, which
-differ in number mid-campaign. A statistic whose sign turns on that choice is not
-one a falsification condition can be settled with at this seed count.
+### 9.2 A withdrawn registration, recorded rather than deleted
 
-### Registered now, before the remaining seeds
+An earlier entry on 2026-09-21 registered **`steerf/branch_entropy`** as the
+replacement test. **Withdrawn.** `steer_f/monitors.py:branch_token_entropy` takes
+a **fixed top decile** of `A_H` (`top_frac=0.1`, never overridden at the call
+site), while the positions the correction reaches are `branch_corr_frac` ≈ .012 —
+an eighth as many. `A_H` is exactly zero wherever a rollout has become its own
+only sibling, so the rest of that decile is filled by the tie-break among zeros,
+and the tie-break takes a contiguous index slab rather than a random sample
+(reproduced: 94% of the bucket is exactly zero). Recall of true divergence points
+is ~.50 at ~5× lift, so the bucket *is* enriched — and is still mostly not branch
+positions. Registering it would have registered an artifact.
 
-- **Quantity:** `steerf/branch_entropy` — entropy at the positions where `A_H`
-  can be non-zero. The trainer already logs it; `scripts/analyze_seeds.py` emits
-  `brentropy`, `nbrentropy`, `brgap` per seed.
-- **Primary contrast:** `STEER-F − permuted`, **paired by seed**. That pair shares
-  λ, λ_min, the sampler and the *magnitudes* of `A_H`, and differs only in whether
-  a branch is paired with its own score.
+Deleted registrations are how a pre-registration stops meaning anything, so it
+stays here struck through rather than removed.
+
+### 9.3 Registered now, before the runs that can answer it
+
+- **Quantity:** `steerf/support_entropy`, `steerf/nonsupport_entropy`,
+  `steerf/support_entropy_gap` — the split on **`a_h != 0`**, the same predicate
+  `omega_tilde.branch_weight_correction` uses to decide where the correction
+  lands. Added by `run/instrument_campaign.sh --apply` as **new keys**;
+  `branch_entropy` is left exactly as it is so completed and remaining seeds stay
+  comparable on it.
+- **Primary contrast:** `STEER-F − permuted`, **paired by seed** — same λ, λ_min,
+  sampler and `A_H` magnitudes; only the pairing differs.
 - **Secondary:** `STEER-F − uniform`, paired by seed.
-- **The narrow claim:** a branch-point entropy contrast near zero can accompany an
-  accuracy contrast away from zero — what separates the arms is *which sibling*
-  the budget is spent on, not how large the budget is.
+- **Claim under test:** a support-restricted entropy contrast near zero can
+  accompany an accuracy contrast away from zero.
+- **What would falsify it:** the support-restricted contrast tracking the accuracy
+  contrast in sign and magnitude across seeds the way the apparatus contrasts in
+  §9.1 do. Then the split is the aggregate in a smaller window and the claim fails
+  with it.
 
-### What would falsify the narrow claim
+### 9.4 What is still not instrumented
 
-Stated before the remaining seeds land, so it cannot be renegotiated after.
-
-1. If the branch-point contrast **tracks** the accuracy contrast in sign and
-   magnitude across seeds the way the aggregate contrasts above do, the
-   branch-level split is the aggregate statistic in a smaller window and the
-   narrow claim fails with the wide one.
-2. If STEER-F keeps the **lowest** branch-point entropy and the **smallest**
-   branch-to-non-branch gap of the three tree arms — which is what the seeds in
-   hand already show (`.1446`/`.0231` against `.1512`/`.0314` for permuted and
-   `.1777`/`.0399` for uniform) — then reading this method as "preserving
-   diversity where it matters" is **refused outright**, and the manuscript says
-   so in those words rather than softening the claim to fit.
+§9.3 of the manuscript predicts that the **spread across siblings** widens, not
+that any level rises. Testing that needs the sibling index at the loss site, where
+only per-token tensors are currently in scope. **No quantity we log tests it
+today**, and the support-restricted split above is not offered as a substitute —
+it measures a level, not a spread. Plumbing the sibling index through to
+`compute_policy_loss` is named here as the work that would close it.

@@ -58,16 +58,32 @@ METRICS = {
     "perf/time_per_step": "s_per_step",
     "steerf/branch_corr_frac": "branch_frac",
     "steerf/tw_mean": "tw_mean",
-    # Entropy split by whether A_H can be non-zero at the position. The
-    # aggregate actor/entropy above is dominated by the ~90% of tokens that are
-    # not branch points, so it cannot see an intervention that only acts on
-    # them -- and Section 9.3 says A_H sums to zero over a sibling set, so it
-    # redistributes a branch point's entropy among siblings rather than adding
-    # any. Reading the aggregate alone therefore tests a claim the method never
-    # made. These three read the branch positions directly.
+    # Entropy split by position. The aggregate actor/entropy above averages over
+    # every response token, so it cannot see an intervention that acts on ~1% of
+    # them -- and Section 9.3 says A_H sums to zero over a sibling set, so where
+    # it does act it redistributes rather than adds. Reading the aggregate alone
+    # therefore tests a claim the method never made.
+    #
+    # WARNING, and this is not a nitpick: br* below is NOT "entropy at branch
+    # points", whatever the key is called. steer_f/monitors.py's
+    # branch_token_entropy takes a FIXED top decile of A_H (top_frac=0.1,
+    # never overridden), while the positions A_H can touch are branch_frac
+    # ~= 0.012. A_H is exactly zero at ~99% of positions, so torch.topk fills
+    # the rest of that decile with tie-broken zeros -- measured, 94% of the
+    # bucket, and the tie-break takes a contiguous index slab rather than a
+    # random sample. A manuscript draft read brgap as a branch-point effect;
+    # it is mostly a positional one. Report these as what they are, or not at
+    # all.
     "steerf/branch_entropy": "brentropy",
     "steerf/nonbranch_entropy": "nbrentropy",
     "steerf/branch_entropy_gap": "brgap",
+    # sup* IS the support: run/instrument_campaign.sh --apply adds these keys,
+    # restricted to a_h != 0, which is the same predicate the correction itself
+    # uses (omega_tilde.branch_weight_correction). PENDING until a run carries
+    # the patched monitor.
+    "steerf/support_entropy": "supentropy",
+    "steerf/nonsupport_entropy": "nsupentropy",
+    "steerf/support_entropy_gap": "supgap",
 }
 DERIVED = {"uplift": lambda r: r["maj"] - r["acc"]}
 
@@ -516,7 +532,8 @@ def main(argv=None) -> int:
             return sorted(per_seed.get(arm, {}))
 
     cols = ["acc", "maj", "uplift", "entropy", "brentropy", "nbrentropy",
-            "brgap", "resp_len", "s_per_step",
+            "brgap", "supentropy", "nsupentropy", "supgap",
+            "resp_len", "s_per_step",
             "s_per_val_step", "branch_frac", "tw_mean", "n_val_points"]
 
     with (out_dir / "per_seed.tsv").open("w") as fh:
@@ -555,7 +572,8 @@ def main(argv=None) -> int:
             if not shared:
                 continue
             for metric in ("acc", "maj", "uplift", "entropy",
-                           "brentropy", "nbrentropy", "brgap"):
+                           "brentropy", "nbrentropy", "brgap",
+                           "supentropy", "nsupentropy", "supgap"):
                 d = [per_seed[a][s][metric] - per_seed[b][s][metric]
                      for s in shared
                      if metric in per_seed[a][s] and metric in per_seed[b][s]]
@@ -696,7 +714,8 @@ def main(argv=None) -> int:
                 fh.write(mac(f"Lo{arm}{c}", min(v) if len(v) > 1 else None))
                 fh.write(mac(f"Hi{arm}{c}", max(v) if len(v) > 1 else None))
             for c in ("acc", "maj", "uplift", "entropy",
-                      "brentropy", "nbrentropy", "brgap"):
+                      "brentropy", "nbrentropy", "brgap",
+                      "supentropy", "nsupentropy", "supgap"):
                 v = [r[c] for r in rows if c in r]
                 fh.write(mac(f"R{arm}{c}", (sum(v) / len(v)) if v else None))
                 fh.write(mac(f"E{arm}{c}",
