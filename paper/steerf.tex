@@ -1019,10 +1019,12 @@ RMS normalization, clip $c = 1.0$, and the sibling-prefix baseline. The weight m
 is the base method's exponential map of Eq.~\eqref{eq:steermap}, taken
 un-rescaled, at $\lambda_{\min} = 0.7$, so weights land in $[0.7, 1]$ and can only
 attenuate. The released configuration of the base method sets $\lambda_{\min} = 0.8$;
-every other value in that launcher matches it. Ours therefore attenuates the
-extreme-$|\Om|$ tokens by up to $30\%$ where theirs stops at $20\%$, and
-Table~\ref{tab:followups} carries an arm at the released value so that the
-difference is measured rather than assumed.\footnote{Our implementation exposes an optional reshaping of
+every other value in that launcher matches it. We state plainly how ours was
+chosen, because it bears on which contrasts can be read: $0.7$ was selected on
+\emph{our} method, not on the base method, so the baseline runs at a damping
+strength picked for the treatment and $1.5$ times the maximum attenuation its own
+release uses. Section~\ref{sec:res:ablate} reports the base method at
+$\lambda_{\min} = 0.8$ for this reason.\footnote{Our implementation exposes an optional reshaping of
 $\Omt$ before this map (winsorizing or rank-transforming it); every run reported
 here uses the identity setting, so the base method's map sees exactly what it would
 have seen.} The tree sampler uses a single root, cuts at depths
@@ -1514,16 +1516,31 @@ edge. A flat response across $0.1$--$0.5$ would say the method is insensitive to
 a peak at $0.25$ with both neighbours below would say it is a tuned quantity and must
 be reported as one.
 
-\paragraph{The damping strength.} We measure \textsc{steer} below GRPO by
-$\num{Csteergrpoacc}$ over $\num{Nsteergrpo}$ seeds, which the base method's own
-results contradict. The one configuration difference we have found is
-$\lambda_{\min}$: $0.7$ here against $0.8$ in the released script, so our
-\textsc{steer} arm applies one and a half times their maximum attenuation. This
-arm runs $\lambda = 0$ --- stock \textsc{steer} --- at their value, and separates
-a failure to reproduce from an over-damped control. Note what it cannot settle on
-its own: the STEER-F arms also run at $0.7$, so a difference here would mean the
-$\lambda_{\min}$ shared by both sides of every contrast is not neutral, and the
-comparison would have to be re-based rather than corrected.
+\paragraph{The damping strength, and what it does and does not reach.} We
+measure \textsc{steer} below GRPO by $\num{Csteergrpoacc}$ over
+$\num{Nsteergrpo}$ seeds, which the base method's own results contradict. The
+explanation is not a difference in the code --- we read the released weighting
+function against ours and it agrees line for line, as do every other value in the
+two launchers --- but in $\lambda_{\min}$, which we set to $0.7$ by selecting it
+on STEER-F while the released script uses $0.8$. The baseline is therefore running
+at a damping strength chosen for the method it is the control for, and one that
+attenuates half again as hard as its own default. Section~\ref{sec:blind} predicts
+the sign of that: if the local channel is blind at branch points and
+anti-correlated away from them, more of it should cost accuracy. This arm is stock
+\textsc{steer} ($\lambda = 0$) at the released value, and separates a failure to
+reproduce from an over-damped control.
+
+The reach of the problem is bounded, and by the design rather than by luck. All
+four damped arms share $\lambda_{\min} = 0.7$ exactly, so it cancels in any
+contrast between two of them. STEER-F $-$ \textsc{uniform} and STEER-F $-$
+\textsc{permuted} --- the pair that carries this paper's central claim, that the
+forecast's \emph{value} is what matters --- hold $\lambda_{\min}$, $\lambda$,
+the sampler and the weight map all fixed and vary only what $\AH$ contains. Those
+two are unaffected by how $\lambda_{\min}$ was chosen. What the choice does reach
+is the two contrasts against an arm that does not share it: STEER-F $-$
+\textsc{steer}, where only the treatment's side was tuned, and \textsc{steer} $-$
+GRPO, where GRPO has no such knob at all. We report those two with this stated
+rather than resolved.
 
 \paragraph{The sampler.} This is the cell no other arm supplies. Tree rollouts make a
 group share prefixes, which changes the GRPO advantage estimate itself, quite apart
