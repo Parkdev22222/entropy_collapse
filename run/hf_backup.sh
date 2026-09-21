@@ -183,12 +183,22 @@ if [ "${PRUNE}" = "1" ]; then
             echo "  skip $(basename "$(dirname "${d}")"): no actor/huggingface"
             continue
         fi
+        # Deleting inside actor/ bumps actor/'s own mtime, and the liveness
+        # guard above is `find -maxdepth 3 -mmin -FRESH_MIN` -- which matches
+        # actor/ exactly. So a prune made the NEXT half hour of this same
+        # script refuse the run it had just pruned, reporting "written in the
+        # last 30 min" about its own deletions. Snapshot the timestamp and put
+        # it back: the guard asks whether a TRAINER is writing, and a prune is
+        # not one. The restored mtime is still the last real write.
+        stamp="$(mktemp)"; touch -r "${d}" "${stamp}"
         while IFS= read -r item; do
             [ -n "${item}" ] || continue
             echo "  rm $(du -sh "${item}" 2>/dev/null | cut -f1)  ${item#"${CKPT_ROOT}/"}"
             rm -rf "${item}"
             freed=$((freed + 1))
         done <<< "$(find "${d}" -maxdepth 1 -mindepth 1 ! -name huggingface 2>/dev/null)"
+        touch -r "${stamp}" "${d}" 2>/dev/null || true
+        rm -f "${stamp}"
     done
     echo
     df -h "${STEER_ROOT}" | tail -1

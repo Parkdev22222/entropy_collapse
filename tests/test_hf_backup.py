@@ -228,3 +228,34 @@ def test_an_explicit_root_still_wins(tmp_path):
                             "STEER_ROOT": str(elsewhere)})
     assert "FATAL" not in p.stdout + p.stderr
     assert p.returncode == 2          # usage, having found the root fine
+
+
+def test_prune_does_not_make_the_run_look_live(tmp_path):
+    """2026-09-21: prune deletes inside global_step_N/actor, which bumps that
+    directory's mtime -- and the liveness guard is `find -maxdepth 3 -mmin
+    -FRESH_MIN`, which matches actor/ exactly. So pruning made the next half
+    hour of this same script REFUSE the run it had just pruned, blaming its own
+    deletions on a trainer. Three runs hit this at once on the A100 box.
+    """
+    ckpt = tmp_path / "checkpoints" / "STEER-F" / "arun" / "global_step_10" / "actor"
+    (ckpt / "huggingface").mkdir(parents=True)
+    (ckpt / "huggingface" / "model.safetensors").write_bytes(b"w")
+    (ckpt / "optim_world_size_2_rank_0.pt").write_bytes(b"o" * 4096)
+    # The guard scans everything within maxdepth 3 of the run directory, so
+    # backdate the whole tree -- on a real box those timestamps come from the
+    # trainer's last write, and prune touches only actor/.
+    old = 10_000_000          # well outside any freshness window
+    run_dir = tmp_path / "checkpoints" / "STEER-F" / "arun"
+    for path in sorted(run_dir.rglob("*"), reverse=True):
+        os.utime(path, (old, old))
+    os.utime(run_dir, (old, old))
+
+    p = subprocess.run(["bash", str(ROOT / "run" / "hf_backup.sh"), "arun"],
+                       capture_output=True, text=True,
+                       env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path),
+                            "STEER_ROOT": str(tmp_path), "PRUNE": "1"})
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert not (ckpt / "optim_world_size_2_rank_0.pt").exists(), "prune did nothing"
+    assert (ckpt / "huggingface" / "model.safetensors").exists(), "prune ate the eval copy"
+    assert abs(ckpt.stat().st_mtime - old) < 2, (
+        "prune left a fresh mtime, so the liveness guard will refuse this run")
