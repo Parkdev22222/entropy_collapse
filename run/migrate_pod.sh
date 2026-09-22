@@ -150,14 +150,31 @@ inventory () {
     [ "${n_opt}" = "0" ] && warn "none present: every training arm can still run; STAGES=measure has nothing to read"
 
     say "3. trained checkpoints"
-    local n=0
+    local n=0 n_empty=0
     for d in checkpoints/STEER-F/*/global_step_*/actor/huggingface; do
         [ -d "${d}" ] || continue
+        # The directory exists for every save. The weights do not -- see
+        # hf_weights_present in _arms.sh. Counting directories reported
+        # checkpoints that hold a config and nothing else.
+        if ! hf_weights_present "${d}"; then
+            n_empty=$((n_empty + 1))
+            printf '  %-72s %s\n' "${d%/actor/huggingface}" "NO WEIGHTS"
+            continue
+        fi
         n=$((n + 1))
         printf '  %-72s %s\n' "${d%/actor/huggingface}" "$(human "${d}")"
     done
     [ "${n}" = "0" ] && warn "none on disk (already uploaded and deleted?)" \
                      || ok "${n} checkpoint(s) on disk"
+    if [ "${n_empty}" != "0" ]; then
+        warn "${n_empty} step(s) have actor/huggingface but no weights in it."
+        echo "        Those runs saved without 'hf_model' in save_contents, so"
+        echo "        there is nothing to evaluate or upload from them. The FSDP"
+        echo "        shards beside them are the only copy -- do not prune those"
+        echo "        runs. Check a run with:"
+        echo "          grep -o \"'save_contents': \\[[^]]*\\]\" \\"
+        echo "            logs/experiments/train-<run>.log | head -1"
+    fi
 
     say "4. rebuilt on the new pod, do NOT copy"
     printf '  pip env       -> bash run/setup_env.sh\n'
@@ -262,9 +279,17 @@ for p in paths:
         for chunk in iter(lambda: fh.read(1 << 20), b""):
             h.update(chunk)
     entries[p] = {"bytes": os.path.getsize(p), "sha256": h.hexdigest()}
+# Only steps whose huggingface/ actually holds weights. verl creates that
+# directory for the tokenizer and config on every save, so listing directories
+# named runs that have nothing to restore (see hf_weights_present in _arms.sh).
 runs = sorted({d.split("/")[2] for d in
                subprocess.run(["bash", "-c",
-                               "ls -d checkpoints/STEER-F/*/global_step_*/actor/huggingface 2>/dev/null"],
+                               "for h in checkpoints/STEER-F/*/global_step_*/actor/huggingface; do "
+                               "  [ -d \"$h\" ] || continue; "
+                               "  find \"$h\" -maxdepth 1 -type f \\( -name '*.safetensors' "
+                               "    -o -name 'pytorch_model*.bin' -o -name 'model*.bin' "
+                               "    -o -name '*.pth' \\) -print -quit | grep -q . && echo \"$h\"; "
+                               "done 2>/dev/null"],
                               capture_output=True, text=True).stdout.split()})
 json.dump({"created": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
            "git_branch": branch,
@@ -314,7 +339,16 @@ PY
     for d in checkpoints/STEER-F/*/; do
         [ -d "${d}" ] || continue
         run="$(basename "${d}")"
-        ls -d "${d}"global_step_*/actor/huggingface >/dev/null 2>&1 || continue
+        # At least one step with real weights, not just the directory.
+        has_w=0
+        for hf in "${d}"global_step_*/actor/huggingface; do
+            hf_weights_present "${hf}" && { has_w=1; break; }
+        done
+        if [ "${has_w}" = "0" ]; then
+            ls -d "${d}"global_step_*/actor/huggingface >/dev/null 2>&1 \
+                && warn "skip ${run} -- actor/huggingface holds no weights (saved without 'hf_model')"
+            continue
+        fi
         if [ "${training_now}" = "1" ] \
            && ! train_log_done "${ROOT}/logs/experiments" "${run}" "${STEPS:-110}"; then
             warn "skip ${run} -- still training (log has not reached step ${STEPS:-110})"

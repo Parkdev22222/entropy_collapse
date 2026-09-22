@@ -1006,7 +1006,14 @@ $1.5$B mathematics backbone, a ratio of $\num{Bllamainformratio}$.
 Optimization uses GRPO with $n = 8$ responses per prompt, a constant learning rate
 of $1\mathrm{e}{-6}$ with no warm-up (so that the schedule is independent of the
 declared total step count), a maximum response length of $3072$ tokens, no entropy
-bonus, and no KL loss. Rollouts are sampled at temperature $1.0$ with no nucleus
+bonus, and no KL loss. The clipped surrogate is asymmetric,
+$\varepsilon_{\mathrm{low}} = 0.2$ and $\varepsilon_{\mathrm{high}} = 0.28$, with
+the dual-clip lower bound at $c = 10$; we state this because ``GRPO'' with a
+symmetric $\varepsilon = 0.2$ and a KL term is a different baseline, and because
+the follow-up arm of Section~\ref{sec:res:ablate} is defined by moving these two
+numbers. Every arm, the baseline included, uses the same three values: the
+only configuration difference between the GRPO arm and STEER-F is the loss mode and
+the method hyperparameters listed next. Rollouts are sampled at temperature $1.0$ with no nucleus
 truncation; validation uses temperature $1.0$ and $\mathrm{top\text{-}}p = 0.7$.
 Every arm uses the same data seed and the same initial checkpoint, which we verify by
 requiring the step-$0$ validation scores to agree.
@@ -1489,29 +1496,41 @@ run, measures whether a gap is stable along a single trajectory. That is a diffe
 question from whether it survives re-running, and we report it only in
 Appendix~\ref{sec:appendix-within} so the two are not confused.
 
-Run-to-run spread is itself worth reporting, and with one seed per arm it is the
-number that decides how much the rest of this section is worth. Two arms have now
-finished twice. GRPO's converged-window accuracy moves from \num{Logrpoacc} to
-\num{Higrpoacc} across its \num{Nallgrpo} seeds --- a spread of \num{Sgrpoacc},
-against a headline STEER-F\,$-$\,GRPO gap of \num{Csignedgrpoacc}; on majority vote
-the spread is \num{Sgrpomaj} against \num{Csignedgrpomaj}. \textsc{permuted} moves
-from \num{Lopermutedacc} to \num{Hipermutedacc} across its \num{Nallpermuted}, a
-spread of \num{Spermutedacc}, roughly six times smaller.
+\paragraph{One run is excluded, and the pre-registration says which.} STEER-F at
+seed $4$ stopped at training step $91$ when its machine lost a GPU, so its window
+covers six validation points where every other run covers eight. A mean over six
+points is not a shorter version of a mean over eight; paired against the others it
+is a different statistic. The pre-registration
+(Appendix~\ref{sec:appendix-prereg}) excludes a run for mechanical failure and
+relaunches it with the same seed, so that is what happens here, and the release
+reports the run with an \texttt{partial} flag rather than deleting it. It is
+counted in the spread below, for the reason given there.
 
-That disagreement is itself the result. A range between two draws is not a standard
-error, and two such ranges differing by a factor of six do not bound a third arm's.
-We therefore read the larger one as the operative figure and decline the smaller,
-which means no contrast in this paper should be compared against a noise floor
-quoted to one significant figure. On that conservative reading the gap is larger than
-the spread on both metrics, and on majority vote by more than a factor of two. But it is
-the \emph{same order} as the spread, which is precisely the regime in which a single
-seed cannot decide the question: the comparison we are making is between one draw
-from each arm, and the arm we can observe twice moved by more than half the effect we
-are claiming. For scale at the other end, two validations of the \emph{same} weights
-on these $30$ questions differ by about $.004$, so seed variation is the larger term
-by roughly an order of magnitude and any comparison quoted at single-run precision is
-quoting noise. We therefore state the ordering and the mechanism as what this
-experiment establishes, and the effect size as what the remaining seeds are for.
+\paragraph{Run-to-run spread, and it is the number that governs this section.}
+Every arm has now finished more than once. GRPO's converged-window accuracy moves
+from \num{Logrpoacc} to \num{Higrpoacc} across its \num{Nallgrpo} seeds, a spread
+of \num{Sgrpoacc}; STEER-F moves from \num{Losignedacc} to \num{Hisignedacc} across
+its \num{Nallsigned} seeds, a spread of \num{Ssignedacc}; \textsc{permuted}
+moves only \num{Spermutedacc} across \num{Nallpermuted}. Both extremes are
+measured on the same benchmark with the same protocol, and they differ by more than
+an order of magnitude.
+
+Set the headline gap of \num{Csignedgrpoacc} against those. \textbf{It is smaller
+than GRPO's own spread and comparable to STEER-F's}, and the two arms it compares
+are each observed a handful of times. That is the regime in which a single paired
+difference cannot decide the question, and we do not claim it does. A range between
+two or three draws is also not a standard error: three such ranges differing by a
+factor of fifteen do not bound each other, so no contrast here should be read
+against a noise floor quoted to one significant figure. For scale at the other end,
+two validations of the \emph{same} weights on these $30$ questions differ by about
+$.004$, so seed variation is the larger term by roughly an order of magnitude and
+any comparison quoted at single-run precision is quoting noise.
+
+We therefore state what this experiment establishes and what it does not. The
+mechanism contrasts --- what changes when $\AH$'s value is discarded or its pairing
+destroyed, with the apparatus held fixed --- are the claim. The effect size is what
+the remaining seeds are for, and on the seeds in hand the headline gap is not
+separated from the spread.
 
 \subsection{Six benchmarks}
 \label{sec:res:bench}

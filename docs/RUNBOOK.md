@@ -212,6 +212,9 @@ bash run/publish_logs.sh --push --queue-logs  # 큐 드라이버 로그도
 | **로그 글롭** | `train-<run>.log` + `train-<run>_*.log`만 허용해야 한다. 밑줄이 없으면 `-permuted`를 삼켜 signed를 DONE으로 오판정한다. `tests/test_run_names.py`가 고정한다 |
 | **★ GPU 장수가 줄면 `topology_guard`가 안 막는다** | `gpu_topology`는 `TP_SIZE`를 4→2→1 중 나누어떨어지는 첫 값으로 정한다. **3장이면 `3/1`**이고 `3 % 1 == 0`이라 가드가 통과시킨다 — "not every card is in use" 안내만 찍는다. 끝난 H100 런은 전부 4/4이므로 그 박스에서 새로 시작한 런은 **에러 없이 다른 토폴로지로 돌아 같은 표에 섞인다.** 카드 수가 변했으면 새 런을 시작하지 말고, 새 박스에서는 `N_GPUS=4 TP_SIZE=4`를 명령줄에 명시한다. §파드 통째로 옮기기 |
 | **`validation_data/`는 git에도 rsync에도 빠지기 쉽다** | gitignore가 아닌데 `publish_logs.sh`가 일부러 제외한다(런당 ~150 MB가 히스토리에 영구히 남는다). 문제별 점수라 **대응 표본 SE의 유일한 출처**이고, 파드를 옮길 때 rsync가 안 옮기면 아무 데도 없다 |
+| **★ `save_contents` 없이 `hf_model`이면 `huggingface/`는 비어 있다** | `fsdp_checkpoint_manager.py:228`이 토크나이저·config를 **언제나** 쓰고 `:263`이 **가중치만 조건부**로 쓴다. 그래서 `hf_model`이 빠진 런은 `huggingface/`가 존재하는데 모델이 없다. 2026-09-22에 푸시된 다섯 런 중 넷이 `['model','optimizer','extra']`로 저장됐다. 존재만 보는 도구는 **빈 디렉토리를 올리고 VERIFIED를 찍고**, `PRUNE=1`은 더 나쁘게 **옆의 샤드(유일한 사본)를 지운다**. `_arms.sh`의 `hf_weights_present`가 이제 실제 weight 파일을 보고, `hf_backup.sh`·`migrate_pod.sh`가 그걸 쓴다. 런 확인: `grep -o "'save_contents': \\[[^]]*\\]" logs/experiments/train-<run>.log \| head -1` |
+| **창을 다 못 채운 런은 주 통계에서 빠진다** | step 91에서 죽은 런은 40–110 창에 검증 지점이 6개뿐인데 나머지는 8개다. `analyze_seeds.py`가 그 6점 평균을 8점 평균과 짝지어 헤드라인을 +.0145에서 0으로 옮겼다. 이제 검증이 창 상단에 **도달했는지**로 거르고(`--allow-partial`로 해제), 무엇을 뺐는지 stdout과 `contrasts.tsv`의 `held_out` 열에 적는다. 단 **run-to-run spread는 뺀 런까지 센다** — 짝짓기와 재현 변동폭은 다른 질문이고, 빼면 우리에게 유리한 방향으로 틀린다 |
+| **`box_tag()`는 푸시한 박스를 찍는다** | 커밋 제목의 `H100x3`은 그 로그 속 런의 토폴로지가 아니라 **푸시 시점 박스의 GPU 수**다. 런이 몇 장으로 돌았는지는 로그 설정 덤프의 `n_gpus_per_node`로 본다 |
 | **`run_paper.sh` preflight** | `-paper` 접미사 MTP 파일은 `measure` 스테이지 전용이다. 학습 arm은 안 쓴다 |
 
 ---

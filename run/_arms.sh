@@ -295,6 +295,33 @@ ckpt_alias_for () {   # <arm> <seed>  -> extra checkpoint directory names
 # seed completes would drop the treatment arm silently, with no error anywhere.
 # Every arm suffix starts with "-", every recovery tag with "_", which is
 # exactly the line these two patterns draw. tests/test_run_names.py pins it.
+# Does an HF checkpoint directory actually hold a model?
+#
+# Its presence is not the question. verl writes global_step_N/actor/huggingface
+# and puts the tokenizer and config there ALWAYS --
+# verl/utils/checkpoint/fsdp_checkpoint_manager.py:228, "no matter whether
+# huggingface model is requested to be saved or not" -- and writes the weights
+# only when `hf_model` is in save_contents (:263).
+#
+# So a run launched without `hf_model` leaves a huggingface/ with a config and
+# no weights, and every caller that tested `-d` accepted it. Four of the five
+# runs pushed on 2026-09-22 recorded save_contents ['model','optimizer','extra']
+# and are exactly that shape. Two different costs:
+#   upload  a weightless directory reaches the Hub and is reported VERIFIED,
+#           because verification compares local bytes to Hub bytes and both
+#           sides are the config.
+#   PRUNE   worse. It keeps huggingface/ and deletes the shards beside it, so
+#           on such a run it deletes the only copy of the weights.
+hf_weights_present () {   # <.../actor/huggingface>
+    # `find | read` would put the read in a subshell, where a return says
+    # nothing to the caller. Substitute and test the string instead.
+    [ -d "$1" ] || return 1
+    [ -n "$(find "$1" -maxdepth 1 -type f \
+              \( -name '*.safetensors' -o -name 'pytorch_model*.bin' \
+                 -o -name 'model*.bin' -o -name '*.pth' \) \
+              -print -quit 2>/dev/null)" ]
+}
+
 train_log_done () {   # <log-dir> <run-name> <steps>
     local f
     for f in "$1/train-$2.log" "$1/train-$2"_*.log; do

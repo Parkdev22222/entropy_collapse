@@ -349,6 +349,13 @@ def main(argv=None) -> int:
     ap.add_argument("--model-tag", default="Qwen2.5-Math-1.5B")
     ap.add_argument("--plateau", default="40:110", help="lo:hi step window")
     ap.add_argument("--steps", type=int, default=110)
+    ap.add_argument("--allow-partial", action="store_true",
+                    help="keep runs whose validation never reached the top of "
+                         "the plateau window. Off by default: such a run's mean "
+                         "is taken over fewer points than the others and gets "
+                         "paired against theirs as if it were the same "
+                         "statistic, which docs/preregistration_5seed.md "
+                         "excludes as a mechanical failure")
     ap.add_argument("--unbalanced", dest="balanced", action="store_false",
                     help="average each arm over every seed it has, even when "
                          "the arms have different seeds (the tables then stop "
@@ -454,6 +461,10 @@ def main(argv=None) -> int:
     # run to one number, which is right for the question the paper asks, but
     # the within-run appendix needs the eight points back.
     per_step: dict[str, dict[int, dict[int, dict[str, float]]]] = defaultdict(dict)
+    # Runs the window gate below held out. They stay in per_seed.tsv -- the
+    # record is never deleted, only kept out of the statistics.
+    per_seed_partial: dict[str, dict[int, dict[str, float]]] = defaultdict(dict)
+    partial: list[tuple[str, int, int, int]] = []
     missing = []
     for arm in MAIN_ARMS:
         for seed in range(1, 6):
@@ -463,14 +474,36 @@ def main(argv=None) -> int:
                 continue
             steps = parse_log(f)
             agg = plateau(steps, lo, hi)
-            if agg:
-                agg["log"] = f.name
-                agg["stack"] = offloaded(f)
-                per_seed[arm][seed] = agg
-                per_step[arm][seed] = {k: v for k, v in steps.items()
-                                       if lo <= k <= hi and "acc" in v}
-            else:
+            if not agg:
                 missing.append(f"{arm} s{seed} (no validation point in {lo}-{hi})")
+                continue
+            agg["log"] = f.name
+            agg["stack"] = offloaded(f)
+            # A run that died inside the window contributes a mean over FEWER
+            # points than the others and gets paired against theirs as if it
+            # were the same statistic. On 2026-09-22 signed s4 died at step 91
+            # and its six-point mean was paired against everyone else's eight,
+            # which alone moved the headline contrast from +.0145 to about
+            # zero. docs/preregistration_5seed.md fixes the endpoint as the
+            # mean "over the converged window, steps 40-110 (8 validation
+            # points)" and excludes a run "only for mechanical failure -- out
+            # of memory, a crash, a corrupted checkpoint", relaunching it with
+            # the same seed. So the gate is the registration's, not ours.
+            #
+            # The test is "did validation reach the top of the window", not a
+            # count, so it stays correct when --plateau names a window whose
+            # edge is not a validation step, and a narrower window legitimately
+            # readmits a short run (40:90 admits a run that died at 91).
+            last_val = max(k for k, v in steps.items() if "acc" in v)
+            agg["partial"] = 0.0 if last_val >= hi else 1.0
+            if agg["partial"]:
+                partial.append((arm, seed, last_val, int(agg["n_val_points"])))
+            if agg["partial"] and not args.allow_partial:
+                per_seed_partial[arm][seed] = agg
+                continue
+            per_seed[arm][seed] = agg
+            per_step[arm][seed] = {k: v for k, v in steps.items()
+                                   if lo <= k <= hi and "acc" in v}
 
     # The follow-up arms, at the one seed they were run at. They carry no error
     # bar by design (Table 10's caption says so), so they are plateau means and
@@ -534,26 +567,31 @@ def main(argv=None) -> int:
     cols = ["acc", "maj", "uplift", "entropy", "brentropy", "nbrentropy",
             "brgap", "supentropy", "nsupentropy", "supgap",
             "resp_len", "s_per_step",
-            "s_per_val_step", "branch_frac", "tw_mean", "n_val_points"]
+            "s_per_val_step", "branch_frac", "tw_mean", "n_val_points",
+            "partial"]
 
     with (out_dir / "per_seed.tsv").open("w") as fh:
         fh.write("arm\tseed\t" + "\t".join(cols) + "\tstack\tlog\n")
         for arm in MAIN_ARMS:
-            for seed in sorted(per_seed.get(arm, {})):
-                r = per_seed[arm][seed]
+            # Both tables, so a held-out run is still on the record with
+            # partial=1 saying why it is not in the means.
+            rows = {**per_seed.get(arm, {}), **per_seed_partial.get(arm, {})}
+            for seed in sorted(rows):
+                r = rows[seed]
                 fh.write(f"{arm}\t{seed}\t"
                          + "\t".join(f"{r[c]:.4f}" if c in r else "-" for c in cols)
                          + f"\t{r.get('stack', '?')}\t{r['log']}\n")
 
     # ---------------------------------------------------------- arm means
     with (out_dir / "arm_means.tsv").open("w") as fh:
-        fh.write("arm\tn_seeds\t" + "\t".join(f"{c}\t{c}_se" for c in cols[:-1]) + "\n")
+        mean_cols = [c for c in cols if c not in ("n_val_points", "partial")]
+        fh.write("arm\tn_seeds\t" + "\t".join(f"{c}\t{c}_se" for c in mean_cols) + "\n")
         for arm in MAIN_ARMS:
             rows = [per_seed[arm][s_] for s_ in seeds_of(arm) if s_ in per_seed.get(arm, {})]
             if not rows:
                 continue
             cells = [arm, str(len(rows))]
-            for c in cols[:-1]:
+            for c in mean_cols:
                 v = [r[c] for r in rows if c in r]
                 if not v:
                     cells += ["-", "-"]
@@ -566,9 +604,17 @@ def main(argv=None) -> int:
     # ---------------------------------------------------------- contrasts
     contrast_rows = []
     with (out_dir / "contrasts.tsv").open("w") as fh:
-        fh.write("contrast\tmetric\tn_seeds\tmean_diff\tsd\tse\tt\tp\tseeds\n")
+        fh.write("contrast\tmetric\tn_seeds\tmean_diff\tsd\tse\tt\tp\t"
+                 "seeds\theld_out\n")
         for a, b in CONTRASTS:
             shared = sorted(set(per_seed.get(a, {})) & set(per_seed.get(b, {})))
+            # Seeds this pair would have had but for the window gate. Printed so
+            # an n that dropped between two runs of this script is attributable
+            # rather than mysterious.
+            both = ((set(per_seed.get(a, {})) | set(per_seed_partial.get(a, {})))
+                    & (set(per_seed.get(b, {})) | set(per_seed_partial.get(b, {}))))
+            held = sorted(both - set(shared))
+            held_s = ",".join(map(str, held)) if held else "-"
             if not shared:
                 continue
             for metric in ("acc", "maj", "uplift", "entropy",
@@ -583,7 +629,7 @@ def main(argv=None) -> int:
                 contrast_rows.append((f"{a} - {b}", metric, st))
                 fh.write(f"{a} - {b}\t{metric}\t{st['n']}\t{st['mean']:+.4f}\t"
                          f"{st['sd']:.4f}\t{st['se']:.4f}\t{st['t']:+.2f}\t"
-                         f"{st['p']:.4f}\t{','.join(map(str, shared))}\n")
+                         f"{st['p']:.4f}\t{','.join(map(str, shared))}\t{held_s}\n")
 
     # ------------------------------------------------------- compute match
     # Table 11's cells, kept so the macro block below can emit them. The TSV
@@ -702,14 +748,25 @@ def main(argv=None) -> int:
         for arm in MAIN_ARMS:
             rows = [per_seed[arm][s_] for s_ in seeds_of(arm) if s_ in per_seed.get(arm, {})]
             fh.write(mac(f"N{arm}", len(rows), "{:d}"))
-            # how many that arm actually has, balanced or not
-            fh.write(mac(f"Nall{arm}", len(per_seed.get(arm, {})), "{:d}"))
-            # Run-to-run spread of ONE arm across ALL its seeds. This is the
-            # only direct measurement of how much a seed moves a number, and
-            # the manuscript compares the headline gap against it -- a gap the
-            # size of the spread is not yet a result.
+            # Run-to-run spread of ONE arm across ALL its seeds, INCLUDING the
+            # ones the window gate held out of the paired statistics. The two
+            # questions are different and only one of them needs comparable
+            # windows: "does this gap survive re-running" is answered by paired
+            # contrasts, which is why a short run cannot join them; "how much
+            # does a re-run move this number" is answered by any completed
+            # window, and a run that reached step 90 is evidence about that.
+            #
+            # Dropping them here would have flattered us on 2026-09-22 and in
+            # the direction that matters: STEER-F's two counted seeds sit at
+            # .1495 and .1497, a spread of .0003, while the held-out third run
+            # sits at .1392. Reporting .0003 would have made the treatment arm
+            # look like the most reproducible in the table on the strength of an
+            # exclusion. The manuscript compares the headline gap against this
+            # spread, so understating it overstates the result.
+            spread_rows = {**per_seed.get(arm, {}), **per_seed_partial.get(arm, {})}
+            fh.write(mac(f"Nall{arm}", len(spread_rows), "{:d}"))
             for c in ("acc", "maj"):
-                v = [r[c] for r in per_seed.get(arm, {}).values() if c in r]
+                v = [r[c] for r in spread_rows.values() if c in r]
                 fh.write(mac(f"S{arm}{c}", (max(v) - min(v)) if len(v) > 1 else None))
                 fh.write(mac(f"Lo{arm}{c}", min(v) if len(v) > 1 else None))
                 fh.write(mac(f"Hi{arm}{c}", max(v) if len(v) > 1 else None))
@@ -783,6 +840,16 @@ def main(argv=None) -> int:
           f"compute_match.tsv, tables.tex, {macro_path.name}")
     for arm in MAIN_ARMS:
         print(f"  {arm:9s} {len(per_seed.get(arm, {}))} seed(s)")
+    if partial:
+        where = "included (--allow-partial)" if args.allow_partial else "HELD OUT"
+        print(f"  {len(partial)} run(s) did not reach step {hi} -- {where}:")
+        for arm, seed, last, npts in partial:
+            print(f"    {arm:9s} s{seed}  last validation at step {last}, "
+                  f"{npts} point(s) in {lo}-{hi} (others have more)")
+        if not args.allow_partial:
+            print("    They stay in per_seed.tsv with partial=1. The "
+                  "pre-registration relaunches a crashed run with the SAME "
+                  "seed rather than averaging a shorter window.")
     if missing:
         print(f"  MISSING ({len(missing)}): {', '.join(missing[:12])}"
               + (" ..." if len(missing) > 12 else ""))

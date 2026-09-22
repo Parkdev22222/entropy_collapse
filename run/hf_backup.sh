@@ -162,6 +162,8 @@ live_guard () {   # <run> -> 1 when the run must not be read
     return 1
 }
 
+# hf_weights_present lives in _arms.sh next to the other state judgements,
+# because run/migrate_pod.sh needs the same one.
 live_guard "${RUN}" || exit 1
 
 # --- PRUNE: reclaim the bytes that never needed to be uploaded --------------
@@ -223,6 +225,18 @@ if [ "${PRUNE}" = "1" ]; then
             echo "  skip $(basename "$(dirname "${d}")"): no actor/huggingface"
             continue
         fi
+        # The directory exists. Does it hold weights? If not, the shards next
+        # to it are the only copy and pruning them destroys the checkpoint.
+        if ! hf_weights_present "${d}/huggingface"; then
+            echo "  REFUSE $(basename "$(dirname "${d}")"): actor/huggingface has"
+            echo "         no weights (config and tokenizer only), so the shards"
+            echo "         beside it are the only copy. This run was launched"
+            echo "         without 'hf_model' in save_contents; check the log:"
+            echo "           grep -o \"'save_contents': \\[[^]]*\\]\" \\"
+            echo "             ${LOG_DIR}/train-${RUN}.log | head -1"
+            echo "         Export an HF copy first, or leave this step alone."
+            continue
+        fi
         # Deleting inside actor/ bumps actor/'s own mtime, and the liveness
         # guard above is `find -maxdepth 3 -mmin -FRESH_MIN` -- which matches
         # actor/ exactly. So a prune made the NEXT half hour of this same
@@ -251,6 +265,10 @@ steps=("$@")
 if [ ${#steps[@]} -eq 0 ]; then
     for d in "${CKPT_ROOT}/${RUN}"/global_step_*; do
         [ -d "${d}/actor/huggingface" ] || continue
+        if ! hf_weights_present "${d}/actor/huggingface"; then
+            echo "  skip $(basename "${d}"): actor/huggingface holds no weights"
+            continue
+        fi
         steps+=("$(basename "${d}" | sed 's/^global_step_//')")
     done
 fi
@@ -271,6 +289,11 @@ if [ ${#steps[@]} -eq 0 ]; then
     echo "    - it was already backed up and deleted (DELETE=1 leaves the run"
     echo "      directory behind, empty). Check the Hub before re-uploading."
     echo "    - a step was named on the command line that is not on disk."
+    echo "    - the run saved without 'hf_model'. verl still creates"
+    echo "      actor/huggingface for the config and tokenizer, but puts no"
+    echo "      weights in it, so there is nothing to upload:"
+    echo "        grep -o \"'save_contents': \\[[^]]*\\]\" \\"
+    echo "          ${LOG_DIR}/train-${RUN}.log | head -1"
     exit 1
 fi
 

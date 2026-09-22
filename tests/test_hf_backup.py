@@ -352,3 +352,67 @@ def test_prune_refuses_when_it_cannot_tell(tmp_path):
     assert p.returncode == 1, p.stdout + p.stderr
     assert "cannot tell" in p.stdout + p.stderr
     assert (d / "optim_world_size_2_rank_0.pt").exists()
+
+
+# ------------------------------- a huggingface/ that holds no model at all
+def _weightless(box, run, step):
+    """Strip the weights but leave the directory, config and tokenizer.
+
+    That is what verl produces when `hf_model` is not in save_contents:
+    fsdp_checkpoint_manager.py:228 writes huggingface/ with the tokenizer and
+    config "no matter whether huggingface model is requested to be saved or
+    not", and :263 writes the weights only when it is. Four of the five runs
+    pushed on 2026-09-22 recorded ['model','optimizer','extra'] and are exactly
+    this shape, which every `-d` test in this repo accepted.
+    """
+    hf = box / "checkpoints" / "STEER-F" / run / f"global_step_{step}" / "actor" / "huggingface"
+    (hf / "model.safetensors").unlink()
+    (hf / "config.json").write_text("{}")
+    (hf / "tokenizer.json").write_text("{}")
+    old = time.time() - 3 * 86400
+    root = box / "checkpoints" / "STEER-F" / run
+    for path in sorted(root.rglob("*"), reverse=True):
+        os.utime(path, (old, old))
+    os.utime(root, (old, old))
+
+
+def test_a_weightless_checkpoint_is_not_uploaded(tmp_path):
+    """It would reach the Hub and then verify, because both sides are config."""
+    box = build_box(tmp_path, runs=("done-run",), steps=(110,))
+    _weightless(box, "done-run", 110)
+    p = run(box, "done-run", tmp_path)
+    assert "no weights" in p.stdout or "holds no weights" in p.stdout, p.stdout
+    assert calls(tmp_path) == [], \
+        f"the stub CLI was called for a weightless checkpoint: {calls(tmp_path)}"
+
+
+def test_prune_refuses_a_weightless_checkpoint(tmp_path):
+    """The dangerous half: the shards beside it are the only copy.
+
+    PRUNE keeps huggingface/ and deletes everything else in actor/. On a run
+    that saved without `hf_model` that deletes the weights and keeps a config.
+    """
+    box = build_box(tmp_path, runs=("done-run",), steps=(110,))
+    actor = box / "checkpoints" / "STEER-F" / "done-run" / "global_step_110" / "actor"
+    (actor / "model_world_size_2_rank_0.pt").write_text("the only weights")
+    _weightless(box, "done-run", 110)
+
+    p = run(box, "done-run", tmp_path, PRUNE=1)
+    assert "REFUSE" in p.stdout, p.stdout
+    assert (actor / "model_world_size_2_rank_0.pt").is_file(), \
+        "PRUNE deleted the only copy of the weights"
+    assert (actor / "optim_world_size_2_rank_0.pt").is_file()
+
+
+def test_a_real_checkpoint_is_still_uploaded(tmp_path):
+    """Regression guard: the weight test must not reject a healthy run."""
+    box = build_box(tmp_path, runs=("done-run",), steps=(110,))
+    p = run(box, "done-run", tmp_path)
+    # The exit code is not the signal here: verification imports
+    # huggingface_hub, which this container does not have, so it fails after a
+    # successful upload. What this test guards is that the upload happened at
+    # all -- the same thing test_a_quiet_finished_run_is_uploaded asserts.
+    got = calls(tmp_path)
+    assert got, "a real checkpoint stopped being uploaded"
+    assert "done-run/global_step_110" in got[0]
+    assert "no weights" not in p.stdout
