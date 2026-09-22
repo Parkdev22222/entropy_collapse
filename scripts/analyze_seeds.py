@@ -384,10 +384,18 @@ def main(argv=None) -> int:
                          "paired against theirs as if it were the same "
                          "statistic, which docs/preregistration_5seed.md "
                          "excludes as a mechanical failure")
+    # Default: each arm over its own seeds. --balanced restricts every arm to
+    # the seeds all five share; --unbalanced is kept so older invocations and
+    # the docs' command lines still mean what they meant.
+    ap.add_argument("--balanced", dest="balanced", action="store_true",
+                    default=False,
+                    help="restrict every arm to the seeds all five share, so "
+                         "that subtracting two rows of the means table gives "
+                         "the contrast table's number. Costs whatever seeds "
+                         "the other arms are ahead by -- with the campaign "
+                         "mid-flight that has been every arm but one")
     ap.add_argument("--unbalanced", dest="balanced", action="store_false",
-                    help="average each arm over every seed it has, even when "
-                         "the arms have different seeds (the tables then stop "
-                         "agreeing with the contrasts)")
+                    help="the default: average each arm over every seed it has")
     ap.add_argument("--long-steps", type=int, default=200,
                     help="final step of the compute-matched grpo-long control")
     ap.add_argument("--macro-prefix", default="",
@@ -603,14 +611,26 @@ def main(argv=None) -> int:
     if not per_seed:
         sys.exit(f"[analyze] no parsable training log under {log_dir}")
 
-    # Seeds every main arm has. The arm means and the contrasts must be drawn
-    # from the SAME set, or a reader who subtracts two rows of Table 1 gets a
-    # different number from the contrast table and has no way to know why. With
-    # the campaign mid-flight that is a live hazard: GRPO finished seed 2 while
-    # every other arm is still on seed 1, so an unbalanced mean would move GRPO
-    # alone and shrink the headline gap by a third for no reason a reviewer
-    # could see. The extra seeds are not discarded -- per_seed.tsv keeps them,
-    # and they are what the manuscript quotes for run-to-run spread.
+    # Which seeds an arm's MEAN is taken over. Neither answer is free, so the
+    # choice is here with both costs written down rather than settled by a
+    # default nobody reads.
+    #
+    # --balanced: every arm over the seeds all five share. Subtracting two rows
+    #   of the means table then gives the contrast table's number. The cost is
+    #   everything the other arms are ahead by -- on 2026-09-22 the shared set
+    #   was {1}, so the table reported n=1 per arm and no error bar at all while
+    #   sixteen runs sat in per_seed.tsv.
+    #
+    # DEFAULT, unbalanced: each arm over its own seeds. The table then carries
+    #   n=2..4 and a seed-level SE, which is the number that says whether any of
+    #   this is worth reading. The cost is that the rows stop being subtractable
+    #   -- Rsigned - Rgrpo is +.0048 where the paired contrast is +.0145 -- and
+    #   that the arms no longer share a seed-to-box mapping, which matters
+    #   because seed 1,2 ran on A100x2 and 3,4 on H100x4. The caption has to say
+    #   both, and Section 12.7 carries the box mix.
+    #
+    # What does NOT change either way: the contrasts, which always pair on the
+    # seeds their own two arms share, so a box effect cancels inside the pair.
     common = set.intersection(*[set(per_seed.get(a, {})) for a in MAIN_ARMS]) \
         if all(per_seed.get(a) for a in MAIN_ARMS) else set()
     if args.balanced and common:
@@ -798,6 +818,28 @@ def main(argv=None) -> int:
         fh.write(mac("STDaime", (sum(allstd) / len(allstd)) if allstd else None))
         fh.write(mac("SEaime", (sum(allstd) / len(allstd) / math.sqrt(30))
                      if allstd else None))
+        # The machine effect, measured inside ONE arm so nothing else varies.
+        # Seed 1,2 ran on a two-GPU box and 3,4 on a four-GPU box, so a seed
+        # index also names a machine; an arm that has finished on both is the
+        # only place the difference can be read without confounding it with the
+        # treatment. The manuscript sets the top-two gap of the means table
+        # against it, so it has to be measured rather than asserted.
+        # NB: not `lo`/`hi` -- those are the plateau window, and shadowing them
+        # here fed a list to a "{:d}" format twenty lines later.
+        both = [a for a in MAIN_ARMS
+                if {g for (arm_, _s), g in topo.items() if arm_ == a} == {2, 4}]
+        if both:
+            a = max(both, key=lambda x: len(per_seed.get(x, {})))
+            box_lo = [per_seed[a][s_]["acc"] for (arm_, s_), g in topo.items()
+                      if arm_ == a and g == 2 and s_ in per_seed.get(a, {})]
+            box_hi = [per_seed[a][s_]["acc"] for (arm_, s_), g in topo.items()
+                      if arm_ == a and g == 4 and s_ in per_seed.get(a, {})]
+            if box_lo and box_hi:
+                m_lo = sum(box_lo) / len(box_lo)
+                m_hi = sum(box_hi) / len(box_hi)
+                fh.write(mac("Boxlo", m_lo))
+                fh.write(mac("Boxhi", m_hi))
+                fh.write(mac("Boxdelta", m_hi - m_lo, "{:+.4f}"))
         fh.write(mac("Nseeds", len(per_seed.get("signed", {})), "{:d}"))
         fh.write(mac("Plateaulo", lo, "{:d}"))
         fh.write(mac("Plateauhi", hi, "{:d}"))

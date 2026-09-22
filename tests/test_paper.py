@@ -121,10 +121,19 @@ def emittable_names():
         f"the emitter's metric tuple was not found; got {metrics}"
     pairs = re.findall(r'\("([a-z]+)", "([a-z]+)"\)', src)
 
-    names = {"Nseeds", "Plateaulo", "Plateauhi", "STDaime", "SEaime", "Wseed",
-             "Bsigncount", "Dirconsistency", "Dirconsistencyperm",
-             "Matchstep", "Longsteps", "Rgrpolongacc",
-             "Wsigned", "Wgrpo", "Wgrpolong"}
+    # Macros the emitter writes by literal name rather than from a table. Read
+    # them out of the source for the same reason as everything else here: a
+    # list kept in this file goes stale, and on 2026-09-22 the Box* machine
+    # -effect macros were added and this test was the only thing that noticed.
+    names = set(re.findall(r'mac\(\s*"([A-Za-z]+)"', src))       # mac("Name", ...)
+    names |= set(re.findall(r'mac\(\s*f"([A-Za-z]+)\{', src))    # mac(f"Name{...}")
+    # mac(k, ...) over a tuple of literal names, and the dict k is looked up in.
+    # Table 11's wall clocks are written that way, and so is anything else that
+    # collects a few macros before emitting them.
+    for tup in re.findall(r"for k in \(([^)]*)\):", src):
+        names |= set(re.findall(r'"([A-Za-z]+)"', tup))
+    names |= set(re.findall(r'"([A-Z][A-Za-z]*)":\s', src))
+    names |= {"STDaime", "SEaime", "Dirconsistency", "Dirconsistencyperm"}
     for a in arms:
         names |= {f"N{a}", f"Nall{a}", f"R{a}len", f"R{a}cost"}
         for c in metrics:

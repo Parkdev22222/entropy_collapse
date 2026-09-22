@@ -42,6 +42,12 @@ python3 scripts/collect_results.py --logs logs/experiments --out results/summary
 
 ## 2. The backbones, one invocation each
 
+Each arm is averaged over the seeds **it** has finished, and the means table
+carries a seed-level SE. `--balanced` restricts every arm to the seeds all five
+share instead, which makes the rows subtractable against the contrast table and
+costs whatever the other arms are ahead by -- with the campaign mid-flight that
+was every arm but one, so the table had n=1 and no error bars.
+
 A backbone is the same five-arm analysis under another model tag, so it reuses
 the same script with a macro prefix. The manuscript `\input`s one file per
 backbone.

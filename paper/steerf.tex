@@ -1172,31 +1172,42 @@ Table~\ref{tab:plateau} averages each arm over steps $40$--$110$.
 \centering
 \scriptsize
 \setlength{\tabcolsep}{2.6pt}
-\begin{tabular}{@{}lccccc@{}}
+\begin{tabular}{@{}lcr@{\,$\pm$\,}lr@{\,$\pm$\,}lcc@{}}
 \toprule
-arm & $n$ & acc@32 & maj@32 & uplift & entropy \\
+arm & $n$ & \multicolumn{2}{c}{acc@32} & \multicolumn{2}{c}{maj@32} & uplift & entropy \\
 \midrule
-GRPO             & \num{Ngrpo}     & \num{Rgrpoacc}     & \num{Rgrpomaj}     & \num{Rgrpouplift}     & \num{Rgrpoentropy}     \\
-\textsc{steer}   & \num{Nsteer}    & \num{Rsteeracc}    & \num{Rsteermaj}    & \num{Rsteeruplift}    & \num{Rsteerentropy}    \\
-\textsc{uniform} & \num{Nuniform}  & \num{Runiformacc}  & \num{Runiformmaj}  & \num{Runiformuplift}  & \num{Runiformentropy}  \\
-\textsc{permuted}& \num{Npermuted} & \num{Rpermutedacc} & \num{Rpermutedmaj} & \num{Rpermuteduplift} & \num{Rpermutedentropy} \\
-\textbf{STEER-F} & \num{Nsigned}   & \num{Rsignedacc}   & \num{Rsignedmaj}   & \num{Rsigneduplift}   & \num{Rsignedentropy}   \\
+GRPO             & \num{Ngrpo}     & \num{Rgrpoacc}     & \num{Egrpoacc}     & \num{Rgrpomaj}     & \num{Egrpomaj}     & \num{Rgrpouplift}     & \num{Rgrpoentropy}     \\
+\textsc{steer}   & \num{Nsteer}    & \num{Rsteeracc}    & \num{Esteeracc}    & \num{Rsteermaj}    & \num{Esteermaj}    & \num{Rsteeruplift}    & \num{Rsteerentropy}    \\
+\textsc{uniform} & \num{Nuniform}  & \num{Runiformacc}  & \num{Euniformacc}  & \num{Runiformmaj}  & \num{Euniformmaj}  & \num{Runiformuplift}  & \num{Runiformentropy}  \\
+\textsc{permuted}& \num{Npermuted} & \num{Rpermutedacc} & \num{Epermutedacc} & \num{Rpermutedmaj} & \num{Epermutedmaj} & \num{Rpermuteduplift} & \num{Rpermutedentropy} \\
+\textbf{STEER-F} & \num{Nsigned}   & \num{Rsignedacc}   & \num{Esignedacc}   & \num{Rsignedmaj}   & \num{Esignedmaj}   & \num{Rsigneduplift}   & \num{Rsignedentropy}   \\
 \bottomrule
 \end{tabular}
 \caption{Means over the converged window (steps $40$--$110$, eight validation points
-per run), averaged over the $n$ seeds \emph{common to all five arms}, so that no row
-moves merely because one arm is a seed ahead of the others. Each contrast in
-Table~\ref{tab:contrast} pairs on the seeds \emph{its own two arms} share, which can
-be more, so the difference of two rows here need not equal the contrast there; both
-seed sets are listed in the released \texttt{per\_seed.tsv}. \emph{uplift} is $\mathrm{maj@}32 - \mathrm{acc@}32$. Entropy is the token-mean quantity discussed in
+per run), each arm averaged over the $n$ seeds \emph{it} has finished, with the
+standard error across those seeds. \textbf{The rows are not meant to be
+subtracted.} The arms do not share a seed set, so a difference of two rows here
+carries whatever the two seed sets differ by --- including the machine, since seeds
+$1,2$ ran on one box and $3,4$ on another (Section~\ref{sec:res:seeds}). The
+comparison is Table~\ref{tab:contrast}, which pairs each contrast on the seeds its
+own two arms share so that anything common to a seed cancels inside the pair; taken
+that way $\text{STEER-F} - \text{GRPO}$ is $\num{Csignedgrpoacc}$, not the
+difference of the two rows. The $\pm$ is a spread over very few draws and one of
+them is two seeds that happened to land together: read it with the run-to-run ranges
+in Section~\ref{sec:res:seeds}, not as a precision. Every seed, included and held
+out, is in the released \texttt{per\_seed.tsv}. \emph{uplift} is $\mathrm{maj@}32 - \mathrm{acc@}32$. Entropy is the token-mean quantity discussed in
 Section~\ref{sec:setup}, i.e.\ $\Htraj$ divided by mean length.}
 \label{tab:plateau}
 \end{table}
 
-Two orderings are worth stating before the contrasts. On accuracy, the two arms with
-no forecast (\textsc{steer}, \textsc{uniform}) sit \emph{below} plain GRPO, and only
-the arm carrying $\AH$ is clearly above it. On entropy, GRPO retains the most and
-STEER-F among the least, so the two columns are neither aligned nor reversed.
+Two orderings are worth stating before the contrasts. On accuracy all three arms
+that do not carry $\AH$'s value --- \textsc{steer}, \textsc{uniform},
+\textsc{permuted} --- sit \emph{below} plain GRPO, and STEER-F is the only one
+above it. It is above by less than GRPO's own standard error across seeds, which is
+why the ordering and not the size is what we take from this table. On entropy GRPO
+holds the most by a clear margin and the four intervened arms sit close to one
+another, STEER-F among them, so the two columns are neither aligned nor
+reversed.
 Section~\ref{sec:res:entropy} shows that the entropy column tracks the damping
 apparatus rather than $\AH$, and why ranking five arm means is the wrong instrument
 for either question at this seed count.
@@ -1505,6 +1516,17 @@ is a different statistic. The pre-registration
 relaunches it with the same seed, so that is what happens here, and the release
 reports the run with an \texttt{partial} flag rather than deleting it. It is
 counted in the spread below, for the reason given there.
+
+\paragraph{The arms did not all run on the same machine.} Seeds $1$ and $2$ ran on
+a two-GPU box and seeds $3$ and $4$ on a four-GPU box, uniformly across arms, so a
+seed index also names a machine. The arms are therefore mixed differently: STEER-F's
+seeds are two-thirds from the larger box, GRPO's, \textsc{uniform}'s and
+\textsc{permuted}'s one-third. \textsc{steer} is the one arm that has finished on
+both boxes twice, and its two-GPU seeds average $\num{Boxlo}$ against
+$\num{Boxhi}$ on four --- a difference of $\num{Boxdelta}$, larger than the gap
+between the top two rows of Table~\ref{tab:plateau}. This does not touch the contrasts, which pair inside a seed
+and so inside a machine, and it is the reason we do not read those rows as a
+comparison. The release prints the per-arm machine mix on every run of the analysis.
 
 \paragraph{Run-to-run spread, and it is the number that governs this section.}
 Every arm has now finished more than once. GRPO's converged-window accuracy moves

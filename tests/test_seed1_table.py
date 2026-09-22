@@ -266,10 +266,16 @@ def test_arm_means_use_only_the_seeds_every_arm_has():
     GRPO finished seed 2 while the rest are on seed 1; averaging arms over
     different seed sets makes a reader who subtracts two rows of the means
     table get a different number from the contrast table.
+
+    The manuscript now reports the unbalanced means -- the balanced set had
+    shrunk to one seed per arm, which is a table with no error bar on it -- and
+    says in the caption that its rows are not meant to be subtracted. Both
+    modes stay reachable, which is what this pins.
     """
     body = (ROOT / "scripts" / "analyze_seeds.py").read_text()
     assert "set.intersection" in body
     assert "--unbalanced" in body
+    assert '"--balanced"' in body, "the balanced mode lost its flag"
 
 
 def test_the_within_run_appendix_gets_its_own_seed_and_stays_on_it(tmp_path):

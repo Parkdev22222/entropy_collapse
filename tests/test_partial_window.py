@@ -202,3 +202,33 @@ def test_mixed_gpu_counts_are_reported(tmp_path):
     stdout = _run(logs, out)
     assert "did not all run on the same GPU count" in stdout, stdout
     assert "s1=2" in stdout and "s4=4" in stdout
+
+
+# ------------------------------- which seeds an arm's MEAN is taken over
+def test_the_means_default_to_each_arm_s_own_seeds(tmp_path):
+    """The balanced set had shrunk to one seed per arm, which is a table with
+    no error bar on it while sixteen runs sat in per_seed.tsv."""
+    logs = _tree(tmp_path, {("grpo", 1): 110, ("grpo", 2): 110, ("grpo", 4): 110,
+                            ("steer", 1): 110, ("steer", 2): 110,
+                            ("signed", 1): 110})
+    out = tmp_path / "res"
+    _run(logs, out)
+    got = {r.split("\t")[0]: r.split("\t")[1]
+           for r in (out / "arm_means.tsv").read_text().splitlines()[1:]}
+    assert got["grpo"] == "3" and got["steer"] == "2" and got["signed"] == "1"
+    # and with more than one seed the SE is a number, not a placeholder
+    nums = (out / "numbers.tex").read_text()
+    assert "\\providecommand{\\Egrpoacc}{\\PENDING}" not in nums, \
+        "the means table still has no error bar"
+
+
+def test_balanced_still_collapses_to_the_shared_seeds(tmp_path):
+    logs = _tree(tmp_path, {("grpo", 1): 110, ("grpo", 2): 110, ("grpo", 4): 110,
+                            ("steer", 1): 110, ("steer", 2): 110,
+                            ("uniform", 1): 110, ("permuted", 1): 110,
+                            ("signed", 1): 110})
+    out = tmp_path / "res"
+    _run(logs, out, "--balanced")
+    got = {r.split("\t")[0]: r.split("\t")[1]
+           for r in (out / "arm_means.tsv").read_text().splitlines()[1:]}
+    assert set(got.values()) == {"1"}, f"--balanced did not collapse: {got}"
