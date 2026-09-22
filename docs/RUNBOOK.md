@@ -217,6 +217,8 @@ bash run/publish_logs.sh --push --queue-logs  # 큐 드라이버 로그도
 | **`box_tag()`는 푸시한 박스를 찍는다** | 커밋 제목의 `H100x3`은 그 로그 속 런의 토폴로지가 아니라 **푸시 시점 박스의 GPU 수**다. 런이 몇 장으로 돌았는지는 로그 설정 덤프의 `n_gpus_per_node`로 본다 |
 | **★ 학습 로그는 append-only다 — 기존 줄이 바뀌면 푸시가 거부된다** | 2026-09-22에 `train-grpo-<tag>-s4.log`의 metric 라인 12개에서 정확도만 교체됐다(step 60–110, plateau `.1560 → .1375`). 같은 줄의 `global_seqlen/min`·`/max` 지문은 수정 전후 동일했고, 주변 `New best` 장부까지 새 숫자에 맞춰 고쳐져 있었다. 같은 런·같은 최종 스텝·더 큰 바이트·정상 줄바꿈이라 기존 검사 셋이 전부 통과했다. 이제 `publish_logs.sh`가 **커밋된 판본이 들어오는 판본의 바이트 접두사인지**를 본다 — 새 스텝은 뒤에 붙고 재시작도 뒤에 붙으므로, 앞쪽이 달라졌다면 새 데이터가 아니다. 줄바꿈 수리도 같이 걸리며 그게 맞다(`--force`로 사람이 확인). 로그가 파일명과 안 맞으면 **고치지 말고 지우거나 진짜 파일을 올린다** — 없는 시드가 지어낸 시드보다 낫다 |
 | **파일명은 라벨이고 설정 덤프가 기록이다** | `417113c`가 seed 2 런을 `train-grpo-<tag>-s4.log`로 넣었고, 뒤이은 커밋이 파일 맨 위 **배너 두 줄만** s4로 고쳤다(배너는 `run_grpo.sh:241`이 `${SEED}`·`${N_GPUS}`에서 찍는 줄이라, 배너와 덤프가 어긋난 파일은 손으로 편집된 것이다). `analyze_seeds.py`는 파일명으로 시드를 정하므로 조용히 통과했다. 이제 덤프의 `seed`를 파일명과 대조해 어긋나면 **제외하고 이유를 찍는다**. `experiment_name`은 판정에 안 쓴다 — 초기 런이 `math-<tag>-steer-s1`이라 그걸로 거르면 진짜 시드가 날아간다. 손으로 확인하려면: `grep -o "'experiment_name': '[^']*'\|'seed': [0-9]*\|'n_gpus_per_node': [0-9]*" <log> \| sort -u` |
+| **★ `runpodctl` 경로에서는 `git clone`이 먼저다** | 보내는 것이 `checkpoints/`·`validation_data/`·`rollout_data/` 셋뿐이라 `.git`이 안 따라온다. 먼저 압축을 풀면 그 디렉토리로는 clone이 실패한다(`destination path already exists and is not an empty directory`). 순서는 **clone → `bootstrap_pod.sh` → `tar xzf`**다. 그리고 재개가 없으므로 검증은 크기가 아니라 `tar tzf <archive> > /dev/null`이다 — gzip 스트림 전체를 읽어야 잘린 전송이 드러난다. 자세한 것은 아래 §파드끼리 직접 전송 |
+| **`tmux new -s <name>`으로 시작하는 블록은 붙여넣기를 가로챈다** | 첫 줄이 attached tmux를 띄우면 나머지 줄이 그 새 셸로 들어가 아무 데도 안 닿는다. 화면만 바뀌고 명령은 사라진다. 붙여넣을 블록에서는 `tmux new -d -s <name> "<cmd>"`로 detached로 띄우고 출력을 `tee`로 파일에 남긴다. 같은 이유로 명령 안의 자리표시자에 `<...>` 꺾쇠를 쓰지 않는다 — 셸 리다이렉션이라 `syntax error near unexpected token` 이 난다. `CODE=...` 같은 변수로 준다 |
 | **`run_paper.sh` preflight** | `-paper` 접미사 MTP 파일은 `measure` 스테이지 전용이다. 학습 arm은 안 쓴다 |
 
 ---
@@ -537,6 +539,75 @@ tmux new -d -s paper \
 `migration verified`에 해당하는 것은 **4의 빈 목록**과 **5의 `STACK OK`** 두 개다.
 기동해서 `step:1 - global_seqlen`을 보고 나서 지우면 더 확실하다.
 
+---
+
+# 파드끼리 직접 전송 (runpodctl) — SSH도 볼륨도 못 쓸 때
+
+`/workspace`는 네트워크 볼륨이라 **한 번에 한 파드만** 붙을 수 있고, HF Hub는 용량
+한도에 걸린다. 그 둘이 다 막혔을 때 남는 경로가 `runpodctl`이다. 일회용 코드로 붙으므로
+SSH 키를 교환할 필요가 없다. 2026-09-22에 실제로 이쪽을 썼다.
+
+```bash
+# 옛 파드 — 묶고, detached tmux 에서 보낸다
+cd /workspace/entropy_collapse
+tar czf /workspace/ckpt.tgz checkpoints/ validation_data/ rollout_data/
+tmux new -d -s send "runpodctl send /workspace/ckpt.tgz 2>&1 | tee /workspace/send.log"
+tail -f /workspace/send.log          # 여기에 코드가 찍힌다
+
+# 새 파드
+cd /workspace
+CODE=<위에서 복사한 코드>
+runpodctl receive "$CODE"
+```
+
+> **명령 블록의 첫 줄이 `tmux new -s send`면 붙여넣기가 통째로 그 안으로 들어간다.**
+> 나머지 줄이 새 셸로 가서 아무 데도 안 닿는다. `tmux new -d -s ...`로 detached로 띄우고
+> 출력은 `tee`로 파일에 남긴다.
+
+## rsync와 다른 점 셋 — 여기서 틀린다
+
+**1. `.git`이 안 따라온다. 그래서 `git clone`이 먼저다.**
+rsync는 디렉토리를 통째로 옮기므로 `.git`·브랜치·미커밋 작업이 같이 온다. `runpodctl`로
+보내는 건 `checkpoints/`·`validation_data/`·`rollout_data/` 셋뿐이라, 새 파드에서는
+트리를 **직접 만들어야** 한다. 그리고 순서가 있다 — 먼저 풀면 `git clone`이
+"destination path already exists and is not an empty directory"로 실패한다.
+
+```bash
+cd /workspace
+git clone -b claude/3b-text-generation-models-thz2vl <repo-url> entropy_collapse
+cd entropy_collapse && git fetch origin paper
+bash run/bootstrap_pod.sh                       # verl/ datasets/ logs/ + 도너의 steer_f/
+tar xzf /workspace/ckpt.tgz -C /workspace/entropy_collapse/   # ← 이 다음이다
+```
+
+**2. 재개가 없다. 그래서 검증이 크기 비교가 아니다.**
+rsync는 `--append-verify`로 이어붙지만 `runpodctl`은 끊기면 처음부터다. 그리고 받은
+파일은 크기가 맞아도 내용이 잘려 있을 수 있다 — gzip 스트림 전체를 읽어야 안다.
+
+```bash
+tar tzf /workspace/ckpt.tgz | head -5                       # 맨 앞 경로가 checkpoints/ 인지
+tar tzf /workspace/ckpt.tgz > /dev/null && echo "ARCHIVE OK"   # 전부 읽는다 = 무결성 검사
+```
+
+`ARCHIVE OK`가 안 뜨면 그 전송은 버리고 다시 보낸다. 이 검사를 건너뛰면 잘린
+체크포인트가 사흘 뒤 이상한 학습 곡선으로 드러난다(`hf_backup.sh`가 크기만 보다가
+같은 일을 한 번 당했다).
+
+**3. 아카이브가 디스크에 두 번 앉는다.**
+옛 파드에 `.tgz` 한 벌, 새 파드에 또 한 벌, 그리고 푼 트리까지 세 벌이다.
+**검증이 끝난 뒤에** 지운다.
+
+```bash
+du -sh checkpoints validation_data rollout_data
+rm /workspace/ckpt.tgz
+```
+
+## 그 다음은 rsync 경로와 같다
+
+`bash run/setup_env.sh` → `check_env_pins.py` → flash-attn 재설치(아래 §flash-attn) →
+`env_preflight` → `bash run/migrate_pod.sh --check` → `bash run/run_status.sh`.
+`--check`가 실패하면 MTP 헤드·보정이 안 온 것이고, 그 상태로는
+`run_uniform_ablation.sh:149`가 REFUSE해서 **tree arm이 하나도 안 뜬다.**
 ---
 
 # flash-attn 다시 깔기
