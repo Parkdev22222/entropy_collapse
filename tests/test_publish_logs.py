@@ -581,3 +581,78 @@ def test_force_still_overwrites_a_degraded_copy(box, tmp_path):
     assert p.returncode == 0, p.stdout + p.stderr
     kept = blob_bytes(origin, f"logs/experiments/train-grpo-{TAG}-s4.log")
     assert kept.count(b"\n") < 10, "--force must still overwrite"
+
+
+# --------------------- the same run, with its recorded numbers changed (09-22)
+def test_a_copy_whose_metric_lines_were_edited_is_refused(box, tmp_path):
+    """2026-09-22, and every other check here passed.
+
+    A push to train-grpo-<tag>-s4.log altered the accuracy in twelve metric
+    lines -- steps 60 through 110, converged-window mean .1560 -> .1375 --
+    while the global_seqlen fingerprints on those same lines stayed identical,
+    so it was one run's lines with the numbers replaced. Same run, same final
+    step, more bytes, real newlines: the step test, the line-ending test and
+    the truncation test all had nothing to say.
+
+    A log is append-only, so the committed copy must be a prefix of the
+    incoming one. Changed content is not new data.
+    """
+    pod, origin, logs = box
+    name = f"train-grpo-{TAG}-s4.log"
+    make_log(logs, f"grpo-{TAG}-s4", 110)
+    # give the step lines something to edit
+    good = (logs / name).read_text().replace(
+        "step:70 - global_seqlen: 1", "step:70 - global_seqlen: 1 - acc:0.168")
+    (logs / name).write_text(good)
+    assert run_publish(pod, logs, "--push").returncode == 0
+
+    other, logs2 = _second_box(tmp_path, origin)
+    (logs2 / name).write_text(good.replace("acc:0.168", "acc:0.138"))
+
+    p = sh(["bash", SCRIPT, "--push"], other, LOG_DIR=str(logs2))
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert "rewritten" in p.stdout, p.stdout
+    assert "70" in p.stdout, f"the changed step is not named: {p.stdout}"
+
+    kept = blob_bytes(origin, f"logs/experiments/{name}")
+    assert b"acc:0.168" in kept, "the recorded numbers were overwritten anyway"
+    assert b"acc:0.138" not in kept
+
+
+def test_force_still_overwrites_an_edited_copy(box, tmp_path):
+    """A line-ending repair trips the same test, and should: rewriting a
+    committed log is something a person confirms, not something that happens
+    on the way past."""
+    pod, origin, logs = box
+    name = f"train-grpo-{TAG}-s4.log"
+    make_log(logs, f"grpo-{TAG}-s4", 110, tail="acc:0.168\n")
+    assert run_publish(pod, logs, "--push").returncode == 0
+
+    other, logs2 = _second_box(tmp_path, origin)
+    good = (logs / name).read_text()
+    (logs2 / name).write_text(good.replace("acc:0.168", "acc:0.138"))
+
+    p = sh(["bash", SCRIPT, "--push", "--force"], other, LOG_DIR=str(logs2))
+    assert p.returncode == 0, p.stdout + p.stderr
+    kept = blob_bytes(origin, f"logs/experiments/{name}")
+    assert b"acc:0.138" in kept, "--force did not overwrite"
+
+
+def test_an_append_after_a_restart_still_publishes(box, tmp_path):
+    """The guard must not stop a relaunch. A restart appends a second launch,
+    so step numbers repeat -- which is why the test is a byte prefix and not a
+    per-step comparison."""
+    pod, origin, logs = box
+    name = f"train-grpo-{TAG}-s4.log"
+    make_log(logs, f"grpo-{TAG}-s4", 40)
+    assert run_publish(pod, logs, "--push").returncode == 0
+
+    other, logs2 = _second_box(tmp_path, origin)
+    first = (logs / name).read_text()
+    relaunch = "".join(f"step:{i} - global_seqlen: 1\n" for i in range(1, 111))
+    (logs2 / name).write_text(first + relaunch)
+
+    p = sh(["bash", SCRIPT, "--push"], other, LOG_DIR=str(logs2))
+    assert "rewritten" not in p.stdout, p.stdout
+    kept = blob_bytes(origin, f"logs/experiments/{name}")
+    assert len(kept) > len(first), "the relaunch was refused"

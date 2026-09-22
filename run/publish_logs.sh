@@ -125,7 +125,47 @@ degraded () {   # <incoming> <committed> -> prints why the incoming copy is wors
         echo "truncated: ours is ${mine_b} bytes, the branch has ${theirs_b}"
         return 0
     fi
+    # Rewritten: append-only means the committed copy is a PREFIX of ours. New
+    # steps land at the end; a restart appends another launch at the end. So if
+    # the first ${theirs_b} bytes differ, something already on the branch was
+    # changed, and changed content is not new data.
+    #
+    # Why this is here: on 2026-09-22 a push to train-grpo-<tag>-s4.log altered
+    # the accuracy in twelve metric lines -- steps 60 through 110, converged
+    # mean .1560 -> .1375 -- while the global_seqlen fingerprints on those same
+    # lines stayed identical, so it was one run's lines with the numbers
+    # replaced. Every other check here passed: same run, same final step, more
+    # bytes, real newlines. Only "did what was already there change" catches it.
+    #
+    # A line-ending repair also trips this, and should: rewriting a committed
+    # log is a thing a person confirms with --force, not something that happens
+    # on the way past.
+    if [ "${theirs_b:-0}" -gt 0 ] && ! cmp -s -n "${theirs_b}" "$1" "$2"; then
+        local where steps
+        where="$(cmp "$1" "$2" 2>/dev/null | sed 's/.*char \([0-9]*\).*/\1/')"
+        steps="$(changed_steps "$1" "$2" | head -6 | tr '\n' ' ')"
+        echo "rewritten: the branch's ${theirs_b} bytes are not a prefix of ours" \
+             "(first difference at byte ${where:-?})${steps:+; step(s) changed: ${steps}}"
+        return 0
+    fi
     return 1
+}
+
+# Which step lines differ, for the refusal message only. Keyed by step number
+# and comparing the LAST occurrence of each, so a log with two launches reads
+# the live one; that is good enough to name the damage, and the prefix test
+# above is what actually decides.
+changed_steps () {   # <incoming> <committed> -> step numbers whose line changed
+    awk '
+      function k(l,  s) {
+          if (match(l, /step:[0-9]+ - global_seqlen/)) {
+              s = substr(l, RSTART, RLENGTH); sub(/step:/, "", s)
+              sub(/ - global_seqlen/, "", s); return s }
+          return "" }
+      FNR == NR { j = k($0); if (j != "") mine[j] = $0; next }
+      { j = k($0); if (j == "" || !(j in mine)) next
+        if (mine[j] != $0) print j }
+    ' "$1" "$2" 2>/dev/null
 }
 # run name from the file name, so train_log_done and trainer_pid_for can be
 # asked about it. train-<run>.log and the recovery chain's train-<run>_<tag>.log.

@@ -139,3 +139,66 @@ def test_full_runs_are_untouched(tmp_path):
               "signed - permuted", "steer - grpo", "uniform - steer"):
         n, seeds, held = _seeds_of(out, c)
         assert n == "3" and seeds == "1,2,3" and held == "-", c
+
+
+# ------------------------- the file name is a label, the config dump is not
+def _identified(path, seed, name, gpus=4):
+    """Prepend the config dump verl writes near the top of every run."""
+    head = ("{'data': {'seed': %d}, 'trainer': {'experiment_name': '%s', "
+            "'n_gpus_per_node': %d, 'tensor_model_parallel_size': %d}}\n"
+            % (seed, name, gpus, gpus))
+    path.write_text(head + path.read_text())
+
+
+def test_a_log_whose_dump_names_another_seed_is_excluded(tmp_path):
+    """2026-09-22: a push put the seed-2 run into train-grpo-<tag>-s4.log.
+
+    Nothing here reads the file's contents for identity -- the seed comes from
+    the NAME and the numbers from the metric lines -- so GRPO would have taken
+    seed 2's numbers twice, one of them carrying an A100 topology into the H100
+    set. A later edit fixed the two-line banner at the top of the file and left
+    the dump alone, so a human skim saw s4 while the dump still said s2.
+    """
+    logs = _tree(tmp_path, {("grpo", 1): 110, ("grpo", 4): 110,
+                            ("signed", 1): 110, ("signed", 4): 110})
+    _identified(logs / "train-grpo-T-s1.log", 1, "grpo-T-s1")
+    # the s4 file actually holds the seed-2 run, on two GPUs
+    _identified(logs / "train-grpo-T-s4.log", 2, "grpo-T-s2", gpus=2)
+    out = tmp_path / "res"
+    stdout = _run(logs, out)
+
+    assert "EXCLUDED" in stdout, stdout
+    assert "train-grpo-T-s4.log" in stdout
+    assert "seed 2" in stdout
+
+    n, seeds, _ = _seeds_of(out, "signed - grpo")
+    assert n == "1" and seeds == "1", f"the wrong-seed run reached the contrast (n={n})"
+
+
+def test_an_older_experiment_name_is_kept(tmp_path):
+    """The first version of this check rejected on experiment_name and dropped
+    a real STEER seed: the early runs were called math-<tag>-steer-s1 before
+    the campaign settled on steer-<tag>-s1. The seed is what indexes the
+    analysis, so the seed is what has to agree."""
+    logs = _tree(tmp_path, {("steer", 1): 110, ("signed", 1): 110})
+    _identified(logs / "train-steer-T-s1.log", 1, "math-T-steer-s1")
+    out = tmp_path / "res"
+    stdout = _run(logs, out)
+
+    assert "EXCLUDED" not in stdout, stdout
+    assert "older experiment_name" in stdout
+    rows = (out / "per_seed.tsv").read_text()
+    assert "steer\t1\t" in rows, "a renamed but genuine run was dropped"
+
+
+def test_mixed_gpu_counts_are_reported(tmp_path):
+    """Seed-paired contrasts cancel a box effect; arm means over different
+    seed sets do not, and the mapping is invisible in the numbers."""
+    logs = _tree(tmp_path, {("grpo", 1): 110, ("grpo", 4): 110,
+                            ("signed", 1): 110})
+    _identified(logs / "train-grpo-T-s1.log", 1, "grpo-T-s1", gpus=2)
+    _identified(logs / "train-grpo-T-s4.log", 4, "grpo-T-s4", gpus=4)
+    out = tmp_path / "res"
+    stdout = _run(logs, out)
+    assert "did not all run on the same GPU count" in stdout, stdout
+    assert "s1=2" in stdout and "s4=4" in stdout

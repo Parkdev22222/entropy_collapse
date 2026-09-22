@@ -166,6 +166,34 @@ def parse_log(path: Path) -> dict[int, dict[str, float]]:
 OFFLOAD_RE = re.compile(r"'param_offload':\s*(True|False)")
 
 
+def log_identity(path: Path) -> dict:
+    """What the log says it is, as opposed to what its file name says.
+
+    verl dumps its resolved config near the top of every run, so the log
+    carries `experiment_name`, `seed` and `n_gpus_per_node` independently of
+    whatever the file is called. Nothing here read them until 2026-09-22, when
+    a push put the seed-2 run into train-grpo-<tag>-s4.log: the file name said
+    s4, the dump said s2 on two GPUs, and this script -- which takes the seed
+    from the NAME and the numbers from the metric lines -- would have given
+    GRPO seed 2's numbers twice, one of them carrying an A100 topology into the
+    H100 set. A later edit fixed the two-line banner at the top of that file and
+    left the dump alone, so a human skim saw s4 and the dump still said s2.
+
+    The banner is echoed by run_grpo.sh from ${SEED} and ${N_GPUS}; the dump
+    comes from the trainer. Reading the dump is the check.
+    """
+    txt = path.read_text(errors="replace")
+    out: dict = {}
+    m = re.search(r"'experiment_name':\s*'([^']*)'", txt)
+    if m:
+        out["experiment_name"] = m.group(1)
+    for key in ("seed", "n_gpus_per_node", "tensor_model_parallel_size"):
+        m = re.search(r"'%s':\s*(\d+)" % key, txt)
+        if m:
+            out[key] = int(m.group(1))
+    return out
+
+
 def offloaded(path: Path) -> str:
     """Did this run put params and the optimizer on the CPU?
 
@@ -465,6 +493,14 @@ def main(argv=None) -> int:
     # record is never deleted, only kept out of the statistics.
     per_seed_partial: dict[str, dict[int, dict[str, float]]] = defaultdict(dict)
     partial: list[tuple[str, int, int, int]] = []
+    # Logs whose own config dump disagrees with the file name they arrived
+    # under. Excluded rather than trusted: a file name is a label, the dump is
+    # what the trainer recorded.
+    mislabelled: list[tuple] = []
+    # Same seed, different experiment_name: a naming-convention change, not a
+    # wrong file. Reported so the difference is visible, never excluded.
+    renamed: list[tuple[str, str, str]] = []
+    topo: dict[tuple[str, int], int] = {}
     missing = []
     for arm in MAIN_ARMS:
         for seed in range(1, 6):
@@ -472,6 +508,24 @@ def main(argv=None) -> int:
             if f is None:
                 missing.append(f"{arm} s{seed}")
                 continue
+            ident = log_identity(f)
+            # The SEED is what indexes everything here, so that is what has to
+            # agree. experiment_name does not: the early runs were named
+            # math-<tag>-steer-s1 before the campaign settled on steer-<tag>-s1,
+            # and rejecting on the string dropped a real STEER seed the first
+            # time this check ran. The seed alone catches the failure it is for
+            # -- on 2026-09-22 a push put the seed-2 run into
+            # train-grpo-<tag>-s4.log, where the dump read seed 2 on two GPUs --
+            # and a renamed-but-genuine run passes.
+            got_seed = ident.get("seed")
+            if got_seed is not None and got_seed != seed:
+                mislabelled.append((arm, seed, f.name,
+                                    ident.get("experiment_name"), got_seed,
+                                    ident.get("n_gpus_per_node")))
+                continue
+            got_name = ident.get("experiment_name")
+            if got_name is not None and got_name != run_name(arm, seed):
+                renamed.append((f.name, run_name(arm, seed), got_name))
             steps = parse_log(f)
             agg = plateau(steps, lo, hi)
             if not agg:
@@ -479,6 +533,8 @@ def main(argv=None) -> int:
                 continue
             agg["log"] = f.name
             agg["stack"] = offloaded(f)
+            if ident.get("n_gpus_per_node") is not None:
+                topo[(arm, seed)] = ident["n_gpus_per_node"]
             # A run that died inside the window contributes a mean over FEWER
             # points than the others and gets paired against theirs as if it
             # were the same statistic. On 2026-09-22 signed s4 died at step 91
@@ -840,6 +896,35 @@ def main(argv=None) -> int:
           f"compute_match.tsv, tables.tex, {macro_path.name}")
     for arm in MAIN_ARMS:
         print(f"  {arm:9s} {len(per_seed.get(arm, {}))} seed(s)")
+    if mislabelled:
+        print(f"  {len(mislabelled)} log(s) EXCLUDED -- the file name and the "
+              f"trainer's own config dump disagree:")
+        for arm, seed, fname, got, gseed, ggpu in mislabelled:
+            print(f"    {fname}")
+            print(f"      name says   {arm} seed {seed}")
+            print(f"      log says    {got}"
+                  + (f", seed {gseed}" if gseed is not None else "")
+                  + (f", {ggpu} GPU(s)" if ggpu is not None else ""))
+        print("    A file name is a label; the dump is what the trainer recorded."
+              " Rename the file, or publish the run it actually is.")
+    if renamed:
+        print(f"  {len(renamed)} log(s) carry an older experiment_name "
+              f"(same seed, so kept):")
+        for fname, want, got in renamed:
+            print(f"    {fname}: name says {want}, log says {got}")
+    # Arms that did not all run on the same hardware. Pairing within a seed
+    # cancels a box effect exactly, which is why the contrasts are safe -- but
+    # an arm MEAN taken over a different mix of boxes is not comparable to
+    # another arm's, and the seed-to-box mapping is not visible in the numbers.
+    if len(set(topo.values())) > 1:
+        by_arm: dict[str, list[str]] = {}
+        for (arm, seed), g in sorted(topo.items()):
+            by_arm.setdefault(arm, []).append(f"s{seed}={g}")
+        print("  NOTE: arms did not all run on the same GPU count:")
+        for arm, cells in by_arm.items():
+            print(f"    {arm:9s} {' '.join(cells)}")
+        print("    Seed-paired contrasts cancel this; arm means over different"
+              " seed sets do not.")
     if partial:
         where = "included (--allow-partial)" if args.allow_partial else "HELD OUT"
         print(f"  {len(partial)} run(s) did not reach step {hi} -- {where}:")
