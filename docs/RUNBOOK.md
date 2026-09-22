@@ -210,6 +210,8 @@ bash run/publish_logs.sh --push --queue-logs  # 큐 드라이버 로그도
 | **`pip install wandb` 금지** | vllm 0.8.4의 opentelemetry 핀(`<1.27.0`)을 깨고 protobuf를 4.25→7.36으로 올린다. 2026-09-13 H100 박스에서 실제로 그랬다. 그리고 **어차피 안 쓴다** — 큐가 도는 세 경로가 전부 tensorboard다(`run_grpo.sh:207`, `run_uniform_ablation.sh:170`, `_arms.sh:102`). `setup_env.sh` 5b절이 이제 설치 후 핀을 다시 검사해서 이런 걸 잡는다 |
 | **`run_steerf.sh`의 `STEPS=200`** | SCALE case에 하드코딩이라 `export STEPS`가 안 닿는다. 캠페인은 `steer_plain_args()`를 trailing override로 붙여 막는다 |
 | **로그 글롭** | `train-<run>.log` + `train-<run>_*.log`만 허용해야 한다. 밑줄이 없으면 `-permuted`를 삼켜 signed를 DONE으로 오판정한다. `tests/test_run_names.py`가 고정한다 |
+| **★ GPU 장수가 줄면 `topology_guard`가 안 막는다** | `gpu_topology`는 `TP_SIZE`를 4→2→1 중 나누어떨어지는 첫 값으로 정한다. **3장이면 `3/1`**이고 `3 % 1 == 0`이라 가드가 통과시킨다 — "not every card is in use" 안내만 찍는다. 끝난 H100 런은 전부 4/4이므로 그 박스에서 새로 시작한 런은 **에러 없이 다른 토폴로지로 돌아 같은 표에 섞인다.** 카드 수가 변했으면 새 런을 시작하지 말고, 새 박스에서는 `N_GPUS=4 TP_SIZE=4`를 명령줄에 명시한다. §파드 통째로 옮기기 |
+| **`validation_data/`는 git에도 rsync에도 빠지기 쉽다** | gitignore가 아닌데 `publish_logs.sh`가 일부러 제외한다(런당 ~150 MB가 히스토리에 영구히 남는다). 문제별 점수라 **대응 표본 SE의 유일한 출처**이고, 파드를 옮길 때 rsync가 안 옮기면 아무 데도 없다 |
 | **`run_paper.sh` preflight** | `-paper` 접미사 MTP 파일은 `measure` 스테이지 전용이다. 학습 arm은 안 쓴다 |
 
 ---
@@ -391,6 +393,144 @@ STAGES='eval analysis' REPO=DSDSh/steer-f_2 bash run/run_paper.sh
 ⚠️ **`s/step` 비용 표에 두 박스를 섞지 마라.** 논문의 오버헤드 수치(+86%)는 같은 실행
 안의 STEER↔STEER-F 비교다. H100에서 잰 초를 그 표에 넣으면 오버헤드가 과소평가된다.
 
+
+---
+
+# 파드 통째로 옮기기 (rsync) — 파드가 죽었거나 GPU가 줄었을 때
+
+위의 허깅페이스 경로(`--share` / `--import`)는 **두 파드가 동시에 도는 분업**을 위한
+것이다. 파드 하나를 버리고 새 파드로 **통째로 가는** 경우에는 rsync가 더 빠르고 용량
+한도에 안 걸린다. 2026-09-22에 H100이 4→3장으로 줄고 돌던 런이 죽어서 이 경로를 썼다.
+
+## ★ GPU가 줄면 가드가 막아주지 않는다
+
+`gpu_topology()`(`run/_arms.sh:170`)는 `N_GPUS`가 비면 카드 수를 감지하고 `TP_SIZE`를
+4→2→1 중 나누어떨어지는 첫 값으로 정한다. **3장이면 `N_GPUS=3 TP_SIZE=1`**이고,
+`topology_guard`는 `3 % 1 == 0`이라 **REFUSE하지 않는다** — "not every card is in use"
+안내만 찍고 지나간다.
+
+끝난 H100 런은 전부 4/4다. 그러므로 **GPU가 줄어든 뒤 시작된 런은 에러 없이 다른
+토폴로지로 돌아 같은 표에 섞인다.** 카드 수가 변했으면 (1) 그 박스에서 새 런을 시작하지
+말고 (2) 줄어든 뒤 시작된 런은 폐기 대상으로 보고 (3) 새 박스에서는
+`N_GPUS=4 TP_SIZE=4`를 **명령줄에 명시**한다(`NCCL_NVLS_ENABLE=0`과 같은 이유).
+
+## 0. 로그부터 git에 — 제일 싸고, 유일하게 비가역적이다
+
+rsync가 실패하든 파드가 회수되든 로그만 살아 있으면 원고의 모든 수치가 재계산된다.
+GRPO seed-1 로그를 이 단계를 건너뛰어 잃었다(`docs/seed1_grpo_transcript.json`).
+
+```bash
+cd <OLD>          # 경로 확인: ls -d /workspace/entropy_collapse /mnt/common/*/entropy_collapse
+bash run/publish_logs.sh                      # 무엇이 갈지 먼저 본다
+bash run/publish_logs.sh --push --queue-logs
+```
+
+## 1. 디스크
+
+```bash
+# 옛 박스
+du -sh --exclude=.cache <OLD>
+# 새 박스
+df -h /workspace
+```
+
+RunPod의 할당량은 `df`에 **안 보인다** — "Avail 0인데 Used는 적다"가 할당량 소진이다.
+여유를 넉넉히 본다.
+
+## 2. 키 한 벌 — **새 박스에서 당긴다(pull)**
+
+옛 박스는 이미 `Disk quota exceeded`를 낸 적이 있으므로 거기서의 쓰기를 최소화한다.
+새 박스에서 키를 만들고, 옛 박스에는 한 줄만 쓴다.
+
+```bash
+# 새 박스
+ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_ed25519 && cat ~/.ssh/id_ed25519.pub
+
+# 옛 박스 — 위 출력을 그대로 붙여넣는다
+mkdir -p ~/.ssh && echo '<PUBKEY>' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys
+```
+
+## 3. rsync — 새 박스에서, `setsid nohup`으로
+
+tmux 페인이 닫히면 프로세스 그룹에 SIGHUP이 간다. 수십 GB는 오래 걸린다.
+
+```bash
+OLD_HOST=<old-ip>; OLD_PORT=<old-ssh-port>; OLD_PATH=<OLD>
+NEW_PATH=/workspace/entropy_collapse
+mkdir -p "${NEW_PATH}"
+setsid nohup rsync -avP --partial --append-verify \
+  -e "ssh -p ${OLD_PORT} -o StrictHostKeyChecking=no" \
+  --exclude '.cache/' --exclude '__pycache__/' --exclude '*.pyc' \
+  --exclude '.pytest_cache/' --exclude 'wandb/' \
+  "root@${OLD_HOST}:${OLD_PATH}/" "${NEW_PATH}/" \
+  > /workspace/rsync.log 2>&1 &
+tail -f /workspace/rsync.log
+```
+
+**디렉토리를 통째로 옮기는 이유.** `bootstrap_pod.sh`가 두 브랜치를 합쳐 만드는 트리가
+이미 옛 박스에 있다. 통째로 오면 `.git`·브랜치·미커밋 작업·도너의 `verl/`·`steer_f/`가
+한 번에 오고, "체크아웃 순서를 틀려 `setup_env.sh`가 도너의 옛 버전으로 덮이는" 함정을
+아예 피한다. 새 박스에서 다시 만들어야 하는 것은 **pip 환경뿐**이다.
+
+**무엇이 git에 없어서 rsync에만 실리나:**
+
+| | |
+|---|---|
+| `checkpoints/` | 학습 가중치와 MTP 헤드·보정. gitignore |
+| `rollout_data/` | 워밍업 롤아웃. locality·recall 측정의 입력. gitignore |
+| **`validation_data/`** | **gitignore가 아닌데 `publish_logs.sh`가 일부러 제외한다**(런당 ~150 MB가 히스토리에 영구히 남으므로). 문제별 점수라서 대응 표본 SE의 **유일한** 출처다 — rsync가 안 옮기면 아무 데도 없다 |
+| `results/*.tsv` | 재생성 가능하지만 공짜다 |
+
+**`.cache/`는 일부러 뺀다.** HF 스냅샷 ~18 GB는 다시 받으면 되고, 옮기다 잘린 캐시는
+사흘 뒤 이상한 학습 곡선으로 드러난다. pip 트리도 옮기지 않는다 — 복사하면 flash-attn이
+엉뚱한 torch에 링크된다.
+
+## 4. 검증 — 크기가 아니라 체크섬
+
+크기 비교는 잘린 파일을 못 잡는다(`hf_backup.sh`가 같은 이유로 한 번 당했다).
+rsync 자신에게 다시 물어본다.
+
+```bash
+rsync -avn --checksum -e "ssh -p ${OLD_PORT}" \
+  --exclude '.cache/' --exclude '__pycache__/' --exclude '*.pyc' \
+  --exclude '.pytest_cache/' --exclude 'wandb/' \
+  "root@${OLD_HOST}:${OLD_PATH}/" "${NEW_PATH}/"
+```
+
+**파일 목록이 비어 있어야 한다.** 하나라도 뜨면 그 파일은 내용이 다르다.
+
+## 5. 환경 재설치 — 볼륨과 함께 오지 않는 유일한 것
+
+```bash
+cd "${NEW_PATH}"
+git status --short && git log --oneline -1       # 트리가 제대로 왔는지
+bash run/setup_env.sh
+python3 scripts/check_env_pins.py && echo "PINS OK"
+bash -c '. run/_arms.sh; env_preflight "'"${NEW_PATH}"'"' && echo "STACK OK"
+bash run/migrate_pod.sh --check                  # MTP 헤드·보정 제자리 확인 (읽기 전용)
+```
+
+flash-attn은 ABI가 그 박스의 torch에 묶여 있어 **거의 확실히 다시 깔아야 한다** —
+아래 §flash-attn. 선택이 아니다(`dp_actor.py:43`이 무조건 import한다).
+
+## 6. 기동 — 무엇이 남았는지부터
+
+```bash
+bash run/run_status.sh                           # MISSING인 arm, 죽은 런이 도달한 step
+DRY=1 N_GPUS=4 TP_SIZE=4 ROLE=followups bash run/run_paper.sh
+tmux new -d -s paper \
+  "cd ${NEW_PATH} && NCCL_NVLS_ENABLE=0 N_GPUS=4 TP_SIZE=4 \
+   ROLE=followups REPO=<HF repo> bash run/run_paper.sh > logs/experiments/paper_h100.log 2>&1"
+```
+
+죽은 런의 재개 여부는 `SAVE_CONTENTS`가 결정한다. `['hf_model','model','optimizer','extra']`
++ `RESUME_MODE=auto`로 시작된 런만 `optim_world_size_*_rank_*.pt`를 갖고 있어 이어진다.
+`hf_model`만 있으면 처음부터다.
+
+## 7. 옛 파드는 4·5가 통과한 뒤에 지운다
+
+`migration verified`에 해당하는 것은 **4의 빈 목록**과 **5의 `STACK OK`** 두 개다.
+기동해서 `step:1 - global_seqlen`을 보고 나서 지우면 더 확실하다.
 
 ---
 
