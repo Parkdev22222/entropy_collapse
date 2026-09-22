@@ -219,6 +219,7 @@ bash run/publish_logs.sh --push --queue-logs  # 큐 드라이버 로그도
 | **파일명은 라벨이고 설정 덤프가 기록이다** | `417113c`가 seed 2 런을 `train-grpo-<tag>-s4.log`로 넣었고, 뒤이은 커밋이 파일 맨 위 **배너 두 줄만** s4로 고쳤다(배너는 `run_grpo.sh:241`이 `${SEED}`·`${N_GPUS}`에서 찍는 줄이라, 배너와 덤프가 어긋난 파일은 손으로 편집된 것이다). `analyze_seeds.py`는 파일명으로 시드를 정하므로 조용히 통과했다. 이제 덤프의 `seed`를 파일명과 대조해 어긋나면 **제외하고 이유를 찍는다**. `experiment_name`은 판정에 안 쓴다 — 초기 런이 `math-<tag>-steer-s1`이라 그걸로 거르면 진짜 시드가 날아간다. 손으로 확인하려면: `grep -o "'experiment_name': '[^']*'\|'seed': [0-9]*\|'n_gpus_per_node': [0-9]*" <log> \| sort -u` |
 | **★ `runpodctl` 경로에서는 `git clone`이 먼저다** | 산출물만 가고 `.git`은 안 따라오므로 새 파드의 트리를 직접 만들어야 한다. 먼저 압축을 풀면 그 디렉토리로는 clone이 실패한다(`destination path already exists and is not an empty directory`). 순서는 **clone → `bootstrap_pod.sh` → `tar xf`**다. 그리고 통짜로 보내지 않는다 — `checkpoints/`는 189 GB인데 학습을 막는 건 그 중 100 MB(MTP 헤드·보정)뿐이고, 나머지는 `PRUNE=1 bash run/hf_backup.sh <run>`으로 먼저 줄인다. 자세한 것은 아래 §파드끼리 직접 전송 |
 | **★ `tar`는 셸과 함께 죽는다 — 그리고 두 개가 같은 파일을 쓴다** | tmux 세션을 죽였을 때 그 안의 `tar`가 SIGHUP으로 끊겨 655 MB짜리 잘린 아카이브가 남았다(옛·새 파드의 **바이트 수가 같아서** 전송이 아니라 소스가 잘린 것이 드러났다). 붙여넣기가 샜을 때는 **같은 출력 파일에 `tar` 두 개**가 동시에 쓰고 그 파일을 `runpodctl send`가 읽고 있었다. 시작 전에 `pgrep -af 'tar \|runpodctl'`, 띄울 때는 `setsid nohup … &`, 압축은 빼고(`.safetensors`는 거의 안 줄고 단일 스레드다), **보내기 전에 소스를** `tar tf <archive> > /dev/null`로 검증한다 |
+| **★ `runpodctl`은 양쪽에 API 키가 있어야 방이 열린다** | 키가 없으면 `send`가 **코드를 찍고도** 릴레이에 방을 등록하지 못한다(코드는 croc이 자체적으로 만든다). 보내는 쪽 화면은 정상으로 보이고 `pgrep`에도 살아 있으며, 받는 쪽에만 `croc: receive: room not ready`로 나타난다 — 코드를 새로 발급해도 똑같다. 진짜 원인은 보내는 쪽 로그 첫 줄의 `Runpod config file not found`였다. 양쪽에서 `read -rs -p "API key: " K; runpodctl config --apiKey "$K"; unset K`(read-write 스코프). **무엇을 의심하기 전에 `send.log`를 읽는다** |
 | **`tmux new -s <name>`으로 시작하는 블록은 붙여넣기를 가로챈다** | 첫 줄이 attached tmux를 띄우면 나머지 줄이 그 새 셸로 들어가 아무 데도 안 닿는다. 화면만 바뀌고 명령은 사라진다. 붙여넣을 블록에서는 `tmux new -d -s <name> "<cmd>"`로 detached로 띄우고 출력을 `tee`로 파일에 남긴다. 같은 이유로 명령 안의 자리표시자에 `<...>` 꺾쇠를 쓰지 않는다 — 셸 리다이렉션이라 `syntax error near unexpected token` 이 난다. `CODE=...` 같은 변수로 준다 |
 | **`run_paper.sh` preflight** | `-paper` 접미사 MTP 파일은 `measure` 스테이지 전용이다. 학습 arm은 안 쓴다 |
 
@@ -551,6 +552,43 @@ tmux new -d -s paper \
 
 **단, SSH가 닿으면 rsync가 낫다.** `--partial --append-verify`가 붙어 끊겨도 이어지고,
 `runpodctl`은 재개가 없다. 위 §파드 통째로 옮기기를 먼저 보라.
+
+## ★ 먼저: 양쪽 파드에 API 키를 넣는다
+
+이게 없으면 `send`는 **코드를 찍고도 방을 못 연다.** 코드는 croc이 자체적으로 만들기
+때문에 화면상 정상으로 보이고, 받는 쪽에만 `croc: receive: room not ready`로 나타난다.
+2026-09-22에 이걸로 세 라운드를 썼다. 진짜 원인은 보내는 쪽 로그 첫 줄에 있었다:
+
+```
+Runpod config file not found, please run `runpodctl config` to create it
+7638-nectar-oxygen-folio-10          ← 코드는 찍힌다. 방은 안 열린다
+```
+
+```bash
+# 양쪽 파드 각각. read -rs 라서 키가 셸 히스토리에 안 남는다
+read -rs -p "API key: " K; echo; runpodctl config --apiKey "$K"; unset K
+cat ~/.runpod/config.toml
+```
+
+키는 콘솔의 Settings → API Keys에서 **read-write** 스코프로 만든다. `runpodctl config`가
+덤으로 하는 SSH 키 동기화가 `Unauthorized`를 내면 키 권한이 부족한 것이다 — 설정 파일
+자체는 저장되므로 `send`/`receive`만 먼저 시험해 볼 수는 있다.
+
+**무엇을 의심하기 전에 `send.log`부터 읽는다.** 보내는 쪽 프로세스가 `pgrep`에 살아
+있어도 그것은 방이 열렸다는 뜻이 아니다.
+
+## 큰 파일은 코드가 나와도 한참 기다린다
+
+croc은 보내기 전에 파일 전체를 한 번 읽어 해시를 만든다. 180 GB를 네트워크 볼륨에서
+읽으면 코드가 찍힌 뒤로도 방이 열리기까지 오래 걸리고, 그 사이 받는 쪽은 위와 같은
+`room not ready`를 본다. 구분하는 법 — **`rchar`를 본다**(`read_bytes`가 아니다:
+MooseFS/FUSE는 블록 디바이스를 안 거쳐서 0으로 남는다):
+
+```bash
+grep rchar /proc/<PID>/io; sleep 30; grep rchar /proc/<PID>/io
+```
+
+늘고 있으면 해시 중이니 기다리면 되고, 0에서 안 움직이면 위의 설정 문제다.
 
 ## 통짜로 보내지 않는다 — 세 덩어리, 작고 급한 것부터
 
