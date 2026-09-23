@@ -392,6 +392,37 @@ importlib.import_module("verl.utils.reward_score.multi_datasets_eval")' 2>&1)"; 
             echo "      pip install word2number sympy"
             return 1
         fi
+        # Same shape one layer out: the logger backend. Every arm any queue
+        # launches sets trainer.logger=['console','tensorboard'] -- :345 below
+        # for the plain arms, run_grpo.sh:207 and run_uniform_ablation.sh:170
+        # for the tree ones -- and verl opens it in Tracking at trainer init,
+        # before step 1. On 2026-09-23 signed s4 died there on a fresh H100 box
+        # whose GPU stack came from plain pip, and the queue moved on to the
+        # next arm with this gate still saying OK. Checked by the import verl
+        # takes, not by the pip name: `import tensorboard` can succeed against
+        # a partial install while torch.utils.tensorboard is what raises.
+        if ! err="$(cd "${root}" && python3 -c '
+import sys
+try:
+    import torch
+except Exception:
+    sys.exit(0)                      # no torch here: not a training box
+from torch.utils.tensorboard import SummaryWriter' 2>&1)"; then
+            echo "  verl and steer_f import, but the logger backend does not:"
+            printf '%s\n' "${err}" | tail -6 | sed 's/^/    /'
+            echo
+            echo "  Every arm sets trainer.logger=['console','tensorboard'] and verl"
+            echo "  opens it at trainer init, before step 1 -- so the training log"
+            echo "  reads as if that one arm failed rather than the box."
+            echo "      pip install tensorboard"
+            echo
+            echo "  If this box got its GPU stack from plain pip, the rest of the"
+            echo "  dependency list is missing too and the next arm dies on the next"
+            echo "  one. setup_env.sh knows the whole list and leaves vllm/ray alone"
+            echo "  unless INSTALL_GPU_STACK=1:"
+            echo "      bash run/setup_env.sh"
+            return 1
+        fi
         # verl importing is necessary and not sufficient. On 2026-09-13 every
         # arm on a fresh box died with "The current node timed out during
         # startup" while this check passed, because the broken package was

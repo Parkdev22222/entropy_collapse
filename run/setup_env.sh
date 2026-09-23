@@ -271,6 +271,11 @@ checks = [
     ("steer_f (레포 내장)",                  "import steer_f"),
     ("steer_f.tree_rollout",                "import steer_f.tree_rollout"),
     ("vllm",                                "import vllm"),
+    # 모든 arm이 trainer.logger=['console','tensorboard'] 로 돈다(_arms.sh:345,
+    # run_grpo.sh:207, run_uniform_ablation.sh:170). verl 은 이걸 트레이너 초기화
+    # 에서 열므로 step 1 전에 죽고, 로그만 보면 그 arm이 실패한 것처럼 보인다.
+    # 2026-09-23 새 H100 박스가 여기서 첫 런을 잃었다.
+    ("tensorboard (모든 arm의 로거)",        "from torch.utils.tensorboard import SummaryWriter"),
 ]
 bad = 0
 for name, stmt in checks:
@@ -346,3 +351,8 @@ echo "  3) MTP 헤드가 없다면:"
 echo "       SCALE=paper MODEL_PATH=Qwen/Qwen2.5-Math-1.5B N_GPUS=1 bash run/warmup_and_validate.sh"
 echo "  4) 학습 재개 (트리 롤아웃, lam=0.25):"
 echo "       bash run/run_tree_2x2.sh   또는 개별 run_steerf.sh 명령"
+echo
+echo "GPU 스택(vllm/ray/flash-attn)을 손으로 깔았더라도 이 스크립트를 한 번은"
+echo "돌리세요. 나머지 의존성 목록은 run/_check_deps.py 만 알고 있고, 그게 빠진"
+echo "박스는 학습이 아니라 트레이너 초기화에서 죽습니다. INSTALL_GPU_STACK=1 을"
+echo "주지 않으면 vllm·ray 는 건드리지 않습니다."

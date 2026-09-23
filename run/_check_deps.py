@@ -17,6 +17,7 @@ capture just the list.
 """
 import importlib
 import pathlib
+import re
 import sys
 
 SPEC = [
@@ -60,15 +61,94 @@ SPEC = [
 # _arms.sh:102 (steer_plain_args) for the plain ones. run_steerf.sh's own
 # wandb default at :236 is reached by no queue in this repo.
 OPTIONAL = [
-    ("wandb", "init", "wandb", "어느 큐도 쓰지 않습니다 (전부 console+tensorboard)"),
+    ("wandb", "init", "wandb", "어느 큐도 쓰지 않습니다 (전부 console+tensorboard, 아래 참조)"),
 ]
+
+# The logger backend is a dependency like any other, and it is the one this file
+# has been able to name since 2026-09-13 without ever checking it: the OPTIONAL
+# note above drops wandb *because* every arm logs to console+tensorboard, and
+# nothing verified that tensorboard was installed.  On 2026-09-23 a fresh H100
+# box that got its GPU stack from plain pip -- never `bash run/setup_env.sh` --
+# lost its first run to exactly that.  verl opens the backend in Tracking at
+# trainer init, before step 1, so the training log reads as if that arm failed
+# and the queue moved on to the next one with every gate still saying OK.
+#
+# Checked by the import path verl actually takes, not by the pip name.
+# `torch.utils.tensorboard` is what raises when the tensorboard distribution is
+# absent; `import tensorboard` on its own can succeed against a partial install.
+# Same lesson as word2number.w2n above.
+LOGGER_BACKENDS = {
+    "console":     None,                                        # verl prints it itself
+    "tensorboard": ("torch.utils.tensorboard", "SummaryWriter", "tensorboard"),
+    "wandb":       ("wandb", "init", "wandb"),
+}
+
+
+def logger_spec(root):
+    """What the queues ask the trainer to log to, read from the queues.
+
+    Returns (required, reported).  `required` is SPEC-shaped and joins the list
+    above; `reported` is every other place in run/ that names a backend, printed
+    but never turned into a pip command.
+
+    The split is not tidiness, it is the 09-13 accident.  run_steerf.sh:236
+    hardcodes `trainer.logger="['console','wandb']"`, and wandb has never had to
+    be installed because the queue appends _arms.sh's steer_plain_args override
+    after it and hydra keeps the last value.  A check that unioned every
+    trainer.logger= it could find would demand wandb, `setup_env.sh` would
+    install it, and that pip run is what pulled opentelemetry 1.26 -> 1.44 and
+    broke vllm 0.8.4 on a freshly built box.  So only the override this repo
+    owns and every queue applies decides what gets installed.  Change
+    _arms.sh:steer_plain_args and this follows; a launcher default only ever
+    gets mentioned.
+    """
+    def backends(path):
+        try:
+            text = (root / path).read_text()
+        except OSError:
+            return []
+        out = []
+        for lineno, line in enumerate(text.splitlines(), 1):
+            # run_steerf.sh:236 and run_steerf_linear.sh:124 quote the whole
+            # value (trainer.logger="['console','wandb']"); the queues do not.
+            # Both spellings have to be seen or the report misses the launcher
+            # defaults, which is the half of this that matters.
+            for body in re.findall(r"""trainer\.logger=["']?\[([^\]]*)\]""", line):
+                names = [n.strip().strip("'\"") for n in body.split(",")]
+                out.append((lineno, [n for n in names if n]))
+        return out
+
+    required, reported = [], []
+    for lineno, names in backends("run/_arms.sh"):
+        for name in names:
+            entry = LOGGER_BACKENDS.get(name, ())
+            if entry is None:                       # console: nothing to install
+                continue
+            if entry == ():
+                reported.append((f"run/_arms.sh:{lineno}", name, "모르는 백엔드"))
+                continue
+            if entry not in required:
+                required.append(entry)
+    wanted = {e[0] for e in required}
+    for path in sorted(p.name for p in (root / "run").glob("run_*.sh")):
+        for lineno, names in backends(f"run/{path}"):
+            for name in names:
+                entry = LOGGER_BACKENDS.get(name, ())
+                if entry is None or (entry and entry[0] in wanted):
+                    continue
+                why = ("필수 아님 — 큐가 이 값을 덮거나 이 스크립트를 실행하지 "
+                       "않습니다") if entry else "모르는 백엔드"
+                reported.append((f"run/{path}:{lineno}", name, why))
+    return required, reported
 
 GREEN, YELLOW, RED, OFF = "\033[32m", "\033[33m", "\033[31m", "\033[0m"
 
 
 def main():
     need = []
-    for mod, attr, pkg in SPEC:
+    root = pathlib.Path(__file__).resolve().parents[1]
+    logger_required, logger_reported = logger_spec(root)
+    for mod, attr, pkg in list(SPEC) + logger_required:
         try:
             m = importlib.import_module(mod)
         except Exception as exc:
@@ -102,6 +182,12 @@ def main():
             continue
         state = "" if hasattr(m, attr) else " (심볼 없음)"
         print(f"  {GREEN}OK{OFF}    {mod} 설치돼 있음{state} — {why}", file=sys.stderr)
+
+    # Named in run/ but not required.  Printed so that a launcher default which
+    # stops being overridden -- or a backend nobody here knows about -- is
+    # visible before it costs a run, without ever reaching `need`.
+    for where, name, why in logger_reported:
+        print(f"  {YELLOW}NOTE{OFF}  {where}: logger '{name}' — {why}", file=sys.stderr)
 
     print(" ".join(f'"{p}"' if any(c in p for c in "<>=") else p for p in need))
     return 0
