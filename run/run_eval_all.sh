@@ -27,7 +27,10 @@
 #   JSONL behind -- the paired across-problem error bars the manuscript's
 #   Limitations section currently says are not computable. Needs
 #   `bash run/instrument_phase2.sh --apply` first; without it the variable is
-#   simply ignored and the queue still runs (it warns).
+#   simply ignored and the queue still runs (it warns). The same applier also
+#   carries the data_source column into that dump, without which one pass is
+#   one flat file with four benchmarks concatenated and no way to say which
+#   rows are MATH500. scripts/eval_paired_se.py reads what comes out.
 #
 # CHECKPOINTS
 #   The campaign uploads each finished run to the Hub and deletes the local
@@ -345,6 +348,8 @@ collision=$?
 
 echo
 echo "Next:  python3 scripts/collect_results.py --logs ${LOG_DIR} --out results/summary.tsv"
+echo "       python3 scripts/analyze_seeds.py --git-ref origin/paper --eval-table results/summary.tsv"
+echo "       python3 scripts/eval_paired_se.py --val-data ${ROOT}/validation_data/eval"
 if [ "${#FAILED[@]}" -gt 0 ]; then
     echo
     echo "${#FAILED[@]} run(s) did not produce a clean eval:"

@@ -185,6 +185,65 @@ bash run/publish_logs.sh --push --queue-logs  # 큐 드라이버 로그도
 `diagnose_run_failure`가 그걸 읽는다. 표에는 `~`로 표시된다. A100과 H100이 같은 브랜치에
 올려도 된다: 커밋 메시지가 박스를 적고, 파일 집합이 겹치지 않으며, 푸시가 rebase한다.
 
+## 6-벤치마크 평가 (학습 큐가 끝난 뒤)
+
+학습이 아니다. 런마다 `run/eval_steerf.sh`를 한 번 부르고, 그게 verl의 val-only 패스를
+두 번 돈다 — `avg32`(AIME24·AIME25·AMC23)와 `avg1`(MATH500·Minerva·OlympiadBench·GSM8K).
+체크포인트당 5,966 generation(패스 A 3,200 + 패스 B 2,766), H100×4에서 15~25분.
+
+### ★ 계측을 먼저 적용한다 — 안 하면 문제별 점수가 안 남는다
+
+```bash
+bash run/instrument_phase2.sh --check     # 0 pending 이어야 한다
+bash run/instrument_phase2.sh --apply
+```
+
+세 군데를 심는다. **셋 다 도너(`origin/paper`) 파일이라 이 브랜치에 커밋해도 파드에
+도달하지 않는다** — applier가 유일한 배달 경로다.
+
+| # | 어디에 | 무엇을 | 없으면 |
+|---|---|---|---|
+| 1 | `run/eval_steerf.sh` | `++trainer.validation_data_dir=${VAL_DATA_DIR}/${tag}` | verl이 문제별 점수를 통째로 버린다 |
+| 2 | `run/run_uniform_ablation.sh` | `"$@"` 통과 | followup arm이 하이드라 override를 못 받는다 |
+| 3 | `verl/trainer/ppo/ray_trainer.py` | 덤프에 `data_source` 열 | **1번만으로는 그 덤프를 쓸 수 없다** (아래) |
+
+`${tag}`가 하는 일: val_only 모드에서 `global_steps`가 0이라 `_dump_generations`가
+`0.jsonl`을 쓴다. 두 패스가 같은 디렉토리를 쓰면 `avg1`이 `avg32`를 **조용히 덮는다.**
+
+`run/run_eval_all.sh`는 `--check`가 통과할 때까지 시작을 거부한다.
+
+### 어느 런과 어느 런을 비교하나
+
+귀속은 **`STEER-F − uniform`과 `STEER-F − permuted`** 둘에서만 나온다. 그 둘만 한 변수를
+바꾸기 때문이다(`tab:arms`). `− GRPO`는 셋이, `− STEER`는 둘이 동시에 바뀌므로 벤치마크
+차이가 나와도 원인을 못 짚는다 — 넷 다 보고하되 귀속은 위 둘이다. `analyze_seeds.py`가
+뱉는 `Dirconsistency*`도 정확히 그 둘이다.
+
+시드가 박스다(s1·s2 = A100×2, s3·s4 = H100×4). 대조를 **시드 안에서** 짝지어야 박스 효과가
+상쇄되므로, 5 arm이 전부 완주한 시드를 고른다. 교차곱이 안 맞으면 쌍을 이름으로 준다:
+
+```bash
+SEEDS="3 4" DRY=1 bash run/run_eval_all.sh                     # 5 arm x 2 seed = 10
+EVAL_RUNS="grpo:1 steer:1 uniform:1 permuted:1 signed:1" \
+    DRY=1 bash run/run_eval_all.sh                             # 쌍을 이름으로
+```
+
+`DRY=1`로 개수를 먼저 본다. 완주하지 않은 런과 가중치가 없는 체크포인트는 이유와 함께
+빠지므로, 개수가 기대와 다르면 그게 정보다.
+
+### 끝난 뒤
+
+```bash
+python3 scripts/collect_results.py --logs logs/experiments --out results/summary.tsv
+python3 scripts/analyze_seeds.py --git-ref origin/paper --eval-table results/summary.tsv
+python3 scripts/eval_paired_se.py --val-data validation_data/eval
+```
+
+세 번째가 원고 Limitations가 "로그로는 계산 불가"라고 적어둔 **대응 across-problem SE**다.
+MATH500·Minerva·OlympiadBench 1,447문제에서 계산하고, 대응 SE가 비대응 SE보다 작아질지는
+**두 arm의 불일치율이 정한다** — 스크립트가 셋을 나란히 찍는다. GSM8K는 포화 근처라 풀에서
+뺀다. AIME24·25·AMC23은 `avg@32`라 한 행이 문제가 아니라 표본이므로 여기 안 들어간다.
+
 ## 알려진 함정
 
 | | |
@@ -225,6 +284,8 @@ bash run/publish_logs.sh --push --queue-logs  # 큐 드라이버 로그도
 | **로거는 필수 목록에서 유도한다 — 손으로 적지 않는다** | `run_steerf.sh:236`은 `trainer.logger="['console','wandb']"`를 하드코딩하는데 **wandb는 설치된 적이 없다** — 큐가 `steer_plain_args`의 override를 뒤에 붙이고 hydra가 마지막 값을 쓴다. 그래서 `_check_deps.py`는 `_arms.sh`가 넘기는 override에서만 필수 백엔드를 읽고, 런처 기본값은 **NOTE로 찍기만 한다.** 이 구분을 지우고 전부 union하면 wandb가 필수가 되고, `pip install wandb`는 09-13에 opentelemetry를 1.26 → 1.44로 올려 vllm을 깬 바로 그 명령이다 |
 | **`pip install tensorboard`도 핀을 건드린다** | protobuf·grpcio를 끌어올린다. 09-13의 wandb와 같은 경로다 — 깔고 나서 `python3 scripts/check_env_pins.py`와 `ray.init()`을 **다시** 확인한다. 검사 → 설치 → **재검사**가 `setup_env.sh`의 순서인 이유다 |
 | **`run_paper.sh` preflight** | `-paper` 접미사 MTP 파일은 `measure` 스테이지 전용이다. 학습 arm은 안 쓴다 |
+| **★ 문제별 점수를 켜도 그 파일은 쓸 수 없었다** | `validation_data_dir`를 켜면 verl이 한 패스를 **한 파일**로 떨군다 — `avg1`이면 MATH500 500행 + Minerva 272 + Olympiad 675 + GSM8K 1,319이 이어 붙고, **어디서 어디까지가 어느 벤치마크인지 적는 열이 없다**(`ray_trainer.py:544 _dump_generations`는 input/output/score와 보상 extras만 쓴다). 행 순서와 parquet 길이로 나누는 건 `data.filter_overlong_prompts`가 한 행도 안 버렸다는 **검증 불가능한 가정**이다. `instrument_phase2.sh`의 3번이 `data_source`를 덤프의 *복사본*에 넣는다 — 진짜 dict에 넣으면 `process_validation_metrics`가 문자열 열을 평균 내려다 죽는다 |
+| **대응 SE가 작아진다는 보장은 없다** | 짝짓기가 얼마를 버는지는 **두 arm의 불일치율**이 정한다. 전부 일치하면 대응 SE가 0으로 무너지고, 전부 불일치하면 대응 SE가 비대응보다 **크다**. `scripts/eval_paired_se.py`가 대응·비대응·불일치율을 나란히 찍는 이유이고, 원고가 줄어든 값을 약속하지 않고 측정값을 인용하는 이유다. 그리고 `avg@1`에서 문제당 점수는 베르누이 한 번이라, 그 SE에는 난이도 분산 위에 생성 한 번의 샘플링 노이즈가 얹혀 있다 |
 
 ---
 

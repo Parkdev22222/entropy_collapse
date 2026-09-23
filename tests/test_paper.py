@@ -129,7 +129,13 @@ def emittable_names():
     names |= set(re.findall(r'mac\(\s*f"([A-Za-z]+)\{', src))    # mac(f"Name{...}")
     # mac(k, ...) over a tuple of literal names, and the dict k is looked up in.
     # Table 11's wall clocks are written that way, and so is anything else that
-    # collects a few macros before emitting them.
+    # collects a few macros before emitting them. Any loop header, not just
+    # `for k in (...)`: on 2026-09-23 the held-out direction counts were added
+    # as `for name, other in ((...), (...))` and the narrower pattern reported
+    # four live macros as cells no run could fill -- this test inventing its
+    # own false positive, for the second time.
+    for tup in re.findall(r"for [\w, ]+ in \((.*?)\):\n", src, re.S):
+        names |= set(re.findall(r'"([A-Z][A-Za-z]*)"', tup))
     for tup in re.findall(r"for k in \(([^)]*)\):", src):
         names |= set(re.findall(r'"([A-Za-z]+)"', tup))
     names |= set(re.findall(r'"([A-Z][A-Za-z]*)":\s', src))
@@ -166,6 +172,13 @@ def emittable_names():
     extra |= set(re.findall(r'out\["([A-Za-z]+)"\]', probe))
     extra |= set(re.findall(r'"([A-Za-z]+)"', re.search(
         r"PASSRATE_MACROS = \{([^}]*)\}", probe).group(1)))
+
+    # The paired across-problem error bar is a third emitter, reading the
+    # evaluation's per-problem dumps rather than the training logs. Same rule
+    # again: its table is the source, not a copy kept here.
+    pse = (ROOT / "scripts" / "eval_paired_se.py").read_text()
+    body = re.search(r"MACROS = \{(.*?)\n\}", pse, re.S)
+    extra |= set(re.findall(r'"([A-Za-z]+)":\s*\(', body.group(1)))
 
     return names | prefixed | extra
 
