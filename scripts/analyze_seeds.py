@@ -92,6 +92,17 @@ DERIVED = {"uplift": lambda r: r["maj"] - r["acc"]}
 # Section 12.8's benchmarks, in the order collect_results.py writes them.
 MATH6 = ["AIME24", "AIME25", "AMC23", "MATH500", "Minerva", "Olympiad"]
 
+# AIME24 is not a test benchmark for this table. It is the metric the checkpoint
+# was selected on -- run/_arms.sh:48 sets it as best_metric_key, the trainer's
+# save_best_only argmaxes it, and run_eval_all.sh then evaluates whatever that
+# left on disk. The pre-registration records the size of the resulting bias
+# (+.011 to +.017 per arm) and that it differs by arm, so it does not cancel in
+# a contrast. The other five were never looked at during selection.
+#
+# The registered count stays over all six and is reported unchanged; this set
+# only adds the out-of-sample reading beside it.
+HELD_OUT = [b for b in MATH6 if b != "AIME24"]
+
 MAIN_ARMS = ["grpo", "steer", "uniform", "permuted", "signed"]
 
 # The follow-up ablations of Table 10, and the compute-matched control. They
@@ -210,33 +221,27 @@ def offloaded(path: Path) -> str:
     return "cpu" if hits[-1] == "True" else "gpu"
 
 
-def direction_consistency(tsv: Path, a: str, b: str) -> tuple[int, int] | None:
-    """On how many of the six benchmarks does arm `a` beat arm `b`?
+def eval_rows(tsv: Path) -> dict[tuple[str, str], dict[str, float]]:
+    """{(arm, seed): {benchmark: score}} from the table collect_results.py writes.
 
-    Section 12.8's headline is not any single cell -- a 30-question benchmark
-    cannot separate a method from a lucky draw -- but whether the ordering seen
-    on AIME24 survives elsewhere. The count is the statistic, and the paper
-    reports it "whatever it returns".
-
-    Reads the table scripts/collect_results.py already produces, rather than
-    parsing the evaluation logs a second time; a second parser is a second
-    thing to drift.
+    The per-arm ``avg`` row that file adds when an arm has more than one seed is
+    dropped here: everything downstream pairs within a seed, and an average over
+    an arm's own seed set is exactly what must not enter a difference.
     """
     if not tsv.is_file():
-        return None
-    rows: dict[str, dict[str, float]] = {}
+        return {}
     lines = tsv.read_text().splitlines()
     if not lines:
-        return None
+        return {}
     head = lines[0].split("\t")
+    out: dict[tuple[str, str], dict[str, float]] = {}
     for line in lines[1:]:
         cell = line.split("\t")
         if len(cell) != len(head):
             continue
-        # the averaged row when there is one, else the single seed
-        row = {h: c for h, c in zip(head, cell)}
-        arm = row.get("arm", "")
-        if arm in rows and row.get("seed") != "avg":
+        row = dict(zip(head, cell))
+        arm, seed = row.get("arm", ""), row.get("seed", "")
+        if not arm or seed == "avg":
             continue
         vals = {}
         for bench in MATH6:
@@ -244,12 +249,100 @@ def direction_consistency(tsv: Path, a: str, b: str) -> tuple[int, int] | None:
                 vals[bench] = float(row.get(bench, "-"))
             except ValueError:
                 pass
-        if len(vals) == len(MATH6):
-            rows[arm] = vals
-    if a not in rows or b not in rows:
-        return None
-    return sum(1 for x in MATH6 if rows[a][x] > rows[b][x]), len(MATH6)
+        if vals:
+            out[(arm, seed)] = vals
+    return out
 
+
+def direction_consistency(tsv: Path, a: str, b: str,
+                          benches: list[str] | None = None,
+                          ) -> tuple[int, int, int] | None:
+    """On how many benchmarks does arm `a` beat arm `b`, paired within a seed?
+
+    Section 12.8's headline is not any single cell -- a 30-question benchmark
+    cannot separate a method from a lucky draw -- but whether the ordering seen
+    on AIME24 survives elsewhere. The count is the statistic, and the paper
+    reports it "whatever it returns".
+
+    Paired, and that is a correction rather than a refinement. This function
+    used to read each arm's averaged row and subtract, which is the operation
+    Table 1's caption exists to warn against: the arms do not share a seed set,
+    a seed index also names the machine the run landed on (Section 12.7 measures
+    that at .0068 on the one arm that finished on both), and a difference of two
+    such averages carries the mix. Restricting to the seeds both arms finished
+    makes whatever a seed carries cancel inside each difference, which is what
+    the contrast table has always done and what running more than one seed per
+    arm is for.
+
+    Reads the table scripts/collect_results.py already produces, rather than
+    parsing the evaluation logs a second time; a second parser is a second
+    thing to drift.
+
+    Returns (benchmarks where a > b, benchmarks counted, shared seeds), or None
+    when the table is absent or the two arms share no seed with a full row.
+    """
+    benches = benches or MATH6
+    rows = eval_rows(tsv)
+    if not rows:
+        return None
+    have = {arm: {seed for (x, seed), v in rows.items()
+                  if x == arm and all(bn in v for bn in benches)}
+            for arm in (a, b)}
+    shared = sorted(have[a] & have[b])
+    if not shared:
+        return None
+    hits = 0
+    for bench in benches:
+        diffs = [rows[(a, sd)][bench] - rows[(b, sd)][bench] for sd in shared]
+        if sum(diffs) / len(diffs) > 0:
+            hits += 1
+    return hits, len(benches), len(shared)
+
+
+def benchmarks_table(tsv: Path) -> str | None:
+    """The tabular paper/steerf.tex:1602 \\input{}s, or None when there is none.
+
+    Nothing wrote this file before. The manuscript has referenced it since the
+    benchmark section was drafted and falls back to a \\PENDING stub when it is
+    missing, so the evaluation could run to completion and Table 12.8 would stay
+    empty with no error anywhere -- the same shape as the slots that had names
+    but no emitter.
+
+    Rows are per-arm means over that arm's own seeds, which is what the caption
+    says they are. They are not subtractable, for the reason in
+    direction_consistency; the count reported beneath the table is.
+    """
+    rows = eval_rows(tsv)
+    if not rows:
+        return None
+    body = []
+    for arm in MAIN_ARMS:
+        seeds = sorted(sd for (x, sd) in rows if x == arm)
+        if not seeds:
+            continue
+        cells = []
+        for bench in MATH6:
+            vals = [rows[(arm, sd)][bench] for sd in seeds if bench in rows[(arm, sd)]]
+            cells.append("{:.1f}".format(sum(vals) / len(vals)) if vals else "--")
+        full = [rows[(arm, sd)] for sd in seeds
+                if all(bn in rows[(arm, sd)] for bn in MATH6)]
+        mean = ("{:.1f}".format(
+            sum(sum(r[bn] for bn in MATH6) / len(MATH6) for r in full) / len(full))
+            if full else "--")
+        label = {"grpo": "GRPO", "steer": "\\textsc{steer}",
+                 "uniform": "\\textsc{uniform}", "permuted": "\\textsc{permuted}",
+                 "signed": "\\textbf{STEER-F}"}.get(arm, arm)
+        body.append("  %s & %s & %s \\\\" % (label, " & ".join(cells), mean))
+    if not body:
+        return None
+    return ("% generated by scripts/analyze_seeds.py -- do not edit\n"
+            "\\begin{tabular}{@{}lccccccc@{}}\n"
+            "\\toprule\n"
+            "arm & AIME24$^\\dagger$ & AIME25 & AMC23 & MATH500 & Minerva & "
+            "Olympiad & mean \\\\\n"
+            "\\midrule\n" + "\n".join(body) + "\n"
+            "\\bottomrule\n"
+            "\\end{tabular}\n")
 
 def plateau(steps: dict[int, dict[str, float]], lo: int, hi: int) -> dict[str, float]:
     """Mean of each metric over the validation points inside [lo, hi].
@@ -900,10 +993,29 @@ def main(argv=None) -> int:
 
         # Section 12.8. Absent evaluation table -> PENDING, not a guess.
         ev = Path(args.eval_table)
-        for name, other in (("Dirconsistency", "uniform"),
-                            ("Dirconsistencyperm", "permuted")):
-            hit = direction_consistency(ev, "signed", other)
+        # The registered count is over all six and is emitted unchanged. The
+        # held-out pair beside it drops AIME24, which selected the checkpoint
+        # rather than testing it -- an addition to the registered analysis, not
+        # a replacement for it.
+        for name, other, benches in (
+                ("Dirconsistency",         "uniform",  MATH6),
+                ("Dirconsistencyperm",     "permuted", MATH6),
+                ("Dirconsistencyheld",     "uniform",  HELD_OUT),
+                ("Dirconsistencypermheld", "permuted", HELD_OUT)):
+            hit = direction_consistency(ev, "signed", other, benches)
             fh.write(mac(name, hit[0] if hit else None, "{:d}"))
+        fh.write(mac("Dirheldtotal", len(HELD_OUT), "{:d}"))
+        # How many seeds each count is paired on. A count out of six says
+        # nothing without it.
+        for name, other in (("Dirnseeds", "uniform"), ("Dirpermnseeds", "permuted")):
+            hit = direction_consistency(ev, "signed", other)
+            fh.write(mac(name, hit[2] if hit else None, "{:d}"))
+
+        # The tabular the manuscript \input{}s. Written only when there is an
+        # evaluation to write; absent, steerf.tex falls back to its own stub.
+        tbl = benchmarks_table(ev)
+        if tbl:
+            (out_dir / "benchmarks_table.tex").write_text(tbl)
 
         # Table 11. Wall clocks are hours, which is how the caption reads them.
         for k in ("Matchstep", "Longsteps"):

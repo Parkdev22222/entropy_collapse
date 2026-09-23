@@ -43,6 +43,23 @@ cd "${ROOT}" || { echo "FATAL: cannot cd to ${ROOT}" >&2; exit 1; }
 . "${ROOT}/run/_arms.sh"
 
 SEEDS=${SEEDS:-"1 2 3 4 5"}
+# Explicit <arm>:<seed> pairs, which override the SEEDS x CAMPAIGN_ARMS cross
+# product. The cross product assumes every arm finished the same seeds; when a
+# box is lost mid-campaign it has not, and the surviving checkpoints do not line
+# up in a rectangle. Naming the pairs is then the only way to evaluate what
+# exists:
+#
+#     EVAL_RUNS="grpo:1 steer:2 signed:2" bash run/run_eval_all.sh
+#
+# Groups are a comma, and they only affect what the queue prints -- the eval is
+# per run either way:
+#
+#     EVAL_RUNS="grpo:1 steer:2 signed:2, grpo:5 steer:5 signed:5"
+#
+# A pair whose training log never reached the final step is skipped with the
+# reason, exactly as a cross-product entry is, so a typo does not silently
+# shrink the queue.
+EVAL_RUNS=${EVAL_RUNS:-}
 EVAL_SET=${EVAL_SET:-campaign}          # campaign | followups | all
 FOLLOWUP_ARMS=${FOLLOWUP_ARMS:-"lam0-tree grpo-long lam0.1 lam0.5 xclip-signed xclip-steer rloo-signed rloo-steer opo-signed opo-steer"}
 LONG_STEPS=${LONG_STEPS:-200}
@@ -80,7 +97,27 @@ case "${EVAL_SET}" in
     campaign|followups|all) ;;
     *) echo "FATAL: EVAL_SET must be campaign|followups|all, got '${EVAL_SET}'" >&2; exit 2 ;;
 esac
-if [ "${EVAL_SET}" = "campaign" ] || [ "${EVAL_SET}" = "all" ]; then
+if [ -n "${EVAL_RUNS}" ]; then
+    # Named pairs replace the cross product entirely. EVAL_SET=followups|all
+    # still appends the follow-up arms below.
+    _grp=1
+    OLD_IFS="${IFS}"; IFS=','
+    for _group in ${EVAL_RUNS}; do
+        IFS="${OLD_IFS}"
+        [ -n "$(printf '%s' "${_group}" | tr -d ' \t')" ] || { IFS=','; continue; }
+        printf '  -- group %s\n' "${_grp}"
+        for _pair in ${_group}; do
+            case "${_pair}" in
+                *:*) add_run "${_pair%%:*}" "${_pair##*:}" ;;
+                *)   echo "FATAL: EVAL_RUNS entry '${_pair}' is not <arm>:<seed>" >&2
+                     exit 2 ;;
+            esac
+        done
+        _grp=$((_grp + 1))
+        IFS=','
+    done
+    IFS="${OLD_IFS}"
+elif [ "${EVAL_SET}" = "campaign" ] || [ "${EVAL_SET}" = "all" ]; then
     for s in ${SEEDS}; do for a in ${CAMPAIGN_ARMS}; do add_run "${a}" "${s}"; done; done
 fi
 if [ "${EVAL_SET}" = "followups" ] || [ "${EVAL_SET}" = "all" ]; then
@@ -134,7 +171,15 @@ resolve_ckpt () {   # <arm> <seed> <run-name>
         # step and say so, so the selection rule is never silent.
         for d in $(ls -d "${CKPT_ROOT}/${cand}"/global_step_* 2>/dev/null |
                    sed 's/.*global_step_//' | sort -n); do
-            [ -d "${CKPT_ROOT}/${cand}/global_step_${d}/actor/huggingface" ] || continue
+            # Weights, not the directory. fsdp_checkpoint_manager.py:228 writes
+            # huggingface/ with the tokenizer and config ALWAYS and :263 writes
+            # the weights only when 'hf_model' is in save_contents, so a run
+            # saved without it leaves a complete-looking directory holding no
+            # model at all. hf_backup.sh and migrate_pod.sh were taught this in
+            # 2026-09-22; the eval path was not, and it would have picked such a
+            # directory and failed minutes later inside vLLM.
+            hf_weights_present \
+                "${CKPT_ROOT}/${cand}/global_step_${d}/actor/huggingface" || continue
             best="${CKPT_ROOT}/${cand}/global_step_${d}/actor/huggingface"
         done
         [ -n "${best}" ] && { echo "${best}"; return 0; }
@@ -166,6 +211,13 @@ PY
         --include "${rn}/global_step_${step}/*" --local-dir "${STAGE}/_dl" >/dev/null 2>&1 || return 1
     mv "${STAGE}/_dl/${rn}/global_step_${step}"/* "${dest}/" 2>/dev/null || return 1
     rm -rf "${STAGE}/_dl"
+    # Same rule as the local branch above: hf_backup.sh used to upload
+    # weightless directories and stamp them VERIFIED, so the Hub can hold one.
+    if ! hf_weights_present "${dest}"; then
+        echo "[eval] ${rn}: the Hub copy of global_step_${step} holds no weights" >&2
+        rm -rf "${dest}"
+        return 1
+    fi
     FETCHED="${STAGE}/${rn}"
     echo "${dest}"
 }
@@ -197,9 +249,14 @@ for item in "${QUEUE[@]}"; do
     echo "  fetched    ${FETCHED:-no (local)}"
     start=$(date +%s)
 
+    # VAL_DATA_DIR is the one instrument_phase2.sh reads: it inserts
+    # ${VAL_DATA_DIR:+++trainer.validation_data_dir=${VAL_DATA_DIR}/${tag}}
+    # into eval_steerf.sh. Without --apply the expansion is simply absent and
+    # the eval runs without per-problem scores, which is why this script
+    # refuses to start until --check passes. (An EVAL_RESULTS_DIR used to be
+    # exported beside it; nothing in the repo ever read that name.)
     MODEL_PATH="${mp}" \
     VAL_DATA_DIR="${ROOT}/validation_data/eval/${arm}-s${seed}" \
-    EVAL_RESULTS_DIR="${ROOT}/results/eval_json/${arm}-s${seed}" \
         bash run/eval_steerf.sh > "${log}" 2>&1
     st=$?
     printf '[eval] %s s%s exit %s after %s min\n' \
