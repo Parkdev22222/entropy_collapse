@@ -64,8 +64,10 @@ EVAL_SET=${EVAL_SET:-campaign}          # campaign | followups | all
 FOLLOWUP_ARMS=${FOLLOWUP_ARMS:-"lam0-tree grpo-long lam0.1 lam0.5 xclip-signed xclip-steer rloo-signed rloo-steer opo-signed opo-steer"}
 LONG_STEPS=${LONG_STEPS:-200}
 STEPS=${STEPS:-110}
-LOG_DIR="${ROOT}/logs/experiments"
-CKPT_ROOT="${ROOT}/checkpoints/STEER-F"
+# Overridable so the queue can be exercised against a fixture tree. Nothing in
+# normal use sets them; the defaults are the real paths.
+LOG_DIR=${LOG_DIR:-"${ROOT}/logs/experiments"}
+CKPT_ROOT=${CKPT_ROOT:-"${ROOT}/checkpoints/STEER-F"}
 STAGE="${ROOT}/checkpoints/_eval_stage"  # where Hub downloads land
 MIN_FREE_GB=${MIN_FREE_GB:-15}
 DRY=${DRY:-0}
@@ -129,6 +131,36 @@ printf '\n%s eval(s) queued\n' "${#QUEUE[@]}"
 [ "${DRY}" = "1" ] && { echo "(DRY=1, stopping here)"; exit 0; }
 
 # ---------------------------------------------------------------- guards
+# An evaluation starts its own vLLM engine and takes the whole box. The three
+# training queues have refused to start on a busy box since September; this one
+# never did, and it is the queue most likely to be run by hand while a campaign
+# is mid-flight -- the checkpoints only become interesting once runs finish, so
+# the temptation to evaluate the finished ones while the rest train is exactly
+# when this fires. Starting here would OOM the trainer and cost whatever it had
+# reached, which for a tree arm is up to sixteen hours.
+WAIT=${WAIT:-0}
+WAIT_POLL=${WAIT_POLL:-300}
+if [ "${WAIT}" = "1" ]; then
+    if is_busy; then
+        echo "[eval] waiting for the running job to finish (polling every ${WAIT_POLL}s)"
+        busy_pids | head -3 | while read -r h; do
+            printf '[eval]   holder: %s %s\n' "${h}" \
+                "$(tr '\0' ' ' < "/proc/${h}/cmdline" 2>/dev/null | cut -c1-80)"
+        done
+        while is_busy; do sleep "${WAIT_POLL}"; done
+        echo "[eval] $(date -Is)  the box is free, starting"
+        sleep 30    # let the GPUs actually release before vLLM grabs them
+    fi
+elif is_busy; then
+    echo "REFUSE: a training process is already running on this box." >&2
+    busy_pids | head -3 | while read -r h; do
+        printf '        holder: %s %s\n' "${h}" \
+            "$(tr '\0' ' ' < "/proc/${h}/cmdline" 2>/dev/null | cut -c1-80)" >&2
+    done
+    echo "        Evaluating now would take the GPUs out from under it." >&2
+    echo "        Re-run with WAIT=1 to queue behind it, or evaluate on another box." >&2
+    exit 2
+fi
 if ! bash run/instrument_phase2.sh --check >/dev/null 2>&1; then
     echo "WARNING: run/instrument_phase2.sh --check does not pass."
     echo "         The evals will run, but validation_data_dir will be ignored and"
