@@ -140,17 +140,34 @@ def emittable_names():
         names |= set(re.findall(r'"([A-Za-z]+)"', tup))
     names |= set(re.findall(r'"([A-Z][A-Za-z]*)":\s', src))
     names |= {"STDaime", "SEaime", "Dirconsistency", "Dirconsistencyperm"}
+    # Which prefixes the emitter puts in front of a contrast key and in front
+    # of an arm+metric, read off the f-strings instead of listed here. On
+    # 2026-09-27 the pre-registered straddle test needed the per-seed extremes
+    # of a contrast and `CLo`/`CHi`/`CNeg` were added; the list that used to sit
+    # here reported all six live macros as cells no run could fill. Third time
+    # this test has invented its own false positive, so this time it learns.
+    ckeys = set(re.findall(r'mac\(\s*f"([A-Za-z]+)\{key\}"', src)) or {"C", "T", "P"}
+    akeys = set(re.findall(r'mac\(\s*f"([A-Za-z]+)\{arm\}\{c\}"', src)) | {"R", "E"}
+    skeys = set(re.findall(r'mac\(\s*f"([A-Za-z]+)\{arm\}\{c\}", \(max', src)) \
+        | set(re.findall(r'mac\(\s*f"([A-Za-z]+)\{arm\}\{c\}", min', src)) \
+        | set(re.findall(r'mac\(\s*f"([A-Za-z]+)\{arm\}\{c\}", max', src)) \
+        | {"S", "Lo", "Hi"}
     for a in arms:
         names |= {f"N{a}", f"Nall{a}", f"R{a}len", f"R{a}cost"}
         for c in metrics:
-            names |= {f"R{a}{c}", f"E{a}{c}", f"S{a}{c}", f"Lo{a}{c}", f"Hi{a}{c}"}
+            names |= {f"{k}{a}{c}" for k in akeys | skeys}
     for stem in stems:
         names |= {f"R{stem}{c}" for c in ("acc", "maj", "uplift")}
     for a, b in pairs:
         for c in metrics:
-            names |= {f"C{a}{b}{c}", f"T{a}{b}{c}", f"P{a}{b}{c}",
-                      f"W{a}{b}{c}", f"WT{a}{b}{c}", f"WN{a}{b}{c}"}
+            names |= {f"{k}{a}{b}{c}" for k in ckeys}
+            names |= {f"W{a}{b}{c}", f"WT{a}{b}{c}", f"WN{a}{b}{c}"}
         names.add(f"N{a}{b}")
+    # analyze_seeds.py's mac() runs every name through str.translate to drop
+    # anything that is not a letter, because a LaTeX command name cannot hold
+    # one: the metric column `tw_mean` is emitted as Rsignedtwmean. Names built
+    # here have to go through the same reduction or they miss by an underscore.
+    names = {re.sub(r"[^A-Za-z]", "", n) for n in names}
     # The locality measurement has its own emitter; read its table rather
     # than listing the names here, for the same reason as above.
     loc = (ROOT / "scripts" / "emit_locality_numbers.py").read_text()

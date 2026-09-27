@@ -306,7 +306,14 @@ fi
 
 if have analysis; then
     stage "analysis"
-    guard analysis-seeds python3 scripts/analyze_seeds.py \
+    # --balanced: every arm averaged over the seeds ALL five share, so a
+    # difference of two rows of the means table IS the paired contrast for
+    # every contrast drawn on those seeds. Without it each arm uses its own
+    # seed set, the rows stop being subtractable, and the arms carry different
+    # A100/H100 mixes. The script's own default stays unbalanced -- the comment
+    # at its seeds_of() writes down what each mode costs -- and this is the
+    # paper's choice, made where the paper is built.
+    guard analysis-seeds python3 scripts/analyze_seeds.py --balanced \
         --logs "${LOG_DIR}" --out "${RES_DIR}" --steps "${STEPS}"
     guard analysis-bench python3 scripts/collect_results.py \
         --logs "${LOG_DIR}" --out "${RES_DIR}/benchmarks.tsv"

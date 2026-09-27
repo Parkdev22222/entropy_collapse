@@ -1145,10 +1145,14 @@ cannot move an average taken over every response token --- and it tests it as a
 contrast \emph{between groups of contrasts}, on up to \num{Nsteergrpo} seeds, with
 the two groups' $|t|$ not overlapping. That is the structural claim, and it is what
 this campaign establishes. The accuracy contrasts after it rest on
-\num{Nsignedgrpo} to \num{Nsignedsteer} seeds, and the headline gap is smaller than
-GRPO's own spread across its seeds (Section~\ref{sec:res:seeds}); for those we report
-a direction and decline to report an effect size. A reader who wants one result from
-this section should take the dissociation, not the gap.
+\num{Nsignedgrpo} paired seeds each, and they do not all survive: the gap against
+\textsc{steer} clears a conventional threshold, the gap against \textsc{permuted} is
+marginal, and the headline gap against GRPO is smaller than GRPO's own spread across
+its seeds (Section~\ref{sec:res:seeds}) and does not. One pre-registered
+falsification condition is met at this seed count, on the contrast that isolates
+$\AH$'s value; Section~\ref{sec:res:contrasts} states which and what it leaves
+standing. A reader who wants one result from this section should take the
+dissociation, not the gap.
 
 % NOTE: every row is recomputed from a committed training log by
 % scripts/analyze_seeds.py, which writes results/numbers.tex. The GRPO log was
@@ -1213,18 +1217,22 @@ GRPO             & \num{Ngrpo}     & \num{Rgrpoacc}     & \num{Egrpoacc}     & \
 \bottomrule
 \end{tabular}
 \caption{Means over the converged window (steps $40$--$110$, eight validation points
-per run), each arm averaged over the $n$ seeds \emph{it} has finished, with the
-standard error across those seeds. \textbf{The rows are not meant to be
-subtracted.} The arms do not share a seed set, so a difference of two rows here
-carries whatever the two seed sets differ by --- including the machine, since seeds
-$1,2$ ran on one box and $3,4$ on another (Section~\ref{sec:res:seeds}). The
-comparison is Table~\ref{tab:contrast}, which pairs each contrast on the seeds its
-own two arms share so that anything common to a seed cancels inside the pair; taken
-that way $\text{STEER-F} - \text{GRPO}$ is $\num{Csignedgrpoacc}$, not the
-difference of the two rows. The $\pm$ is a spread over very few draws and one of
-them is two seeds that happened to land together: read it with the run-to-run ranges
-in Section~\ref{sec:res:seeds}, not as a precision. Every seed, included and held
-out, is in the released \texttt{per\_seed.tsv}. \emph{uplift} is $\mathrm{maj@}32 - \mathrm{acc@}32$. Entropy is the token-mean quantity discussed in
+per run), every arm averaged over the same $n = \num{Nsigned}$ seeds --- the ones all
+five arms have finished --- with the standard error across them. Because the seed set
+is shared, a difference of two rows here \emph{is} the paired contrast of
+Table~\ref{tab:contrast} for every contrast drawn on those seeds:
+$\text{STEER-F} - \text{GRPO}$ reads $\num{Csignedgrpoacc}$ either way. The two
+exceptions are the contrasts whose arms both reach a seed this table drops, which
+pair on $\num{Nsteergrpo}$ seeds instead and therefore differ a little from the row
+difference; Table~\ref{tab:contrast} carries $n$ per row. Restricting to the shared
+seeds also equalizes the machine: each arm here is one two-GPU seed and two four-GPU
+seeds, so a row difference no longer carries a box mix
+(Section~\ref{sec:res:seeds}). The $\pm$ is a standard error over
+$\num{Nsigned}$ draws, not a precision --- STEER-F's three land within
+$\num{Ssignedacc}$ of one another, which is agreement worth noting and still three
+draws; read it against the run-to-run ranges in Section~\ref{sec:res:seeds}. Every
+seed, including the ones outside the shared set and the one held out for not
+finishing, is in the released \texttt{per\_seed.tsv}. \emph{uplift} is $\mathrm{maj@}32 - \mathrm{acc@}32$. Entropy is the token-mean quantity discussed in
 Section~\ref{sec:setup}, i.e.\ $\Htraj$ divided by mean length.}
 \label{tab:plateau}
 \end{table}
@@ -1336,13 +1344,21 @@ in Section~\ref{sec:appendix-prereg}, before those runs, and we state here that 
 is registered after this section's original condition was retired rather than
 before.
 
-\paragraph{What the numbers above cannot carry.} The $\AH$ contrasts rest on
-$\num{Nsigneduniform}$ and $\num{Nsignedpermuted}$ seeds. A $|t|$ near one on two
-seeds is absence of evidence, not evidence of absence: we are entitled to say the
-aggregate does not move detectably when $\AH$ changes, and not entitled to say it is
-unchanged. What carries weight is the contrast between the groups --- the apparatus
-rows reach $t = \num{Tsteergrpoentropy}$ and $\num{Tuniformsteerentropy}$ on the same
-or larger seed counts --- rather than any single row.
+\paragraph{What the numbers above cannot carry.} The claim is about magnitudes, not
+about one row failing a threshold. Changing the apparatus moves the aggregate by
+$\num{Cuniformsteerentropy}$ and $\num{Csteergrpoentropy}$; changing what $\AH$
+contains moves it by $\num{Csignedpermutedentropy}$ and
+$\num{Csigneduniformentropy}$, and the smaller of the two apparatus effects is still
+more than twice the larger of the two $\AH$ effects. The $|t|$ bands separate the
+same way and do not overlap --- $\num{Tsteergrpoentropy}$ and
+$\num{Tuniformsteerentropy}$ against $\num{Tsigneduniformentropy}$ and
+$\num{Tsignedpermutedentropy}$ --- which is why the argument is the contrast
+\emph{between groups} rather than any single row. Two cautions travel with it. A
+small difference that reproduces across seeds can still reach a large $t$: the
+$\AH$ contrast on \textsc{permuted} does, at $\num{Csignedpermutedentropy}$, and
+that is a statement about consistency, not about size. And $\num{Nsigneduniform}$
+seeds entitle us to say the aggregate does not move \emph{much} when $\AH$ changes,
+not that it is unchanged.
 
 \subsection{Does the forecast's value matter?}
 \label{sec:res:contrasts}
@@ -1394,13 +1410,51 @@ buys nothing. \textsc{permuted} keeps the machinery \emph{and} the magnitudes of
 $\AH$ and destroys only the pairing between a branch and its score, and STEER-F
 still exceeds it by $\num{Csignedpermutedacc}$.
 
-We state the signs, not significance. At the seed counts reached so far --- the
-headline contrast rests on $\num{Nsignedgrpo}$ --- no accuracy contrast in
-Table~\ref{tab:contrast} clears a conventional threshold, and the two rows with
-$n = 1$ carry no $t$ at all. What the table shows is that the sign is the same
-wherever $\AH$ carries information and absent where it does not;
-Section~\ref{sec:res:seeds} states what the completed campaign is powered to
-detect, and the pre-registration fixes the test before the remaining seeds land.
+Every contrast here now rests on $\num{Nsignedgrpo}$ paired seeds, and they do not
+all say the same thing. Against \textsc{steer} the gap is $\num{Csignedsteeracc}$ at
+$p = \num{Psignedsteeracc}$; against \textsc{permuted} it is
+$\num{Csignedpermutedacc}$ at $p = \num{Psignedpermutedacc}$. Against
+\textsc{uniform} and against GRPO it is $\num{Psigneduniformacc}$ and
+$\num{Psignedgrpoacc}$ --- the headline contrast is the weakest row in the table, for
+the reason Section~\ref{sec:res:seeds} gives: it is the one that changes three things
+at once, and GRPO's own spread across seeds is wider than the effect. The signs agree
+in the mean everywhere $\AH$ carries information, but the per-seed signs do not, and
+the next paragraph is about the one place they part.
+
+\paragraph{A pre-registered falsification condition is met.} The pre-registration
+(Appendix~\ref{sec:appendix-prereg}) named four things that would count against this
+paper, before any of these runs existed. One of them has happened, and it is the one
+that clause calls the claim of the paper: \emph{if
+$\text{STEER-F} - \textsc{uniform}$ straddles zero across seeds, the forecast's value
+does not matter and the apparatus explains the effect.} On accuracy it straddles.
+Across the $\num{Nsigneduniform}$ paired seeds the difference runs from
+$\num{CLosigneduniformacc}$ to $\num{CHisigneduniformacc}$, with
+$\num{CNegsigneduniformacc}$ of them negative. We report that as a refutation of the
+registered claim rather than as noise, and we do not rescue it with the mean or with
+the majority-vote column, where the same contrast happens not to straddle
+($\num{CNegsigneduniformmaj}$ of $\num{Nsigneduniform}$ negative) --- the registered
+primary endpoint is converged-window accuracy.
+
+The other three conditions did not trigger, and the contrast between the first and
+the second is the informative part. $\text{STEER-F} - \textsc{permuted}$, which
+holds the magnitudes of $\AH$ and destroys only the pairing, does \emph{not} straddle:
+$\num{CLosignedpermutedacc}$ to $\num{CHisignedpermutedacc}$,
+$\num{CNegsignedpermutedacc}$ negative. Aggregate entropy does not order the arms the
+way accuracy does --- STEER-F is third from the top on one column and first on the
+other in Table~\ref{tab:plateau} --- so the dissociation argument of
+Section~\ref{sec:res:entropy} stands. And the mean token weight stays at
+$\num{Rsignedtwmean}$, so $\AH$ is sum-zero over sibling sets as derived.
+
+Read together: the \emph{pairing} of $\AH$ to a branch survives its registered test
+and its \emph{value} does not. The two arms were built to separate exactly those two
+things, so this is the distinction the design can draw, not an evasion of the
+result. It leaves the paper with a tension we do not resolve here. The
+pre-registration calls the \textsc{uniform} contrast the central claim; the argument
+this paper now leads with is the dissociation of Section~\ref{sec:res:entropy}, which
+on these same $\num{Nsignedgrpo}$ seed pairs separates entropy from accuracy at
+$p = \num{Psignedgrpoentropy}$ against $p = \num{Psignedgrpoacc}$. Both are on the
+record; a reader who weights the pre-registration above the reframing should read the
+accuracy claim as refuted at this seed count.
 
 This is the contrast the design was built for. A comparison of STEER-F against
 \textsc{steer} alone changes two things at once, and cannot separate the forecast
@@ -1553,16 +1607,17 @@ relaunches it with the same seed, so that is what happens here, and the release
 reports the run with an \texttt{partial} flag rather than deleting it. It is
 counted in the spread below, for the reason given there.
 
-\paragraph{The arms did not all run on the same machine.} Seeds $1$ and $2$ ran on
-a two-GPU box and seeds $3$ and $4$ on a four-GPU box, uniformly across arms, so a
-seed index also names a machine. The arms are therefore mixed differently: STEER-F's
-seeds are two-thirds from the larger box, GRPO's, \textsc{uniform}'s and
-\textsc{permuted}'s one-third. \textsc{steer} is the one arm that has finished on
-both boxes twice, and its two-GPU seeds average $\num{Boxlo}$ against
+\paragraph{A seed index also names a machine.} Seeds $1$ and $2$ ran on a two-GPU box
+and seeds $3$ and $4$ on a four-GPU box, uniformly across arms. The effect is
+measurable: on $\num{Boxarm}$, which has finished $\num{Boxnlo}$ seeds on the smaller
+box and $\num{Boxnhi}$ on the larger, the two-GPU seeds average $\num{Boxlo}$ against
 $\num{Boxhi}$ on four --- a difference of $\num{Boxdelta}$, larger than the gap
-between the top two rows of Table~\ref{tab:plateau}. This does not touch the contrasts, which pair inside a seed
-and so inside a machine, and it is the reason we do not read those rows as a
-comparison. The release prints the per-arm machine mix on every run of the analysis.
+between the top two rows of Table~\ref{tab:plateau}. Two things keep it out of the
+comparisons. The contrasts pair inside a seed and therefore inside a machine, so it
+cancels in the pair. And Table~\ref{tab:plateau} restricts every arm to the seeds all
+five share, which is one two-GPU seed and two four-GPU seeds for each of them, so the
+rows carry the same mix rather than different ones. The release prints the per-arm
+machine mix on every run of the analysis.
 
 \paragraph{Run-to-run spread, and it is the number that governs this section.}
 Every arm has now finished more than once. GRPO's converged-window accuracy moves
@@ -1573,13 +1628,14 @@ moves only \num{Spermutedacc} across \num{Nallpermuted}. Both extremes are
 measured on the same benchmark with the same protocol, and they differ by more than
 an order of magnitude.
 
-Set the headline gap of \num{Csignedgrpoacc} against those. \textbf{It is smaller
-than GRPO's own spread and comparable to STEER-F's}, and the two arms it compares
-are each observed a handful of times. That is the regime in which a single paired
-difference cannot decide the question, and we do not claim it does. A range between
-two or three draws is also not a standard error: three such ranges differing by a
-factor of fifteen do not bound each other, so no contrast here should be read
-against a noise floor quoted to one significant figure. For scale at the other end,
+Set the headline gap of \num{Csignedgrpoacc} against those. \textbf{It is a fraction
+of GRPO's own spread across seeds and several times STEER-F's}, so the two arms it
+compares do not even agree on how large a seed-to-seed difference is, and each is
+observed a handful of times. That is the regime in which a single paired difference
+cannot decide the question, and we do not claim it does. A range between three draws
+is also not a standard error: the largest of these ranges is more than ten times the
+smallest, so they do not bound each other and no contrast here should be read against
+a noise floor quoted to one significant figure. For scale at the other end,
 two validations of the \emph{same} weights on these $30$ questions differ by about
 $.004$, so seed variation is the larger term by roughly an order of magnitude and
 any comparison quoted at single-run precision is quoting noise.
@@ -1935,6 +1991,23 @@ head-free \textsc{oracle} arm of Table~\ref{tab:followups} is the control that
 separates those two readings, and it is the measurement we would run next.
 
 \section*{Limitations}
+
+\paragraph{A pre-registered falsification condition is met.}
+Appendix~\ref{sec:appendix-prereg} fixed, before these runs, that if
+$\text{STEER-F} - \textsc{uniform}$ straddled zero across seeds then the forecast's
+\emph{value} does not matter and the apparatus explains the effect. On the registered
+primary endpoint it straddles: $\num{CLosigneduniformacc}$ to
+$\num{CHisigneduniformacc}$ over $\num{Nsigneduniform}$ paired seeds, with
+$\num{CNegsigneduniformacc}$ negative. That clause calls this the claim of the paper,
+and we do not renegotiate it here. What it does not reach is the companion condition:
+$\text{STEER-F} - \textsc{permuted}$, which destroys only the pairing of $\AH$ to a
+branch and keeps its magnitudes, does not straddle
+($\num{CNegsignedpermutedacc}$ of $\num{Nsignedpermuted}$ negative), nor do the two
+structural conditions on the entropy ordering and on the mean token weight. The
+honest summary is that the pairing survives its registered test and the value does
+not, at this seed count, on this benchmark. Section~\ref{sec:res:contrasts} states the
+tension that leaves between the pre-registration's choice of central claim and the one
+this paper leads with.
 
 \paragraph{The forecaster does not earn its cost.}
 The calibration in Eq.~\eqref{eq:a3} suppresses heads beyond the first, so

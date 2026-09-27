@@ -105,6 +105,13 @@ HELD_OUT = [b for b in MATH6 if b != "AIME24"]
 
 MAIN_ARMS = ["grpo", "steer", "uniform", "permuted", "signed"]
 
+# How an arm is spelled in the manuscript. Module level because two places now
+# need it -- the six-benchmark table and the Boxarm macro -- and a second copy
+# would be a second thing to keep in step.
+ARM_LABEL = {"grpo": "GRPO", "steer": "\\textsc{steer}",
+             "uniform": "\\textsc{uniform}", "permuted": "\\textsc{permuted}",
+             "signed": "\\textbf{STEER-F}"}
+
 # The follow-up ablations of Table 10, and the compute-matched control. They
 # are seed 1 only and are not part of the seed-level statistics, so they live
 # outside MAIN_ARMS -- but the manuscript has a slot for each, and until this
@@ -329,9 +336,7 @@ def benchmarks_table(tsv: Path) -> str | None:
         mean = ("{:.1f}".format(
             sum(sum(r[bn] for bn in MATH6) / len(MATH6) for r in full) / len(full))
             if full else "--")
-        label = {"grpo": "GRPO", "steer": "\\textsc{steer}",
-                 "uniform": "\\textsc{uniform}", "permuted": "\\textsc{permuted}",
-                 "signed": "\\textbf{STEER-F}"}.get(arm, arm)
+        label = ARM_LABEL.get(arm, arm)
         body.append("  %s & %s & %s \\\\" % (label, " & ".join(cells), mean))
     if not body:
         return None
@@ -430,16 +435,30 @@ def t_two_sided_p(t: float, df: int) -> float:
 
 
 def paired(diffs: list[float]) -> dict[str, float]:
+    """Paired statistics, plus the per-seed extremes and the sign count.
+
+    `lo`/`hi`/`neg` are here because the pre-registration's falsification
+    clause is about the SIGN PATTERN across seeds, not the mean: "if
+    STEER-F - uniform straddles zero across seeds ... that is the claim of
+    this paper and it would be refuted". A mean and a t cannot say whether a
+    contrast straddles zero -- +.0069 with t = 1.16 is what both "all three
+    seeds positive but noisy" and "two up, one down" look like -- so the
+    manuscript needs the extremes as macros rather than as a sentence
+    somebody typed after reading the TSV.
+    """
     n = len(diffs)
     mean = sum(diffs) / n
+    extremes = {"lo": min(diffs), "hi": max(diffs),
+                "neg": sum(1 for d in diffs if d < 0)}
     if n < 2:
         return {"n": n, "mean": mean, "sd": float("nan"),
-                "se": float("nan"), "t": float("nan"), "p": float("nan")}
+                "se": float("nan"), "t": float("nan"), "p": float("nan"),
+                **extremes}
     sd = statistics.stdev(diffs)
     se = sd / math.sqrt(n)
     t = mean / se if se > 0 else float("inf")
     return {"n": n, "mean": mean, "sd": sd, "se": se, "t": t,
-            "p": t_two_sided_p(t, n - 1)}
+            "p": t_two_sided_p(t, n - 1), **extremes}
 
 
 # ----------------------------------------------------------- compute match
@@ -933,6 +952,16 @@ def main(argv=None) -> int:
                 fh.write(mac("Boxlo", m_lo))
                 fh.write(mac("Boxhi", m_hi))
                 fh.write(mac("Boxdelta", m_hi - m_lo, "{:+.4f}"))
+                # WHICH arm, as a macro. The choice above is `the arm with the
+                # most seeds among those that ran on both boxes`, so it MOVES
+                # as the campaign fills: it was steer while grpo had three
+                # seeds, and became grpo (+.0087, not +.0068) the moment grpo
+                # reached four and the tie broke on MAIN_ARMS order. The
+                # manuscript named steer in prose and was silently wrong. A
+                # sentence that has to name the arm should read it from here.
+                fh.write(mac("Boxarm", ARM_LABEL.get(a, a), "{:s}"))
+                fh.write(mac("Boxnlo", len(box_lo), "{:d}"))
+                fh.write(mac("Boxnhi", len(box_hi), "{:d}"))
         fh.write(mac("Nseeds", len(per_seed.get("signed", {})), "{:d}"))
         fh.write(mac("Plateaulo", lo, "{:d}"))
         fh.write(mac("Plateauhi", hi, "{:d}"))
@@ -961,9 +990,14 @@ def main(argv=None) -> int:
                 fh.write(mac(f"S{arm}{c}", (max(v) - min(v)) if len(v) > 1 else None))
                 fh.write(mac(f"Lo{arm}{c}", min(v) if len(v) > 1 else None))
                 fh.write(mac(f"Hi{arm}{c}", max(v) if len(v) > 1 else None))
+            # tw_mean is here because the pre-registration puts a
+            # falsification condition on it -- "if the mean token weight in the
+            # STEER-F arm departs from ~0.999, A_H is not sum-zero over sibling
+            # sets as derived" -- and the manuscript was typing that 0.999 by
+            # hand on both sides of the test.
             for c in ("acc", "maj", "uplift", "entropy",
                       "brentropy", "nbrentropy", "brgap",
-                      "supentropy", "nsupentropy", "supgap"):
+                      "supentropy", "nsupentropy", "supgap", "tw_mean"):
                 v = [r[c] for r in rows if c in r]
                 fh.write(mac(f"R{arm}{c}", (sum(v) / len(v)) if v else None))
                 fh.write(mac(f"E{arm}{c}",
@@ -1045,6 +1079,15 @@ def main(argv=None) -> int:
             fh.write(mac(f"T{key}", st["t"], "{:+.2f}"))
             fh.write(mac(f"P{key}", st["p"], "{:.3f}"))
             fh.write(mac(f"N{a}{b}", st["n"], "{:d}"))
+            # The sign pattern, for the pre-registered straddle test. See
+            # paired(). Prefixed C like the mean/t/p of the same row, and NOT
+            # Lo/Hi: `Lo{arm}{metric}` is already taken, by one arm's
+            # run-to-run spread (Losignedacc). Two different quantities under
+            # one prefix is how a caption ends up quoting the wrong one.
+            fh.write(mac(f"CLo{key}", st.get("lo"), "{:+.4f}"))
+            fh.write(mac(f"CHi{key}", st.get("hi"), "{:+.4f}"))
+            fh.write(mac(f"CNeg{key}", st.get("neg"), "{:d}")
+                     if st.get("neg") is not None else mac(f"CNeg{key}", None))
 
     print(f"[analyze] wrote {out_dir}/per_seed.tsv, arm_means.tsv, contrasts.tsv, "
           f"compute_match.tsv, tables.tex, {macro_path.name}")
