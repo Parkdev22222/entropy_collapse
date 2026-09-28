@@ -341,3 +341,62 @@ def test_the_disproven_diagnosis_is_not_asserted_in_the_comments():
     assert "two dead passes and no benchmark" not in body
     # and the correction is recorded where the next reader will be
     assert "the diagnosis was wrong" in body
+
+
+# --- a crashed eval is not a finished one -----------------------------------
+
+def _eval_log(tmp_path: Path, arm: str, seed: int, body: str) -> None:
+    d = tmp_path / "logs"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"eval-{arm}-s{seed}.log").write_text(body)
+
+
+ENV_HEADER = "### env NCCL_NVLS_ENABLE=0\nCuda failure 401\n"
+AVG32_ONLY = "val-core/aime_2024_dapo_boxed/acc/mean@32:0.1650\n"
+BOTH = AVG32_ONLY + "val-core/math500/acc/mean@1:0.5000\n"
+
+
+def test_a_crashed_eval_is_queued_again(tmp_path):
+    """`[ -s <log> ]` meant a non-empty log counted as a finished eval.
+
+    Three evals died at NCCL init, each leaving a log, and the next invocation
+    said "0 eval(s) queued / Nothing to do." on a campaign with no results at
+    all. Recording the launch environment at the top of every log made it
+    strictly worse: an attempt now has a non-empty log before verl is called.
+    """
+    finished_seed1(tmp_path)
+    _eval_log(tmp_path, "signed", 1, ENV_HEADER)
+    p = queue(tmp_path, {"EVAL_RUNS": "signed:1", "GPU_WAIT": "0"})
+    assert p.returncode == 0, p.stderr
+    assert "1 eval(s) queued" in p.stdout, p.stdout
+    assert "no metrics at all" in p.stdout, p.stdout
+
+
+def test_an_eval_whose_second_pass_died_is_queued_again(tmp_path):
+    """Each eval is two verl passes; only the first leaving a metric is a fail.
+
+    This is the shape the failure actually takes -- avg32 completes, avg1 dies
+    -- and it is invisible to any test that only asks whether the log has
+    something in it.
+    """
+    finished_seed1(tmp_path)
+    _eval_log(tmp_path, "signed", 1, AVG32_ONLY)
+    p = queue(tmp_path, {"EVAL_RUNS": "signed:1", "GPU_WAIT": "0"})
+    assert "1 eval(s) queued" in p.stdout, p.stdout
+    assert "no avg1 metric" in p.stdout, p.stdout
+
+
+def test_a_finished_eval_is_still_skipped(tmp_path):
+    """Regression: both passes' metrics present means do not redo the work."""
+    finished_seed1(tmp_path)
+    _eval_log(tmp_path, "signed", 1, BOTH)
+    p = queue(tmp_path, {"EVAL_RUNS": "signed:1", "GPU_WAIT": "0"})
+    assert "already evaluated" in p.stdout, p.stdout
+    assert "0 eval(s) queued" in p.stdout
+
+
+def test_force_overrides_a_finished_eval(tmp_path):
+    finished_seed1(tmp_path)
+    _eval_log(tmp_path, "signed", 1, BOTH)
+    p = queue(tmp_path, {"EVAL_RUNS": "signed:1", "GPU_WAIT": "0", "FORCE": "1"})
+    assert "1 eval(s) queued" in p.stdout, p.stdout

@@ -84,7 +84,7 @@ REPO=${REPO:-}
 # every existing invocation keeps working unchanged.
 #   EVAL_REPOS="DSDSh/steer-f_2 DSDSh/sssss" bash run/run_eval_all.sh
 EVAL_REPOS=${EVAL_REPOS:-${REPO}}
-FORCE=${FORCE:-0}                        # 1 = re-evaluate runs that already have a log
+FORCE=${FORCE:-0}                        # 1 = re-evaluate even a finished run
 
 banner () { printf '\n========================================\n%s\n========================================\n' "$*"; }
 free_gb () { df -BG --output=avail "${ROOT}" 2>/dev/null | tail -1 | tr -dc '0-9'; }
@@ -158,6 +158,28 @@ probe_ckpt () {   # <arm> <seed> <run-name> -> one line on stdout
 }
 
 # ------------------------------------------------------------- the queue
+# Has this run actually been evaluated? The log existing is not the answer, and
+# `[ -s <log> ]` was: a crashed eval leaves a non-empty log, so the three
+# attempts that died at NCCL init on 2026-09-28 marked their runs done, and the
+# next invocation reported "0 eval(s) queued / Nothing to do." on a campaign
+# that had produced no results at all. Recording the launch environment at the
+# top of each log -- the thing that makes a failure attributable -- made it
+# strictly worse: every attempted run now has a non-empty log from its first
+# instant, before verl is even called.
+#
+# So the predicate is the one the rest of this file already uses: evidence, not
+# presence. train_log_done greps for the final step; hf_weights_present looks
+# for weights rather than the directory. An eval is two verl passes, so it needs
+# a key from each -- mean@32 is written by the avg32 pass and mean@1 by avg1 --
+# and requiring both is what distinguishes a finished eval from one whose first
+# pass worked and whose second died. They are the same two keys the summary
+# block below prints.
+eval_log_done () {   # <log> -> 0 when both passes left their metric behind
+    [ -s "$1" ] || return 1
+    grep -q 'val-core/[^ ]*/acc/mean@32:' "$1" || return 1
+    grep -q 'val-core/[^ ]*/acc/mean@1:'  "$1" || return 1
+}
+
 declare -a QUEUE=()
 add_run () {   # <arm> <seed>
     local rn
@@ -167,9 +189,19 @@ add_run () {   # <arm> <seed>
         printf '  skip  %-24s s%-2s %-52s (training log never reached step %s)\n' "$1" "$2" "${rn}" "${want}"
         return
     fi
-    if [ "${FORCE}" != "1" ] && [ -s "${LOG_DIR}/eval-$1-s$2.log" ]; then
+    local elog="${LOG_DIR}/eval-$1-s$2.log"
+    if [ "${FORCE}" != "1" ] && eval_log_done "${elog}"; then
         printf '  skip  %-24s s%-2s %-52s (already evaluated)\n' "$1" "$2" "${rn}"
         return
+    fi
+    # A log that exists without both metrics is a previous attempt that died.
+    # Say so rather than queueing silently: it is the only place the queue can
+    # tell you the last try produced nothing.
+    if [ -s "${elog}" ]; then
+        printf '  RETRY %-24s s%-2s %-52s (previous attempt left no %s)\n' \
+            "$1" "$2" "${rn}" \
+            "$(grep -q 'val-core/[^ ]*/acc/mean@32:' "${elog}" \
+                && echo 'avg1 metric' || echo 'metrics at all')"
     fi
     printf '  QUEUE %-24s s%-2s %-52s\n' "$1" "$2" "${rn}"
     QUEUE+=("$1|$2|${rn}")
