@@ -1579,7 +1579,8 @@ Table~\ref{tab:followups} is the direct test, and it has now been run.
 \textsc{oracle} reads $\Htogo$ from the policy's realised entropy, which verl
 computes in the same pass, so it carries none of the MTP overhead of
 Section~\ref{sec:res:cost} --- $\num{Roraclecost}$\,s per optimization step
-against STEER-F at the same seed, $\num{Fsignedoraclesaving}\%$ less. It is also
+against STEER-F's $\num{Fsignedoracleref}$ at the same seed on the four-GPU box,
+$\num{Fsignedoraclesaving}\%$ less. It is also
 behind it on accuracy. Section~\ref{sec:res:ablate} reports both numbers and what
 one seed of each can carry.
 
@@ -1862,8 +1863,12 @@ the head substitution and the affine calibration --- are the only things it remo
 and removing them is the whole of its cost difference.
 
 It is cheaper, and by the amount the forward pass costs: $\num{Roraclecost}$\,s per
-optimization step against STEER-F at the same seed, a saving of
-$\num{Fsignedoraclesaving}\%$. It is also behind on accuracy. Over the
+optimization step against STEER-F's $\num{Fsignedoracleref}$ at the same seed, a
+saving of $\num{Fsignedoraclesaving}\%$. Both are the window's training steps on the
+four-GPU box, where every arm is substantially faster than on the two-GPU seeds, so
+neither is comparable to a step time quoted for a different box.
+
+It is also behind on accuracy. Over the
 $\num{Fnsignedoracle}$ validation points of the converged window, STEER-F at seed
 $\num{Roracleseed}$ leads it by $\num{Fsignedoracleacc}$ on the endpoint this
 campaign reports and by $\num{Fsignedoraclemaj}$ under majority vote. We therefore

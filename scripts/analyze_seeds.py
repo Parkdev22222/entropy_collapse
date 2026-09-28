@@ -708,7 +708,29 @@ def main(argv=None) -> int:
         if not cands:
             continue
         done = [(s, f) for s, f in cands if reached(f, args.steps)]
-        seed, f = (done or cands)[0]
+        # The seed check the main loop makes, and for the same reason: a file
+        # name is a label, the dump is what the trainer recorded. It carries
+        # more weight here than it used to -- R{stem}seed is printed in Table
+        # 10's caption, so a misfiled log makes the caption assert a seed the
+        # run never had. A mislabelled candidate is excluded and reported, not
+        # substituted, and the search moves to the next seed in the rule's
+        # order rather than dropping the arm.
+        chosen = None
+        for s_, f_ in (done or cands):
+            ident = log_identity(f_)
+            got_seed = ident.get("seed")
+            if got_seed is not None and got_seed != s_:
+                mislabelled.append((arm, s_, f_.name, ident.get("experiment_name"),
+                                    got_seed, ident.get("n_gpus_per_node")))
+                continue
+            chosen = (s_, f_, ident)
+            break
+        if chosen is None:
+            continue
+        seed, f, ident = chosen
+        got_name = ident.get("experiment_name")
+        if got_name is not None and got_name != run_name(arm, seed):
+            renamed.append((f.name, run_name(arm, seed), got_name))
         steps = parse_log(f)
         agg = plateau(steps, lo, hi)
         if not agg:
@@ -717,7 +739,7 @@ def main(argv=None) -> int:
         followup_seed[stem] = seed
         followup_steps[stem] = {k: v for k, v in steps.items()
                                 if lo <= k <= hi and "acc" in v}
-        followup_topo[stem] = log_identity(f).get("n_gpus_per_node")
+        followup_topo[stem] = ident.get("n_gpus_per_node")
 
     # signed MINUS the follow-up arm, inside the seed the follow-up actually
     # ran at. Table 10 carries no error bars, so the honest comparison for a
@@ -755,6 +777,7 @@ def main(argv=None) -> int:
                     and followup_topo.get(stem) == topo.get(("signed",
                                                              followup_seed[stem])))
         if same_box and "s_per_step" in sagg and "s_per_step" in followups[stem]:
+            row["ref"] = sagg["s_per_step"]
             row["cost"] = sagg["s_per_step"] - followups[stem]["s_per_step"]
             row["saving"] = 100.0 * row["cost"] / sagg["s_per_step"]
         if len(row) > 1:
@@ -1143,6 +1166,10 @@ def main(argv=None) -> int:
             fh.write(mac(f"Fnsigned{stem}", int(st["n"]), "{:d}"))
             fh.write(mac(f"Fsigned{stem}cost", st.get("cost"), "{:+.0f}"))
             fh.write(mac(f"Fsigned{stem}saving", st.get("saving"), "{:.1f}"))
+            # The reference side of that saving. Without it the prose quotes one
+            # step time against Section 12.6's, which is the two-GPU box and a
+            # different number, and reads as a contradiction.
+            fh.write(mac(f"Fsigned{stem}ref", st.get("ref"), "{:.0f}"))
         fh.write(mac("Wseed", within_seed, "{:d}") if within_seed
                  else mac("Wseed", None))
         for key, st in sorted(within.items()):

@@ -49,8 +49,10 @@ def run(tmp_path, logs):
                        capture_output=True, text=True, cwd=str(ROOT))
     assert r.returncode == 0, r.stderr
     txt = mac.read_text()
-    return {m.group(1): m.group(2) for m in
-            re.finditer(r"\\providecommand\{\\([A-Za-z]+)\}\{([^}]*)\}", txt)}
+    out = {m.group(1): m.group(2) for m in
+           re.finditer(r"\\providecommand\{\\([A-Za-z]+)\}\{([^}]*)\}", txt)}
+    out["__stdout__"] = r.stdout
+    return out
 
 
 def test_a_followup_at_seed_four_is_found_and_says_so(tmp_path):
@@ -148,3 +150,34 @@ def test_a_step_time_across_two_boxes_is_not_reported(tmp_path):
     assert m["Fsignedoracleacc"] == "+.0500", m["Fsignedoracleacc"]
     assert m["Fsignedoraclesaving"] == "\\PENDING", m["Fsignedoraclesaving"]
     assert m["Fsignedoraclecost"] == "\\PENDING", m["Fsignedoraclecost"]
+
+
+def test_a_log_whose_dump_disagrees_with_its_name_is_excluded(tmp_path):
+    """R{stem}seed is printed in the caption, so the seed has to be the run's.
+
+    The main loop has checked the trainer's config dump against the file name
+    since a seed-2 run arrived as train-grpo-<tag>-s4.log. The follow-up loop
+    read the dump only for the GPU count, so a misfiled log would have had its
+    file name printed as the seed of the row.
+    """
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    f = logs / f"train-steer-f-{TAG}-s4-tree-rollout-oracle.log"
+    write_log(f, "0.150")
+    f.write_text("{'seed': 2, 'n_gpus_per_node': 4}\n" + f.read_text())
+    m = run(tmp_path, logs)
+    assert "Roracleseed" not in m or m["Roracleseed"] == "\\PENDING"
+    assert "EXCLUDED" in m["__stdout__"], m["__stdout__"]
+
+
+def test_the_search_moves_on_from_a_mislabelled_candidate(tmp_path):
+    """Excluded, not substituted -- and the arm is not lost either."""
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    bad = logs / f"train-steer-f-{TAG}-s1-tree-rollout-oracle.log"
+    write_log(bad, "0.100")
+    bad.write_text("{'seed': 2, 'n_gpus_per_node': 4}\n" + bad.read_text())
+    write_log(logs / f"train-steer-f-{TAG}-s4-tree-rollout-oracle.log", "0.500")
+    m = run(tmp_path, logs)
+    assert m["Roracleseed"] == "4", m["Roracleseed"]
+    assert m["Roracleacc"] == ".5000", m["Roracleacc"]
