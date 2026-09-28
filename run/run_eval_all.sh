@@ -599,6 +599,16 @@ print("\n  no two eval logs share a checkpoint")
 PY
 collision=$?
 
+# Each log against itself: every benchmark's accuracy must equal what its own
+# reward line implies. This is the check that found three eval logs on
+# origin/paper whose MATH500, Minerva and GSM8K had been lowered after the run
+# (2026-09-28), and it belongs where the logs are made rather than in a chat
+# message someone has to remember to paste.
+echo
+python3 scripts/check_eval_logs.py "${LOG_DIR}"/eval-*.log
+incoherent=$?
+[ "${incoherent}" -eq 0 ] || echo "  a log above disagrees with itself -- do not collect or publish it"
+
 echo
 echo "Next:  python3 scripts/collect_results.py --logs ${LOG_DIR} --out results/summary.tsv"
 echo "       python3 scripts/analyze_seeds.py --git-ref origin/paper --eval-table results/summary.tsv"
@@ -608,4 +618,4 @@ if [ "${#FAILED[@]}" -gt 0 ]; then
     echo "${#FAILED[@]} run(s) did not produce a clean eval:"
     printf '  %s\n' "${FAILED[@]}"
 fi
-exit $(( collision != 0 ? 1 : (${#FAILED[@]} > 0 ? 1 : 0) ))
+exit $(( collision != 0 || incoherent != 0 ? 1 : (${#FAILED[@]} > 0 ? 1 : 0) ))

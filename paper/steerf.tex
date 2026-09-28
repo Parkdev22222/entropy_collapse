@@ -1682,6 +1682,9 @@ carry no such bias and only more variance.
 \centering
 \scriptsize
 \setlength{\tabcolsep}{2.6pt}
+% Capped at the column width, never enlarged: the rows are generated, and the
+% first real ones came out 24pt wider than the column the stub fitted in.
+\resizebox{\ifdim\width>\linewidth\linewidth\else\width\fi}{!}{%
 \IfFileExists{../results/benchmarks_table.tex}{\input{../results/benchmarks_table.tex}}{%
   \IfFileExists{results/benchmarks_table.tex}{\input{results/benchmarks_table.tex}}{%
   \begin{tabular}{@{}lccccccc@{}}
@@ -1690,7 +1693,7 @@ carry no such bias and only more variance.
   \midrule
   \multicolumn{8}{c}{\PENDING} \\
   \bottomrule
-  \end{tabular}}}
+  \end{tabular}}}}
 \caption{Six-benchmark evaluation of each arm's selected checkpoint, averaged over
 that arm's own seeds. The rightmost column is the unweighted mean over the six.
 $\dagger$: AIME24 is the set each checkpoint was selected on
