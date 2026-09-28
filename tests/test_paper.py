@@ -174,6 +174,15 @@ def emittable_names():
         for pre, suf in fname:
             names |= ({f"{pre}{stem}{c}" for c in ("acc", "maj", "uplift")}
                       if suf == "{c}" else {f"{pre}{stem}{suf}"})
+    # Section 12.6's per-box step times. The box tag is lo/hi (mac() strips
+    # non-letters, so a GPU count in the name would collide), and the arm may
+    # come before it or be absent. Read off the f-strings, as above.
+    kpre = set(re.findall(r'mac\(\s*f"([A-Za-z]+)\{arm\}\{tag\}"', src))
+    kbare = set(re.findall(r'mac\(\s*f"([A-Za-z]+)\{tag\}"', src))
+    assert kpre and kbare, f"the per-box cost names were not found; {kpre} {kbare}"
+    for tag in ("lo", "hi"):
+        names |= {f"{k}{tag}" for k in kbare}
+        names |= {f"{k}{a}{tag}" for k in kpre for a in arms}
     for a, b in pairs:
         for c in metrics:
             names |= {f"{k}{a}{b}{c}" for k in ckeys}

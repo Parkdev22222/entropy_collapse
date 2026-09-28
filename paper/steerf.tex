@@ -1891,8 +1891,12 @@ one estimator.
 \subsection{Compute-matched comparison}
 \label{sec:res:compute}
 
-STEER-F costs more per step than GRPO, almost entirely in the MTP forward pass, so an
-equal-step comparison hands it more wall clock. The honest comparison holds compute
+Whether STEER-F costs more per step than GRPO depends on the box. On the
+$\num{Costgpuslo}$-GPU box it takes $\num{Costsignedlo}$\,s against GRPO's
+$\num{Costgrpolo}$; on the $\num{Costgpushi}$-GPU box the two are the other way round
+and within the seed spread of either ($\num{Costsignedhi}$ against
+$\num{Costgrpohi}$, Section~\ref{sec:res:cost}). Where it does cost more, an
+equal-step comparison hands it more wall clock, and the honest comparison holds compute
 fixed instead. We run GRPO to \num{Longsteps} steps, integrate its measured per-step
 time, and read its accuracy at the last step whose cumulative time fits inside what
 STEER-F spent reaching step $110$ --- rather than assuming a cost ratio.
@@ -1983,12 +1987,35 @@ result as a limit on generality rather than as noise to be averaged away.
 \subsection{Cost}
 \label{sec:res:cost}
 
-Within the runs executed on identical hardware, \textsc{steer} takes $833$\,s per
-optimization step and STEER-F takes $1516$\,s, an overhead of $82\%$. The
-\textsc{uniform} and \textsc{permuted} arms cost $1480$ and $1492$\,s, confirming
-that the cost is the tree rollout plus the MTP forward pass and not the $\AH$
-computation, which is a subtraction over a mask. We do not report a GRPO timing
-because that arm ran on a different machine.
+Step times are read inside a box. A seed index also names a machine
+(Section~\ref{sec:res:seeds}), and the two boxes are further apart than any two arms
+are, so a mean over both measures the campaign's scheduling.
+
+On the $\num{Costgpushi}$-GPU box, where every arm has finished
+$\num{Costnsignedhi}$ seeds, one optimization step takes $\num{Coststeerhi}$\,s for
+\textsc{steer}, $\num{Costsignedhi}$ for STEER-F, $\num{Costuniformhi}$ for
+\textsc{uniform}, $\num{Costpermutedhi}$ for \textsc{permuted} and
+$\num{Costgrpohi}$ for GRPO. STEER-F's overhead over \textsc{steer} there is
+$\num{Costoverheadhi}\%$. The three tree arms sit within
+$\num{Costrpermutedhi}$\,s of one another while \textsc{steer}, which has neither
+the tree nor the heads, sits below all three: the cost is the rollout and the forward
+pass, not the $\AH$ computation, which is a subtraction over a mask.
+
+On the $\num{Costgpuslo}$-GPU box the same overhead reads
+$\num{Costoverheadlo}\%$. That is not a disagreement to average away. The tree
+rollout and the MTP forward are a larger share of a step when fewer GPUs serve it, so
+the overhead is a property of the deployment as much as of the method, and a single
+figure quoted without its box --- as earlier drafts of this section quoted the smaller
+one --- reports the machine.
+
+Neither box resolves the overhead to better than its own seed-to-seed spread. On the
+larger box \textsc{steer}'s $\num{Costnsteerhi}$ seeds differ by
+$\num{Costrsteerhi}$\,s and STEER-F's by $\num{Costrsignedhi}$, against a gap
+between their means of the same order; on the smaller, \textsc{steer} alone spans
+$\num{Costrsteerlo}$\,s and STEER-F has $\num{Costnsignedlo}$ seed. We therefore
+report these as the cost of the runs we made and not as a coefficient of the method.
+What does isolate the heads from the tree is the \textsc{oracle} arm of
+Section~\ref{sec:res:ablate}, which removes the heads at fixed tree and fixed seed.
 
 \subsection{A note on how these numbers were selected}
 \label{sec:res:selection}

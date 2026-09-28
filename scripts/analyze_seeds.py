@@ -1052,6 +1052,43 @@ def main(argv=None) -> int:
                 fh.write(mac("Boxarm", ARM_LABEL.get(a, a), "{:s}"))
                 fh.write(mac("Boxnlo", len(box_lo), "{:d}"))
                 fh.write(mac("Boxnhi", len(box_hi), "{:d}"))
+        # Section 12.6's step times, PER BOX. They were typed into the prose as
+        # four numbers and an overhead percentage, and none of the four matched
+        # any run: the section claimed steer at 833 s and STEER-F at 1516 for
+        # +82%, while the logs read 785 and 1459 at seed 1. Worse than stale --
+        # the overhead is not one number. The tree rollout and the MTP forward
+        # are a larger share of a step when fewer GPUs serve it, so the same
+        # contrast reads +63% on the two-GPU box and +10% on the four-GPU one,
+        # and quoting either alone reports the machine as the method. Both are
+        # emitted, with the seed count and the within-arm range beside each, so
+        # the prose cannot quote a mean it has no n for.
+        #
+        # lo/hi are the box tags of Boxlo/Boxhi, not GPU counts: mac() strips
+        # non-letters from a macro name, so Costsigned4 and Costsigned2 would
+        # collide as Costsigned.
+        for tag, gpus in (("lo", 2), ("hi", 4)):
+            fh.write(mac(f"Costgpus{tag}", gpus, "{:d}"))
+            per_box: dict[str, list[float]] = {}
+            for arm in MAIN_ARMS:
+                v = [per_seed[arm][s_]["s_per_step"]
+                     for (arm_, s_), g in sorted(topo.items())
+                     if arm_ == arm and g == gpus
+                     and "s_per_step" in per_seed.get(arm, {}).get(s_, {})]
+                if v:
+                    per_box[arm] = v
+                fh.write(mac(f"Cost{arm}{tag}",
+                             (sum(v) / len(v)) if v else None, "{:.0f}"))
+                fh.write(mac(f"Costn{arm}{tag}", len(v), "{:d}"))
+                fh.write(mac(f"Costr{arm}{tag}",
+                             (max(v) - min(v)) if len(v) > 1 else None, "{:.0f}"))
+            # The overhead the section reports: the treatment against the base
+            # method, inside the box, never across it.
+            st, sg = per_box.get("steer"), per_box.get("signed")
+            over = None
+            if st and sg:
+                m_st = sum(st) / len(st)
+                over = 100.0 * (sum(sg) / len(sg) - m_st) / m_st
+            fh.write(mac(f"Costoverhead{tag}", over, "{:+.0f}"))
         fh.write(mac("Nseeds", len(per_seed.get("signed", {})), "{:d}"))
         fh.write(mac("Plateaulo", lo, "{:d}"))
         fh.write(mac("Plateauhi", hi, "{:d}"))
