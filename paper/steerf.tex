@@ -1455,6 +1455,18 @@ $p = \num{Psignedgrpoentropy}$ against $p = \num{Psignedgrpoacc}$. Both are on t
 record; a reader who weights the pre-registration above the reframing should read the
 accuracy claim as refuted at this seed count.
 
+\paragraph{The same contrast on questions the checkpoints were not chosen on.} The
+registered secondary check of this reading is the six-benchmark evaluation of
+Section~\ref{sec:res:bench}. On the seeds evaluated so far (\num{Dirnseeds}) it counts
+STEER-F above \textsc{uniform} on \num{Dirconsistency} of six benchmarks, which the
+pre-registered thresholds call \emph{\num{Dirverdict}}, and on
+\num{Dirconsistencyheld} of the \num{Dirheldtotal} that played no part in selection;
+paired over $\num{Pairn}$ problems, the difference is
+$\num{Pairsigneduniform} \pm \num{Pairsigneduniformse}$
+($t = \num{Pairsigneduniformt}$). It does not change the condition above, which is
+defined on converged-window accuracy across the training seeds. It is the registered
+check on other questions, reported because it was registered and not as a rescue.
+
 This is the contrast the design was built for. A comparison of STEER-F against
 \textsc{steer} alone changes two things at once, and cannot separate the forecast
 from the sampler that delivers it; the two destroyed-forecast arms do separate them.
@@ -1668,6 +1680,15 @@ run's selected checkpoint is re-evaluated on six mathematics benchmarks
 and AMC23 at $\mathrm{avg@}32$, MATH500, Minerva and OlympiadBench at
 $\mathrm{avg@}1$.
 
+An evaluation enters the table only if its log agrees with itself. The trainer prints
+each benchmark twice on the same line, as accuracy and as the mean of a reward that is
+$+1$ for a correct sample and $-1$ otherwise, so on every benchmark the accuracy must
+equal half of one plus the reward; the release checks this for every evaluation log
+(\texttt{scripts/check\_eval\_logs.py}). It is a test of coherence, not of provenance
+--- an edit that moved both numbers together would pass it. The arms without a row,
+\num{Benchmissing}, have no evaluation that passes it yet. Each row averages the
+checkpoints evaluated at the seeds in its last column.
+
 One of the six is not held out. The checkpoint behind each row is the argmax of that
 run's AIME24 validation accuracy (Section~\ref{sec:valset}), so AIME24 is the set the
 selection was made on and its column is in-sample: the pre-registration
@@ -1695,11 +1716,12 @@ carry no such bias and only more variance.
   \bottomrule
   \end{tabular}}}}
 \caption{Six-benchmark evaluation of each arm's selected checkpoint, averaged over
-that arm's own seeds. The rightmost column is the unweighted mean over the six.
+the seeds in the last column. The mean column is the unweighted mean over the six.
 $\dagger$: AIME24 is the set each checkpoint was selected on
 (Section~\ref{sec:valset}), so that column is in-sample; the other five are held out.
-As in Table~\ref{tab:plateau}, these rows average different seed sets and are not
-meant to be subtracted --- the contrasts below are counted within a seed.}
+Rows at different seeds are not meant to be subtracted --- a seed index also names a
+training run and the machine it ran on --- and the contrasts below are counted within
+a seed.}
 \label{tab:bench}
 \end{table}
 
@@ -1707,9 +1729,11 @@ The quantity fixed in advance as the headline here is not any single cell but
 \emph{direction consistency}: in how many of the six benchmarks the ordering observed
 on AIME24 is preserved. Four or better of six we declared support, three equivocal,
 two or fewer evidence against. The observed count is \num{Dirconsistency} of six for
-$\text{STEER-F} > \textsc{uniform}$ across the \num{Dirnseeds} seeds those two arms
-share, and \num{Dirconsistencyperm} of six for $\text{STEER-F} > \textsc{permuted}$
-across \num{Dirpermnseeds}. Counting the benchmarks on the \num{Dirheldtotal} that
+$\text{STEER-F} > \textsc{uniform}$, which those thresholds call
+\emph{\num{Dirverdict}}, over the seeds the two arms share (\num{Dirnseeds}); for
+$\text{STEER-F} > \textsc{permuted}$ it is \num{Dirconsistencyperm} of six,
+\emph{\num{Dirpermverdict}}, over \num{Dirpermnseeds}. A count needs the two arms
+evaluated at a common seed, and an empty slot here means they have not been yet. Counting the benchmarks on the \num{Dirheldtotal} that
 played no part in selection gives \num{Dirconsistencyheld} and
 \num{Dirconsistencypermheld}: the registered six-count is the decision rule, and the
 held-out count is printed beside it so a reader can see how much of it survives
@@ -1732,12 +1756,13 @@ so per-problem difficulty cancels between them and what matters is the standard 
 of the \emph{paired} difference. This evaluation records one row per generated
 sample, so on the three $\mathrm{avg@}1$ benchmarks with enough problems to support
 it --- MATH500, OlympiadBench and Minerva, $\num{Pairn}$ problems together, over the
-$\num{Pairnseeds}$ seeds the arms share --- the paired quantity is computed rather
+seeds the arms share ($\num{Pairnseeds}$) --- the paired quantity is computed rather
 than asserted. $\text{STEER-F} - \textsc{uniform}$ is $\num{Pairsigneduniform} \pm
 \num{Pairsigneduniformse}$ ($t = \num{Pairsigneduniformt}$) against an unpaired error
 of $\num{Pairsigneduniformunpse}$, and $\text{STEER-F} - \textsc{permuted}$ is
 $\num{Pairsignedpermuted} \pm \num{Pairsignedpermutedse}$
-($t = \num{Pairsignedpermutedt}$) against $\num{Pairsignedpermutedunpse}$. How much
+($t = \num{Pairsignedpermutedt}$) against $\num{Pairsignedpermutedunpse}$; the
+\textsc{permuted} figures need the same common seed as its count above. How much
 pairing buys is decided by how often the two arms disagree on a problem, which is
 $\num{Pairsigneduniformdisc}$ and $\num{Pairsignedpermuteddisc}$ here; the
 measurement is what we report, not the reduction we wanted. Two cautions travel with
@@ -2161,7 +2186,10 @@ it, on the three benchmarks large enough to support one; those figures are in
 Section~\ref{sec:res:bench}. What remains missing is the same statistic for AIME24
 itself, which is where every trajectory-level number in this paper is measured, and
 which is also the set the checkpoints were selected on. The gap this paragraph names
-is narrowed, not closed.
+is narrowed, not closed. The figure that narrows it rests on the seeds evaluated so
+far ($\num{Pairnseeds}$) and on one sample per problem at the validation temperature,
+so it carries the sampling noise of a single generation as well as the spread in
+difficulty; and \num{Benchmissing} have no evaluation in it yet.
 
 \paragraph{One prediction of the analysis is unmeasured.}
 Section~\ref{sec:blind} argues that the two channels are anti-correlated. The

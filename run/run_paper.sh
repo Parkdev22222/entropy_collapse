@@ -326,10 +326,30 @@ if have analysis; then
     # also the whole risk: a seed that finishes and is not in this list is held
     # out of every statistic, reported once on stdout and in per_seed.tsv with
     # excluded=1, and otherwise silent.
+    #
+    # The evaluation table comes FIRST, because analyze_seeds.py reads it: the
+    # direction counts, their verdict words and the six-benchmark tabular are
+    # all computed from it. This used to run the other way round and write to
+    # benchmarks.tsv, while analyze_seeds.py read summary.tsv -- so a rebuild
+    # took those numbers from whatever summary.tsv was lying around, or left
+    # them PENDING, and nothing said which.
+    #
+    # And only from logs that agree with themselves. On 2026-09-28 three eval
+    # logs had accuracies changed after the run; collect_results.py reads
+    # whatever a log says. When the check fails the table on disk is left as it
+    # was -- the committed one was built from checked logs -- and the stage is
+    # marked failed rather than regenerated from the bad ones.
+    if compgen -G "${LOG_DIR}/eval-*.log" > /dev/null; then
+        if guard analysis-evalcheck python3 scripts/check_eval_logs.py "${LOG_DIR}"/eval-*.log; then
+            guard analysis-bench python3 scripts/collect_results.py \
+                --logs "${LOG_DIR}" --out "${RES_DIR}/summary.tsv"
+        else
+            note "eval logs disagree with themselves; ${RES_DIR}/summary.tsv left as it was"
+        fi
+    fi
     guard analysis-seeds python3 scripts/analyze_seeds.py --balanced --seeds 1,3,4 \
-        --logs "${LOG_DIR}" --out "${RES_DIR}" --steps "${STEPS}"
-    guard analysis-bench python3 scripts/collect_results.py \
-        --logs "${LOG_DIR}" --out "${RES_DIR}/benchmarks.tsv"
+        --logs "${LOG_DIR}" --out "${RES_DIR}" --steps "${STEPS}" \
+        --eval-table "${RES_DIR}/summary.tsv"
     # The locality JSON is written by the measure stage. Without this the
     # macros are never produced and the diagnostic stays red in the paper
     # however many times the measurement runs -- the failure mode of task 29.
@@ -357,7 +377,7 @@ if [ "${DRY}" = "1" ]; then
     exit 0
 fi
 echo "Tables:"
-for f in per_seed arm_means contrasts compute_match benchmarks; do
+for f in per_seed arm_means contrasts compute_match summary; do
     p="${RES_DIR}/${f}.tsv"
     [ -f "${p}" ] && printf '  %-28s %s rows\n' "${p##*/}" "$(( $(wc -l < "${p}") - 1 ))"
 done
