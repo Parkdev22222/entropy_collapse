@@ -1142,7 +1142,7 @@ result, and the order is the order of how much each one bears.
 Section~\ref{sec:res:entropy} comes first. It tests a prediction the construction
 makes before any run --- that a correction this sparse and this mean-preserving
 cannot move an average taken over every response token --- and it tests it as a
-contrast \emph{between groups of contrasts}, on up to \num{Nsteergrpo} seeds, with
+contrast \emph{between groups of contrasts}, on \num{Nseedsused} seeds, with
 the two groups' $|t|$ not overlapping. That is the structural claim, and it is what
 this campaign establishes. The accuracy contrasts after it rest on
 \num{Nsignedgrpo} paired seeds each, and they do not all survive: the gap against
@@ -1217,15 +1217,14 @@ GRPO             & \num{Ngrpo}     & \num{Rgrpoacc}     & \num{Egrpoacc}     & \
 \bottomrule
 \end{tabular}
 \caption{Means over the converged window (steps $40$--$110$, eight validation points
-per run), every arm averaged over the same $n = \num{Nsigned}$ seeds --- the ones all
-five arms have finished --- with the standard error across them. Because the seed set
-is shared, a difference of two rows here \emph{is} the paired contrast of
-Table~\ref{tab:contrast} for every contrast drawn on those seeds:
-$\text{STEER-F} - \text{GRPO}$ reads $\num{Csignedgrpoacc}$ either way. The two
-exceptions are the contrasts whose arms both reach a seed this table drops, which
-pair on $\num{Nsteergrpo}$ seeds instead and therefore differ a little from the row
-difference; Table~\ref{tab:contrast} carries $n$ per row. Restricting to the shared
-seeds also equalizes the machine: each arm here is one two-GPU seed and two four-GPU
+per run), every arm averaged over the same $\num{Nseedsused}$ seeds --- $\num{Seedset}$, the
+ones all five arms have finished --- with the standard error across them. Every
+number in this paper is over that set and no other. Because it is shared, a
+difference of two rows here \emph{is} the paired contrast of
+Table~\ref{tab:contrast}, for all six: $\text{STEER-F} - \text{GRPO}$ reads
+$\num{Csignedgrpoacc}$ either way, and the one row where the two disagree in print
+does so by a single unit in the last place, because each mean is rounded before
+the subtraction. Using one seed set also equalizes the machine: each arm here is one two-GPU seed and two four-GPU
 seeds, so a row difference no longer carries a box mix
 (Section~\ref{sec:res:seeds}). The $\pm$ is a standard error over
 $\num{Nsigned}$ draws, not a precision --- STEER-F's three land within
@@ -1298,7 +1297,7 @@ that change the apparatus move the aggregate: turning the damping on costs
 $\num{Csteergrpoentropy}$ at $t = \num{Tsteergrpoentropy}$, and adding the tree with
 damping applied uniformly returns $\num{Cuniformsteerentropy}$ at
 $t = \num{Tuniformsteerentropy}$ --- the latter reproducing across all
-$\num{Nuniformsteer}$ seeds to within a thousandth. The contrasts that hold the
+$\num{Nseedsused}$ seeds to within a thousandth. The contrasts that hold the
 apparatus fixed and change only what $\AH$ contains move it by
 $\num{Csigneduniformentropy}$ ($t = \num{Tsigneduniformentropy}$) when its value is
 discarded and $\num{Csignedpermutedentropy}$ when its pairing is destroyed. Accuracy
@@ -1370,8 +1369,8 @@ single-seed draft reported, is in Appendix~\ref{sec:appendix-within}; it answers
 question about one trajectory rather than about re-running.
 
 These contrasts carry less than the dissociation above, and we read them for
-direction rather than magnitude. They pair on \num{Nsignedgrpo} to
-\num{Nsignedsteer} shared seeds against that section's \num{Nsteergrpo}, and the
+direction rather than magnitude. They pair on the same \num{Nseedsused} seeds as
+that section, and the
 quantity they measure --- an accuracy gap --- is the one the seeds in hand do not
 separate from run-to-run spread (Section~\ref{sec:res:seeds}).
 
@@ -1405,7 +1404,7 @@ changes the \emph{value} of $\AH$ is positive; the one that leaves it alone is n
 distinguishable from zero. \textsc{uniform} runs the entire apparatus --- tree
 sampler, forecaster, support, weight map --- and differs from \textsc{steer} by
 $\num{Cuniformsteeracc}$ ($t = \num{Tuniformsteeracc}$ over
-$\num{Nuniformsteer}$ seeds): turning the machinery on and feeding it a constant
+$\num{Nseedsused}$ seeds): turning the machinery on and feeding it a constant
 buys nothing. \textsc{permuted} keeps the machinery \emph{and} the magnitudes of
 $\AH$ and destroys only the pairing between a branch and its score, and STEER-F
 still exceeds it by $\num{Csignedpermutedacc}$.
@@ -1611,17 +1610,27 @@ relaunches it with the same seed, so that is what happens here, and the release
 reports the run with an \texttt{partial} flag rather than deleting it. It is
 counted in the spread below, for the reason given there.
 
-\paragraph{A seed index also names a machine.} Seeds $1$ and $2$ ran on a two-GPU box
-and seeds $3$ and $4$ on a four-GPU box, uniformly across arms. The effect is
-measurable: on $\num{Boxarm}$, which has finished $\num{Boxnlo}$ seeds on the smaller
-box and $\num{Boxnhi}$ on the larger, the two-GPU seeds average $\num{Boxlo}$ against
-$\num{Boxhi}$ on four --- a difference of $\num{Boxdelta}$, larger than the gap
-between the top two rows of Table~\ref{tab:plateau}. Two things keep it out of the
-comparisons. The contrasts pair inside a seed and therefore inside a machine, so it
-cancels in the pair. And Table~\ref{tab:plateau} restricts every arm to the seeds all
-five share, which is one two-GPU seed and two four-GPU seeds for each of them, so the
-rows carry the same mix rather than different ones. The release prints the per-arm
-machine mix on every run of the analysis.
+\paragraph{A seed index also names a machine.} A seed of this campaign ran on a
+two-GPU box or a four-GPU one, uniformly across arms, and the seed set this paper
+uses --- $\num{Seedset}$ --- holds $\num{Boxnlo}$ of the first and $\num{Boxnhi}$ of
+the second for every arm. The effect is measurable on $\num{Boxarm}$, which has both:
+$\num{Boxlo}$ on the smaller box against $\num{Boxhi}$ on the larger, a difference of
+$\num{Boxdelta}$, larger than the gap between the top two rows of
+Table~\ref{tab:plateau}.
+
+Read that difference as an upper bound and not as an estimate. With
+$\num{Boxnlo}$ run on the smaller box it is one run against $\num{Boxnhi}$, and a
+single run carries this arm's own run-to-run spread (Section~\ref{sec:res:seeds}
+below) inside it. We report it at that strength because the alternative was to keep a
+seed outside $\num{Seedset}$ alive for this one number while every other number in
+the paper excluded it, and a nuisance estimate is not worth a second seed set.
+
+What the figure does not reach is the comparisons, for two reasons that do not depend
+on how well it is estimated. The contrasts pair inside a seed and therefore inside a
+machine, so whatever a box is worth cancels in the pair. And every arm in
+Table~\ref{tab:plateau} carries the same $\num{Boxnlo}$-to-$\num{Boxnhi}$ mix, so a
+row difference does not carry a box mix either. The release prints the per-arm machine
+mix on every run of the analysis.
 
 \paragraph{Run-to-run spread, and it is the number that governs this section.}
 Every arm has now finished more than once. GRPO's converged-window accuracy moves
@@ -1804,7 +1813,7 @@ be reported as one.
 
 \paragraph{The damping strength, and what it does and does not reach.} We
 measure \textsc{steer} below GRPO by $\num{Csteergrpoacc}$ over
-$\num{Nsteergrpo}$ seeds, which the base method's own results contradict. The
+$\num{Nseedsused}$ seeds, which the base method's own results contradict. The
 explanation is not a difference in the code --- we read the released weighting
 function against ours and it agrees line for line, as do every other value in the
 two launchers --- but in $\lambda_{\min}$, which we set to $0.7$ by selecting it
@@ -2017,11 +2026,11 @@ the overhead is a property of the deployment as much as of the method, and a sin
 figure quoted without its box --- as earlier drafts of this section quoted the smaller
 one --- reports the machine.
 
-Neither box resolves the overhead to better than its own seed-to-seed spread. On the
-larger box \textsc{steer}'s $\num{Costnsteerhi}$ seeds differ by
-$\num{Costrsteerhi}$\,s and STEER-F's by $\num{Costrsignedhi}$, against a gap
-between their means of the same order; on the smaller, \textsc{steer} alone spans
-$\num{Costrsteerlo}$\,s and STEER-F has $\num{Costnsignedlo}$ seed. We therefore
+Neither figure is resolved to better than the spread underneath it. On the larger box
+\textsc{steer}'s $\num{Costnsteerhi}$ seeds differ by $\num{Costrsteerhi}$\,s and
+STEER-F's by $\num{Costrsignedhi}$, against a gap between their means of the same
+order. On the smaller box every arm has $\num{Costnsteerlo}$ seed inside
+$\num{Seedset}$, so there is no spread to put beside it at all. We therefore
 report these as the cost of the runs we made and not as a coefficient of the method.
 What does isolate the heads from the tree is the \textsc{oracle} arm of
 Section~\ref{sec:res:ablate}, which removes the heads at fixed tree and fixed seed.
@@ -2115,8 +2124,8 @@ have not run it.
 
 \paragraph{Few seeds, and a headline gap inside the spread.}
 Every arm has now finished more than once, so the contrasts here do carry a
-seed-level test --- but on \num{Nsignedgrpo} to \num{Nsteergrpo} paired seeds
-depending on the row, which is few. This bounds the effect sizes rather than the
+seed-level test --- but on \num{Nseedsused} paired seeds, $\num{Seedset}$, for
+every row, which is few. This bounds the effect sizes rather than the
 structural result: the dissociation of Section~\ref{sec:res:entropy} is a comparison
 between two groups of contrasts whose $|t|$ do not overlap, and no single row carries
 it. The accuracy gap is the claim that does rest on one row, and

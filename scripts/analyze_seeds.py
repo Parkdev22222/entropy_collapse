@@ -489,6 +489,10 @@ def main(argv=None) -> int:
     ap.add_argument("--model-tag", default="Qwen2.5-Math-1.5B")
     ap.add_argument("--plateau", default="40:110", help="lo:hi step window")
     ap.add_argument("--steps", type=int, default=110)
+    ap.add_argument("--seeds", default=None,
+                    help="comma-separated seeds to USE, e.g. 1,3,4. Default: all. "
+                         "Seeds outside the list are kept in per_seed.tsv with "
+                         "excluded=1 and left out of every statistic.")
     ap.add_argument("--allow-partial", action="store_true",
                     help="keep runs whose validation never reached the top of "
                          "the plateau window. Off by default: such a run's mean "
@@ -612,6 +616,12 @@ def main(argv=None) -> int:
     # Runs the window gate below held out. They stay in per_seed.tsv -- the
     # record is never deleted, only kept out of the statistics.
     per_seed_partial: dict[str, dict[int, dict[str, float]]] = defaultdict(dict)
+    # Runs a --seeds allowlist held out. Same standing as per_seed_partial:
+    # printed in per_seed.tsv, absent from every statistic.
+    per_seed_excluded: dict[str, dict[int, dict[str, float]]] = defaultdict(dict)
+    seeds_used = None
+    if args.seeds:
+        seeds_used = {int(x) for x in args.seeds.replace(",", " ").split()}
     partial: list[tuple[str, int, int, int]] = []
     # Logs whose own config dump disagrees with the file name they arrived
     # under. Excluded rather than trusted: a file name is a label, the dump is
@@ -653,6 +663,22 @@ def main(argv=None) -> int:
                 continue
             agg["log"] = f.name
             agg["stack"] = offloaded(f)
+            # ONE gate, before per_seed, per_seed_partial and topo are fed, so
+            # everything downstream inherits it: the contrasts, the run-to-run
+            # spread, the machine effect, the within-run appendix, the
+            # compute-matched control and the follow-up topology check. Six
+            # separate restrictions would be six chances to miss one, and the
+            # manuscript's problem was exactly a mixture -- the means table on
+            # three seeds while two contrasts paired on four, which took seven
+            # sentences to explain away.
+            #
+            # The run is still recorded. per_seed_partial's comment states the
+            # rule this follows: the record is never deleted, only kept out of
+            # the statistics, so an excluded seed stays in per_seed.tsv under
+            # excluded=1 and nothing has to be inferred from its absence.
+            if seeds_used is not None and seed not in seeds_used:
+                per_seed_excluded[arm][seed] = agg
+                continue
             if ident.get("n_gpus_per_node") is not None:
                 topo[(arm, seed)] = ident["n_gpus_per_node"]
             # A run that died inside the window contributes a mean over FEWER
@@ -852,16 +878,20 @@ def main(argv=None) -> int:
             "partial"]
 
     with (out_dir / "per_seed.tsv").open("w") as fh:
-        fh.write("arm\tseed\t" + "\t".join(cols) + "\tstack\tlog\n")
+        # `excluded` goes BEFORE stack/log on purpose: tests read the log as the
+        # last field, and a column appended after it would move that.
+        fh.write("arm\tseed\t" + "\t".join(cols) + "\texcluded\tstack\tlog\n")
         for arm in MAIN_ARMS:
-            # Both tables, so a held-out run is still on the record with
-            # partial=1 saying why it is not in the means.
-            rows = {**per_seed.get(arm, {}), **per_seed_partial.get(arm, {})}
+            # All three tables, so a held-out run is still on the record with
+            # partial=1 or excluded=1 saying why it is not in the means.
+            rows = {**per_seed.get(arm, {}), **per_seed_partial.get(arm, {}),
+                    **per_seed_excluded.get(arm, {})}
             for seed in sorted(rows):
                 r = rows[seed]
+                gone = 1 if seed in per_seed_excluded.get(arm, {}) else 0
                 fh.write(f"{arm}\t{seed}\t"
                          + "\t".join(f"{r[c]:.4f}" if c in r else "-" for c in cols)
-                         + f"\t{r.get('stack', '?')}\t{r['log']}\n")
+                         + f"\t{gone}\t{r.get('stack', '?')}\t{r['log']}\n")
 
     # ---------------------------------------------------------- arm means
     with (out_dir / "arm_means.tsv").open("w") as fh:
@@ -1093,6 +1123,20 @@ def main(argv=None) -> int:
                 over = 100.0 * (sum(sg) / len(sg) - m_st) / m_st
             fh.write(mac(f"Costoverhead{tag}", over, "{:+.0f}"))
         fh.write(mac("Nseeds", len(per_seed.get("signed", {})), "{:d}"))
+        # WHICH seeds every number in the paper is over, as a macro. The
+        # manuscript used to state this in prose while the emitter decided it,
+        # and the two drifted: the means table was restricted to three seeds
+        # and two contrasts still paired on four. A sentence that names the
+        # seed set has to read it from here. Same device as Boxarm.
+        # The seeds EVERY main arm has a counted run at -- `common`, the same
+        # set --balanced restricts the table to. Not the union: under a mixture
+        # the union is the seed set of no single statistic, and a sentence built
+        # on it would assert something false about half the rows.
+        used = sorted(common)
+        fh.write(mac("Seedset", ", ".join(map(str, used)), "{:s}") if used
+                 else mac("Seedset", None))
+        fh.write(mac("Nseedsused", len(used), "{:d}") if used
+                 else mac("Nseedsused", None))
         fh.write(mac("Plateaulo", lo, "{:d}"))
         fh.write(mac("Plateauhi", hi, "{:d}"))
         for arm in MAIN_ARMS:
@@ -1245,6 +1289,12 @@ def main(argv=None) -> int:
           f"compute_match.tsv, tables.tex, {macro_path.name}")
     for arm in MAIN_ARMS:
         print(f"  {arm:9s} {len(per_seed.get(arm, {}))} seed(s)")
+    if seeds_used is not None:
+        held = [(a, s_) for a in MAIN_ARMS for s_ in sorted(per_seed_excluded.get(a, {}))]
+        print(f"  --seeds {','.join(map(str, sorted(seeds_used)))}: "
+              f"{len(held)} finished run(s) held out of every statistic")
+        for a, s_ in held:
+            print(f"    {a} s{s_}  (in per_seed.tsv with excluded=1)")
     if mislabelled:
         print(f"  {len(mislabelled)} log(s) EXCLUDED -- the file name and the "
               f"trainer's own config dump disagree:")

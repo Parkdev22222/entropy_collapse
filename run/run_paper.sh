@@ -313,7 +313,20 @@ if have analysis; then
     # A100/H100 mixes. The script's own default stays unbalanced -- the comment
     # at its seeds_of() writes down what each mode costs -- and this is the
     # paper's choice, made where the paper is built.
-    guard analysis-seeds python3 scripts/analyze_seeds.py --balanced \
+    # --seeds is the paper's seed set, and it is ONE list because a mixture was
+    # what the manuscript spent seven sentences explaining: the means table was
+    # restricted to the seeds all five arms share while two contrasts still
+    # paired on a fourth seed, so "n" depended on the row and two row
+    # differences did not equal their contrasts. Everything is over these three
+    # now -- table, contrasts, run-to-run spread, machine effect, the within-run
+    # appendix and the compute-matched control -- and Seedset emits the list so
+    # no sentence has to name it by hand.
+    #
+    # WHEN signed s2 FINISHES, add 2 here. That is the whole change, and it is
+    # also the whole risk: a seed that finishes and is not in this list is held
+    # out of every statistic, reported once on stdout and in per_seed.tsv with
+    # excluded=1, and otherwise silent.
+    guard analysis-seeds python3 scripts/analyze_seeds.py --balanced --seeds 1,3,4 \
         --logs "${LOG_DIR}" --out "${RES_DIR}" --steps "${STEPS}"
     guard analysis-bench python3 scripts/collect_results.py \
         --logs "${LOG_DIR}" --out "${RES_DIR}/benchmarks.tsv"
