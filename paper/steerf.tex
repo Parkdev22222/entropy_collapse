@@ -1575,10 +1575,13 @@ The caveats are the ones a single diagnostic run carries: \num{Locgroups}
 prompts at one validation step of the base policy, on independently sampled
 rollouts, whose sibling support therefore sits early in the response rather
 than at the scheduled branch depths. The head-free arm of
-Table~\ref{tab:followups} is the direct test, and it is cheaper than the arm it
-would replace: \textsc{oracle} reads $\Htogo$ from the policy's realised
-entropy, which verl computes in the same pass, so it carries none of the
-overhead in Section~\ref{sec:res:cost}.
+Table~\ref{tab:followups} is the direct test, and it has now been run.
+\textsc{oracle} reads $\Htogo$ from the policy's realised entropy, which verl
+computes in the same pass, so it carries none of the MTP overhead of
+Section~\ref{sec:res:cost} --- $\num{Roraclecost}$\,s per optimization step
+against STEER-F at the same seed, $\num{Fsignedoraclesaving}\%$ less. It is also
+behind it on accuracy. Section~\ref{sec:res:ablate} reports both numbers and what
+one seed of each can carry.
 
 \subsection{Seeds, not steps}
 \label{sec:res:seeds}
@@ -1736,9 +1739,11 @@ difference measures the ceiling rather than the method.
 \subsection{How much of the design is load-bearing}
 \label{sec:res:ablate}
 
-Table~\ref{tab:followups} varies one element at a time, at a single seed. Every
-comparison in it is therefore $n = 1$: these rows describe a mechanism, and none of
-them carries an error bar or licenses an effect size.
+Table~\ref{tab:followups} varies one element at a time, at a single seed per row.
+Every comparison in it is therefore $n = 1$: these rows describe a mechanism, and
+none of them carries an error bar or licenses an effect size. A row is read against
+the main arm at \emph{its own} seed, which is not the same number as
+Table~\ref{tab:plateau}'s across-seed mean.
 
 \begin{table}[t]
 \centering
@@ -1774,8 +1779,13 @@ OPO, STEER-F         & --- & \num{Roposignedacc}  & \num{Roposignedmaj}  \\
 OPO, \textsc{steer}  & --- & \num{Roposteeracc}   & \num{Roposteermaj}   \\
 \bottomrule
 \end{tabular}
-\caption{Follow-up ablations, seed 1 only, converged window. Each block isolates one
-element of the design.}
+\caption{Follow-up ablations, converged window, one seed per row and no error bar.
+The seed is whichever one the arm was run at, and the release emits it with the row;
+the \textsc{oracle} arm is seed $\num{Roracleseed}$, run there so that it shares a
+seed with the STEER-F and \textsc{uniform} runs the six-benchmark evaluation pairs.
+The $\lambda = 0.25$ line is the reference and is Table~\ref{tab:plateau}'s
+across-seed mean rather than one run. Each block isolates one element of the
+design.}
 \label{tab:followups}
 \end{table}
 
@@ -1839,6 +1849,30 @@ Appendix~\ref{sec:appendix-prereg} decides whether the sampler or the forecast
 carries the structural term; until then, \textsc{uniform} and \textsc{permuted}
 establish that the forecast's \emph{value} matters at fixed $\lambda$, and nothing
 in this paper establishes that the tree does not.
+
+\paragraph{The forecaster, replaced by what the trainer already has.}
+Section~\ref{sec:res:locality} builds the same sibling-differenced quantity from the
+policy's own next-token entropy and finds it close to $\AH$. That measurement is
+taken on a frozen policy at one validation step, and it cannot say what the
+substitution does \emph{inside} the loop, where the weights it produces move the
+trajectory the next measurement would be taken on. The \textsc{oracle} arm makes the
+substitution there: same tree, same $\lambda$, same weight map, with $\Htogo$ read
+from the realised entropy of the rollout verl has already computed. A2 and A3 ---
+the head substitution and the affine calibration --- are the only things it removes,
+and removing them is the whole of its cost difference.
+
+It is cheaper, and by the amount the forward pass costs: $\num{Roraclecost}$\,s per
+optimization step against STEER-F at the same seed, a saving of
+$\num{Fsignedoraclesaving}\%$. It is also behind on accuracy. Over the
+$\num{Fnsignedoracle}$ validation points of the converged window, STEER-F at seed
+$\num{Roracleseed}$ leads it by $\num{Fsignedoracleacc}$ on the endpoint this
+campaign reports and by $\num{Fsignedoraclemaj}$ under majority vote. We therefore
+keep A2 and A3 rather than replacing the forecaster with the realised value, and we
+state the weight of that decision exactly: one run on each side, one seed. The gap is
+larger than STEER-F's own range across seeds, $\num{Ssignedacc}$, and smaller than
+GRPO's, $\num{Sgrpoacc}$. It orders the two arms on this seed; it does not measure
+the difference between them, and the measurement that would is this arm at more
+seeds.
 
 \paragraph{Clipping and the advantage estimator.} The relaxed-clipping setting is
 where entropy interventions are supposed to matter most, because ratio clipping
@@ -1988,7 +2022,11 @@ quantity the trainer already computes at $R^2 = \num{Locrsq}$, and to cost the s
 time reported in Section~\ref{sec:res:cost} to do so. That is a reason to look for a
 cheaper estimator of this reward-to-go, not a reason to doubt the channel: the
 head-free \textsc{oracle} arm of Table~\ref{tab:followups} is the control that
-separates those two readings, and it is the measurement we would run next.
+separates those two readings, and it has been run. At the one seed it carries, the
+realised value costs $\num{Fsignedoraclesaving}\%$ less per step and reads
+$\num{Fsignedoracleacc}$ below the forecast on the primary endpoint. That is a
+reason to keep the estimator rather than a licence to declare it necessary: a single
+draw on each side orders the two and does not size the difference.
 
 \section*{Limitations}
 
@@ -2019,8 +2057,15 @@ next-token entropy reproduces $\AH$ at $r = \num{Locadv}$ and
 $R^2 = \num{Locrsq}$, with the magnitudes in the ratio $\num{Locratio}$ that
 $\gamma_H a_1$ predicts. On that evidence the MTP heads, their warm-up and
 their calibration are machinery around a quantity the trainer already computes,
-and they carry the overhead of Section~\ref{sec:res:cost} to do it. We report
-the \textsc{oracle} arm of Table~\ref{tab:followups} as the direct test. What
+and they carry the overhead of Section~\ref{sec:res:cost} to do it. The
+\textsc{oracle} arm of Table~\ref{tab:followups} is the direct test and it does not
+agree: made inside the training loop, the substitution saves
+$\num{Fsignedoraclesaving}\%$ of the step time and gives up
+$\num{Fsignedoracleacc}$ on the primary endpoint at the one seed it was run at. Both
+readings stand as measured. A correlation on a frozen policy does not predict a
+training loop, and one draw on each side does not overturn a correlation over
+$\num{Locgroups}$ prompts; whether the heads earn their cost is left open here, and
+the arm that closes it is the same arm at more seeds. What
 the measurement does not reach is the visitation channel itself: the local twin
 is not $\Om$, and it exists only because the tree supplies siblings to
 difference against. A forecaster whose error did not grow with $k$ would test

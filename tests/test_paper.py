@@ -156,8 +156,24 @@ def emittable_names():
         names |= {f"N{a}", f"Nall{a}", f"R{a}len", f"R{a}cost"}
         for c in metrics:
             names |= {f"{k}{a}{c}" for k in akeys | skeys}
+    # What the emitter writes for a follow-up arm besides the three metric
+    # means: the seed the row is (R{stem}seed) and the within-seed contrast
+    # against signed (Fsigned{stem}{acc,maj}, Fnsigned{stem}). Read off the
+    # f-strings for the same reason as everything else in this function -- a
+    # list restated here is a list that goes stale, and this test has invented
+    # its own false positive three times already.
+    # Every (prefix, suffix) the emitter wraps a follow-up stem in -- the seed
+    # and the step time of the row (R{stem}seed, R{stem}cost), and the
+    # within-seed contrast against signed (Fsigned{stem}acc, Fnsigned{stem},
+    # Fsigned{stem}saving). A literal suffix is read off the f-string; a
+    # computed one ({c}) expands over the metric names.
+    fname = re.findall(r'mac\(\s*f"([A-Za-z]+)\{stem\}([a-z]*|\{c\})"', src)
+    assert fname, "the follow-up emitter's macro names were not found"
     for stem in stems:
         names |= {f"R{stem}{c}" for c in ("acc", "maj", "uplift")}
+        for pre, suf in fname:
+            names |= ({f"{pre}{stem}{c}" for c in ("acc", "maj", "uplift")}
+                      if suf == "{c}" else {f"{pre}{stem}{suf}"})
     for a, b in pairs:
         for c in metrics:
             names |= {f"{k}{a}{b}{c}" for k in ckeys}

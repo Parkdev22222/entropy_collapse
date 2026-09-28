@@ -684,14 +684,81 @@ def main(argv=None) -> int:
     # The follow-up arms, at the one seed they were run at. They carry no error
     # bar by design (Table 10's caption says so), so they are plateau means and
     # nothing more.
+    #
+    # The seed is SEARCHED, not assumed. This loop read run_name(arm, 1) until
+    # 2026-09-28, while run_name itself has always taken a seed -- and the
+    # oracle control ran at seed 4, deliberately, so that it shares a seed with
+    # signed s4 and uniform s4 in the paired six-benchmark evaluation. A
+    # finished thirteen-hour run would have left Roracleacc, Roraclemaj and
+    # Roracleuplift at \PENDING, indistinguishable from an experiment that had
+    # never been launched, with nothing anywhere saying why.
+    #
+    # The rule is fixed and independent of the outcome, the same philosophy as
+    # find_log: among the seeds that have a log, the LOWEST one that reached the
+    # final step; if none finished, the lowest one that has a log at all. Which
+    # draw gets reported is never chosen by reading its accuracy. R{stem}seed
+    # emits the seed, so a caption cannot quietly claim a different one.
     followups: dict[str, dict[str, float]] = {}
+    followup_seed: dict[str, int] = {}
+    followup_steps: dict[str, dict[int, dict[str, float]]] = {}
+    followup_topo: dict[str, int | None] = {}
     for arm, stem in FOLLOWUP_ARMS.items():
-        f = find_log(run_name(arm, 1), args.steps)
-        if f is None:
+        cands = [(s, find_log(run_name(arm, s), args.steps)) for s in range(1, 6)]
+        cands = [(s, f) for s, f in cands if f is not None]
+        if not cands:
             continue
-        agg = plateau(parse_log(f), lo, hi)
-        if agg:
-            followups[stem] = agg
+        done = [(s, f) for s, f in cands if reached(f, args.steps)]
+        seed, f = (done or cands)[0]
+        steps = parse_log(f)
+        agg = plateau(steps, lo, hi)
+        if not agg:
+            continue
+        followups[stem] = agg
+        followup_seed[stem] = seed
+        followup_steps[stem] = {k: v for k, v in steps.items()
+                                if lo <= k <= hi and "acc" in v}
+        followup_topo[stem] = log_identity(f).get("n_gpus_per_node")
+
+    # signed MINUS the follow-up arm, inside the seed the follow-up actually
+    # ran at. Table 10 carries no error bars, so the honest comparison for a
+    # follow-up is the main arm at ITS OWN seed -- same box, same tree, one
+    # element changed -- and not the balanced across-seed mean, which differs
+    # from the same-seed value by more than several of these contrasts are
+    # wide. Kept out of CONTRASTS on purpose: those are the six registered
+    # across-seed contrasts and each of these is a single draw.
+    fcontrast: dict[str, dict[str, float]] = {}
+    for stem, fsteps in followup_steps.items():
+        ssteps = per_step.get("signed", {}).get(followup_seed[stem])
+        if not ssteps:
+            continue
+        pts = sorted(set(ssteps) & set(fsteps))
+        row: dict[str, float] = {"n": float(len(pts))}
+        for metric in ("acc", "maj"):
+            d = [ssteps[t][metric] - fsteps[t][metric] for t in pts
+                 if metric in ssteps[t] and metric in fsteps[t]]
+            if d:
+                row[metric] = sum(d) / len(d)
+        # And what the substitution costs, on the same seed and so the same
+        # box. Section 12.6's overhead figure is an across-arm comparison; this
+        # is the one the oracle arm is for, and both sides are plateau()'s
+        # non-validation step mean so neither carries the validation step's
+        # extra AIME24 pass.
+        #
+        # Gated on the two runs having the same box. A seed index names a
+        # machine for the main campaign (Section 12.5) but not for these arms:
+        # the lambda sweep ran at seed 1 on the four-GPU box while signed s1
+        # ran on the two-GPU one, and differencing those step times reports the
+        # machine as the ablation -- a seventy-percent "saving" from changing a
+        # damping coefficient. No topology, no number.
+        sagg = per_seed["signed"][followup_seed[stem]]
+        same_box = (followup_topo.get(stem) is not None
+                    and followup_topo.get(stem) == topo.get(("signed",
+                                                             followup_seed[stem])))
+        if same_box and "s_per_step" in sagg and "s_per_step" in followups[stem]:
+            row["cost"] = sagg["s_per_step"] - followups[stem]["s_per_step"]
+            row["saving"] = 100.0 * row["cost"] / sagg["s_per_step"]
+        if len(row) > 1:
+            fcontrast[stem] = row
 
     # ------------------------------------------------- within-run stability
     # A paired t over the validation points of ONE run. It asks whether a gap
@@ -1062,6 +1129,20 @@ def main(argv=None) -> int:
             # settles whether the structural gain belongs to the sampler.
             for c in ("acc", "maj", "uplift"):
                 fh.write(mac(f"R{stem}{c}", agg.get(c)))
+            # Which seed the row is. Table 10's caption used to assert "seed 1
+            # only" for every row; it cannot any more, and it should not be a
+            # sentence anybody has to keep in step by hand.
+            fh.write(mac(f"R{stem}seed", followup_seed.get(stem), "{:d}"))
+            fh.write(mac(f"R{stem}cost", agg.get("s_per_step"), "{:.0f}"))
+        for stem, st in sorted(fcontrast.items()):
+            for c in ("acc", "maj"):
+                if c in st:
+                    fh.write(mac(f"Fsigned{stem}{c}", st[c], "{:+.4f}"))
+            # The point count, so the manuscript can say n=1 in a macro rather
+            # than in prose that can go stale.
+            fh.write(mac(f"Fnsigned{stem}", int(st["n"]), "{:d}"))
+            fh.write(mac(f"Fsigned{stem}cost", st.get("cost"), "{:+.0f}"))
+            fh.write(mac(f"Fsigned{stem}saving", st.get("saving"), "{:.1f}"))
         fh.write(mac("Wseed", within_seed, "{:d}") if within_seed
                  else mac("Wseed", None))
         for key, st in sorted(within.items()):
