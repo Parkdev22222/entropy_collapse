@@ -162,3 +162,28 @@ def test_checkpoint_selection_asks_for_weights():
     picker = body[body.index("resolve_ckpt ()"):body.index("# ------------------------------------------------------------------- run")]
     assert "hf_weights_present" in picker
     assert '[ -d "${CKPT_ROOT}/${cand}/global_step_${d}/actor/huggingface" ]' not in picker
+
+
+# --- the checkpoint may be in either repo -----------------------------------
+
+def test_the_hub_search_covers_every_repo_and_downloads_from_the_one_it_found():
+    """The campaign's checkpoints are split across two Hub repos.
+
+    resolve_ckpt read a single REPO, so every arm whose checkpoint lived in the
+    other one resolved to nothing and was reported exactly like a run that had
+    never been trained. Two things have to hold: the probe iterates EVAL_REPOS,
+    and the download uses the repo that answered rather than the variable that
+    started the search -- fetching from the wrong one of two repos is the
+    failure this replaced, wearing a different hat.
+    """
+    body = (ROOT / "run" / "run_eval_all.sh").read_text()
+    picker = body[body.index("resolve_ckpt ()"):
+                  body.index("# ------------------------------------------------------------------- run")]
+    assert "for repo in ${EVAL_REPOS}; do" in picker
+    assert 'download "${found}"' in picker, "the download must use the repo that answered"
+    assert 'download "${REPO}"' not in picker
+    # EVAL_REPOS defaults to REPO, so no existing invocation changes meaning.
+    assert "EVAL_REPOS=${EVAL_REPOS:-${REPO}}" in body
+    # REPO keeps its single-valued upload meaning in the queues that upload.
+    for q in ("run_campaign.sh", "run_backbones.sh"):
+        assert "EVAL_REPOS" not in (ROOT / "run" / q).read_text(), q

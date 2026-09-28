@@ -7,6 +7,7 @@
 #   EVAL_SET=followups bash run/run_eval_all.sh    # the nine ablations
 #   EVAL_SET=all bash run/run_eval_all.sh          # both
 #   REPO=user/repo bash run/run_eval_all.sh        # fetch checkpoints from the Hub
+#   EVAL_REPOS="u/a u/b" bash run/run_eval_all.sh  # ... searching several, in order
 #
 # No training. Each run is one call to run/eval_steerf.sh, which does verl's
 # val_only pass twice (avg@32 on AIME24/AIME25/AMC23, avg@1 on MATH500 /
@@ -75,6 +76,13 @@ STAGE="${ROOT}/checkpoints/_eval_stage"  # where Hub downloads land
 MIN_FREE_GB=${MIN_FREE_GB:-15}
 DRY=${DRY:-0}
 REPO=${REPO:-}
+# The Hub repos to SEARCH for a checkpoint, in order. Separate from REPO because
+# REPO is an UPLOAD target in run_campaign.sh and run_backbones.sh, where a list
+# would be a wrong destination; here nothing is ever uploaded, and the campaign's
+# checkpoints are in fact split across more than one repo. Defaults to REPO, so
+# every existing invocation keeps working unchanged.
+#   EVAL_REPOS="DSDSh/steer-f_2 DSDSh/sssss" bash run/run_eval_all.sh
+EVAL_REPOS=${EVAL_REPOS:-${REPO}}
 FORCE=${FORCE:-0}                        # 1 = re-evaluate runs that already have a log
 
 banner () { printf '\n========================================\n%s\n========================================\n' "$*"; }
@@ -184,8 +192,8 @@ fi
 # `hf` in huggingface_hub >= 0.34, `huggingface-cli` before that. Accept either
 # so nobody upgrades the package to get the new name -- see run/hf_backup.sh.
 HF_CLI=${HF_CLI:-$(command -v hf || command -v huggingface-cli || true)}
-if [ -n "${REPO}" ] && [ -z "${HF_CLI}" ]; then
-    echo "REFUSE: REPO is set but neither 'hf' nor 'huggingface-cli' is on PATH." >&2
+if [ -n "${EVAL_REPOS}" ] && [ -z "${HF_CLI}" ]; then
+    echo "REFUSE: a Hub repo is set but neither 'hf' nor 'huggingface-cli' is on PATH." >&2
     echo "        pip install \"huggingface_hub>=0.34,<1.0\"   (an unpinned upgrade breaks training)" >&2
     exit 2
 fi
@@ -220,11 +228,19 @@ resolve_ckpt () {   # <arm> <seed> <run-name>
         [ -n "${best}" ] && { echo "${best}"; return 0; }
     done
 
-    [ -n "${REPO}" ] || return 1
+    [ -n "${EVAL_REPOS}" ] || return 1
 
     # Hub layout, written by run/hf_backup.sh: <run>/global_step_<N>/<files>
-    local step
-    step="$(REPO="${REPO}" RUN="${rn}" python3 - <<'PY' 2>/dev/null
+    #
+    # Searched across EVAL_REPOS in the order given; the first repo holding the
+    # run wins. A single repo was assumed here until 2026-09-28, when the
+    # campaign's checkpoints turned out to be split across two: every arm in the
+    # second one resolved to nothing, and the queue reported it exactly like a
+    # run that had never been trained. The order is the caller's, not whichever
+    # copy reads better -- the same rule as find_log's.
+    local repo step="" found=""
+    for repo in ${EVAL_REPOS}; do
+        step="$(REPO="${repo}" RUN="${rn}" python3 - <<'PY' 2>/dev/null
 import os, re
 from huggingface_hub import HfApi
 repo, run = os.environ["REPO"], os.environ["RUN"]
@@ -239,10 +255,13 @@ except Exception:
 print(max(steps) if steps else "")
 PY
 )"
-    [ -n "${step}" ] || return 1
+        [ -n "${step}" ] && { found="${repo}"; break; }
+    done
+    [ -n "${found}" ] || return 1
+    echo "[eval] ${rn}: taking global_step_${step} from ${found}" >&2
     local dest="${STAGE}/${rn}/global_step_${step}"
     rm -rf "${dest}"; mkdir -p "${dest}"
-    "${HF_CLI}" download "${REPO}" --repo-type model \
+    "${HF_CLI}" download "${found}" --repo-type model \
         --include "${rn}/global_step_${step}/*" --local-dir "${STAGE}/_dl" >/dev/null 2>&1 || return 1
     mv "${STAGE}/_dl/${rn}/global_step_${step}"/* "${dest}/" 2>/dev/null || return 1
     rm -rf "${STAGE}/_dl"
