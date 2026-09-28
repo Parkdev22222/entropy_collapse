@@ -300,7 +300,7 @@ def test_the_queue_waits_between_runs_like_the_training_queues(tmp_path):
     """
     body = (ROOT / "run" / "run_eval_all.sh").read_text()
     assert body.count("await_gpus") >= 2, "await_gpus belongs in the guard AND the loop"
-    run_loop = body[body.index("for item in \"${QUEUE[@]}\""):]
+    run_loop = body[body.rindex("for item in \"${QUEUE[@]}\""):]
     assert "await_gpus" in run_loop, "nothing waits between runs"
     # the fixed sleep it replaced was a guess at the same wait
     assert "sleep 30" not in body
@@ -318,10 +318,15 @@ def test_each_eval_log_records_its_own_environment():
     debugged from its logs.
     """
     body = (ROOT / "run" / "run_eval_all.sh").read_text()
-    loop = body[body.index("for item in \"${QUEUE[@]}\""):]
+    loop = body[body.rindex("for item in \"${QUEUE[@]}\""):]
     assert "### env" in loop, "the run log must record the launch environment"
+    # The names themselves live in EVAL_ENV_VARS, which env_report prints to
+    # stdout and this header writes to the log -- one list, two readers.
+    assert "for v in ${EVAL_ENV_VARS}; do" in loop
     for v in ("GPU_MEM_UTIL", "NCCL_NVLS_ENABLE", "CUDA_DEVICE_ORDER"):
-        assert v in loop, f"{v} is one of the knobs that differ; record it"
+        assert v in body[body.index('EVAL_ENV_VARS="GPU_MEM_UTIL'):
+                         body.index("banner () {")], \
+            f"{v} is one of the knobs that differ; record it"
     # The header is written first, so eval_steerf.sh's output has to APPEND or
     # it truncates the very thing the header was added for.
     assert 'bash run/eval_steerf.sh >> "${log}"' in loop
@@ -400,3 +405,74 @@ def test_force_overrides_a_finished_eval(tmp_path):
     _eval_log(tmp_path, "signed", 1, BOTH)
     p = queue(tmp_path, {"EVAL_RUNS": "signed:1", "GPU_WAIT": "0", "FORCE": "1"})
     assert "1 eval(s) queued" in p.stdout, p.stdout
+
+
+# --- and stdout has to say it BEFORE the run ---------------------------------
+
+def test_the_queue_prints_the_knobs_it_was_given(tmp_path):
+    """A knob that did not reach the launcher was only legible after the run.
+
+    The log header added on 2026-09-28 did its job: it is what showed that the
+    fourth attempt at the NVLS test carried ``NCCL_NVLS_ENABLE=<unset>`` and so
+    was not a test of anything -- a repeat of the previous condition, recorded
+    as if it were a new measurement.  It showed that at the END, forty minutes
+    per checkpoint after the fact, because the header exists only inside a log
+    that does not exist yet when the decision to start is made.
+    """
+    finished_seed1(tmp_path)
+    p = queue(tmp_path, {"EVAL_RUNS": "signed:1", "GPU_WAIT": "0",
+                         "NCCL_NVLS_ENABLE": "0", "GPU_MEM_UTIL": "0.6"})
+    assert p.returncode == 0, p.stderr
+    assert "NCCL_NVLS_ENABLE=0" in p.stdout, p.stdout[-600:]
+    assert "GPU_MEM_UTIL=0.6" in p.stdout, p.stdout[-600:]
+    assert "all NCCL knobs unset" not in p.stdout, p.stdout[-600:]
+
+
+def test_no_knobs_set_is_said_in_one_sentence(tmp_path):
+    """The normal state, named.
+
+    A column of twelve ``<unset>`` lines is what made the one that mattered easy
+    to skim past, so the default gets a sentence instead.
+    """
+    finished_seed1(tmp_path)
+    p = queue(tmp_path, {"EVAL_RUNS": "signed:1", "GPU_WAIT": "0"})
+    assert p.returncode == 0, p.stderr
+    assert "all NCCL knobs unset (default NCCL behaviour)" in p.stdout, p.stdout[-600:]
+    assert "NCCL_NVLS_ENABLE=" not in p.stdout, p.stdout[-600:]
+
+
+def test_the_environment_is_reported_before_any_gpu_time(tmp_path):
+    """Both places it has to be: the DRY report, and the head of a real queue.
+
+    DRY=1 is where a run is planned, so it is the one that can still be changed
+    for free; the queue head is where an invocation that skipped the planning
+    gets the same line before its first checkpoint.
+    """
+    finished_seed1(tmp_path)
+    p = queue(tmp_path, {"EVAL_RUNS": "signed:1", "GPU_WAIT": "0"})
+    assert "environment (the same list each run's log header records):" in p.stdout
+    # and the non-DRY path, which cannot be exercised here (it needs verl and a
+    # checkpoint): the call sits between the queue banner and the run loop.
+    body = (ROOT / "run" / "run_eval_all.sh").read_text()
+    head = body[body.index('banner "eval: ${#QUEUE[@]}'):
+                body.rindex('for item in "${QUEUE[@]}"')]
+    assert "env_report" in head, "a real queue must print it before its first run"
+
+
+def test_one_list_feeds_the_stdout_block_and_the_log_header():
+    """Two copies of the list is the next thing to drift out of step.
+
+    The header's names and the reported names have to be the same names, or the
+    stdout block stops being evidence about what the log will say.
+    """
+    body = (ROOT / "run" / "run_eval_all.sh").read_text()
+    assert 'EVAL_ENV_VARS="GPU_MEM_UTIL' in body
+    for v in ("GPU_MEM_UTIL", "NCCL_NVLS_ENABLE", "CUDA_DEVICE_ORDER", "TP_SIZE"):
+        assert v in body[body.index('EVAL_ENV_VARS="GPU_MEM_UTIL'):
+                         body.index("banner () {")], f"{v} belongs in the one list"
+    # both consumers read it, and neither carries its own copy of the names
+    loop = body[body.index('for item in "${QUEUE[@]}"'):]
+    assert "for v in ${EVAL_ENV_VARS}; do" in loop
+    assert "for v in ${EVAL_ENV_VARS}; do" in body[body.index("env_report () {"):
+                                                   body.index("# ------------------------------------------------------------- the queue")]
+    assert body.count("NCCL_SHM_DISABLE NCCL_P2P_DISABLE") == 1

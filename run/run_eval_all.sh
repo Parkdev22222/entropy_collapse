@@ -86,8 +86,59 @@ REPO=${REPO:-}
 EVAL_REPOS=${EVAL_REPOS:-${REPO}}
 FORCE=${FORCE:-0}                        # 1 = re-evaluate even a finished run
 
+# The launch environment worth recording: vLLM's memory fraction and the
+# topology, which are the readable difference between the training launcher and
+# this one; the NCCL transport knobs, one of which the 2026-09-28 failure names
+# in its own message; and the two offload knobs. ONE definition -- env_report
+# prints it and the per-run log header writes it, and a second copy is the next
+# thing to drift out of step with the first.
+# Not overridable from the environment, unlike everything else here: a variable
+# whose whole job is to record faithfully must not be silently narrowed by a
+# stray export in the operator's shell.
+EVAL_ENV_VARS="GPU_MEM_UTIL N_GPUS TP_SIZE CUDA_VISIBLE_DEVICES CUDA_DEVICE_ORDER
+    NCCL_NVLS_ENABLE NCCL_SHM_DISABLE NCCL_P2P_DISABLE NCCL_DEBUG
+    PYTORCH_CUDA_ALLOC_CONF OFFLOAD LOGP_MBS"
+
 banner () { printf '\n========================================\n%s\n========================================\n' "$*"; }
 free_gb () { df -BG --output=avail "${ROOT}" 2>/dev/null | tail -1 | tr -dc '0-9'; }
+
+# The launch environment, on stdout, before any GPU time is spent.
+#
+# The per-run header writes this same list into each log, and that is where the
+# fourth NVLS attempt was found not to have been an NVLS attempt at all: the
+# operator set NCCL_NVLS_ENABLE=0, the run died the same way as the three
+# before it, and the header read "<unset>". A knob that never reached the
+# launcher is only legible there AFTER the run -- forty minutes per checkpoint
+# to learn that the single variable under test was not carried, and a repeat of
+# the previous condition recorded as if it were a new measurement.
+#
+# So it is printed here as well, beside the checkpoint and GPU lines, which are
+# the other two preconditions this queue already reports before starting. No
+# new mechanism: exporting works and the header proves the propagation. What
+# was missing is only that the fact is visible in time.
+env_report () {
+    local v unset_list="" nccl_any="" set_any=""
+    echo "environment (the same list each run's log header records):"
+    printf '  host=%s  shm=%s\n' "$(hostname)" \
+           "$(df -h /dev/shm 2>/dev/null | awk 'NR==2{print $2}')"
+    for v in ${EVAL_ENV_VARS}; do
+        # ${!v+x} rather than a -n test on the value: a knob deliberately set
+        # to the empty string is set, and NCCL reads it.
+        if [ -z "${!v+x}" ]; then unset_list="${unset_list}${v} "; continue; fi
+        printf '  %s=%s\n' "${v}" "${!v}"
+        set_any=1
+        case "${v}" in NCCL_*) nccl_any=1 ;; esac
+    done
+    # One sentence rather than a column of <unset>: that state is the normal one,
+    # and a column of twelve is what made the one missing knob easy to skim past.
+    [ -n "${nccl_any}" ] || echo "  all NCCL knobs unset (default NCCL behaviour)"
+    if [ -z "${set_any}" ]; then
+        echo "  nothing else in the list is set either"
+    elif [ -n "${unset_list}" ]; then
+        printf '  unset: %s\n' "${unset_list% }"
+    fi
+    return 0
+}
 
 # The highest global_step_* this repo holds for a run, or nothing. One
 # definition: resolve_ckpt fetches with it and probe_ckpt reports with it, and a
@@ -268,6 +319,10 @@ if [ "${DRY}" = "1" ]; then
         gpu_holders | head -5 | sed 's/^/  /'
     fi
     echo
+    # The third precondition. Being visible BEFORE the run is the whole point:
+    # a header in a log that does not exist yet has never stopped anything.
+    env_report
+    echo
     echo "(DRY=1, stopping here)"
     exit 0
 fi
@@ -436,6 +491,7 @@ resolve_ckpt () {   # <arm> <seed> <run-name>
 
 # ------------------------------------------------------------------- run
 banner "eval: ${#QUEUE[@]} run(s), set=${EVAL_SET}"
+env_report
 declare -a FAILED=()
 for item in "${QUEUE[@]}"; do
     arm="${item%%|*}"; rest="${item#*|}"; seed="${rest%%|*}"; rn="${rest##*|}"
@@ -468,9 +524,7 @@ for item in "${QUEUE[@]}"; do
     # from its logs, which is most of what those three attempts cost.
     { echo "### run_eval_all.sh  run=${rn}  arm=${arm}  seed=${seed}"
       echo "### host=$(hostname)  $(date -Is)"
-      for v in GPU_MEM_UTIL N_GPUS TP_SIZE CUDA_VISIBLE_DEVICES CUDA_DEVICE_ORDER \
-               NCCL_NVLS_ENABLE NCCL_SHM_DISABLE NCCL_P2P_DISABLE NCCL_DEBUG \
-               PYTORCH_CUDA_ALLOC_CONF OFFLOAD LOGP_MBS; do
+      for v in ${EVAL_ENV_VARS}; do
           printf '### env %s=%s\n' "${v}" "${!v-<unset>}"
       done
       echo "### shm=$(df -h /dev/shm 2>/dev/null | awk 'NR==2{print $2}')"
