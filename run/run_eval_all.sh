@@ -88,6 +88,74 @@ FORCE=${FORCE:-0}                        # 1 = re-evaluate runs that already hav
 banner () { printf '\n========================================\n%s\n========================================\n' "$*"; }
 free_gb () { df -BG --output=avail "${ROOT}" 2>/dev/null | tail -1 | tr -dc '0-9'; }
 
+# The highest global_step_* this repo holds for a run, or nothing. One
+# definition: resolve_ckpt fetches with it and probe_ckpt reports with it, and a
+# second copy would be the next thing to drift out of step with the first.
+hub_step () {   # <repo> <run-name>
+    REPO="$1" RUN="$2" python3 - <<'PY' 2>/dev/null
+import os, re
+from huggingface_hub import HfApi
+repo, run = os.environ["REPO"], os.environ["RUN"]
+steps = set()
+try:
+    for e in HfApi().list_repo_tree(repo, path_in_repo=run, recursive=True, repo_type="model"):
+        m = re.search(r"/global_step_(\d+)/", "/" + e.path + "/")
+        if m:
+            steps.add(int(m.group(1)))
+except Exception:
+    pass
+print(max(steps) if steps else "")
+PY
+}
+
+# Where a checkpoint WOULD come from. Downloads nothing, writes nothing.
+#
+# DRY=1 promised "print the queue, run nothing" and did not print the one thing
+# that decides whether the queue can run at all. A checkpoint that is on neither
+# disk nor any searched repo is reported by resolve_ckpt exactly like a run that
+# was never trained -- an hour into the queue, one arm at a time. The split
+# across two Hub repos made that likely rather than hypothetical, and the
+# weights of some runs only ever existed on the box that trained them.
+probe_ckpt () {   # <arm> <seed> <run-name> -> one line on stdout
+    local arm="$1" seed="$2" rn="$3" cand d hollow="" best="" bestc=""
+    for cand in "${rn}" $(ckpt_alias_for "${arm}" "${seed}"); do
+        for d in $(ls -d "${CKPT_ROOT}/${cand}"/global_step_* 2>/dev/null |
+                   sed 's/.*global_step_//' | sort -n); do
+            if hf_weights_present \
+                   "${CKPT_ROOT}/${cand}/global_step_${d}/actor/huggingface"; then
+                best="${d}"; bestc="${cand}"
+            else
+                # The trap worth naming separately: huggingface/ is written with
+                # the config and tokenizer always and the weights only when
+                # hf_model is in save_contents, so this directory looks complete
+                # and holds no model.
+                hollow="${hollow}${cand}/global_step_${d} "
+            fi
+        done
+        [ -n "${best}" ] && {
+            printf 'LOCAL  global_step_%-6s %s\n' "${best}" \
+                   "${CKPT_ROOT}/${bestc}/global_step_${best}/actor/huggingface"
+            return 0; }
+    done
+
+    local repo step
+    for repo in ${EVAL_REPOS}; do
+        step="$(hub_step "${repo}" "${rn}")"
+        [ -n "${step}" ] && {
+            printf 'HUB    global_step_%-6s %s\n' "${step}" "${repo}"
+            return 0; }
+    done
+
+    if [ -n "${hollow}" ]; then
+        printf 'MISSING  on disk but WITHOUT WEIGHTS: %s-- and in no searched repo\n' \
+               "${hollow}"
+    else
+        printf 'MISSING  not on this box, not in %s\n' \
+               "${EVAL_REPOS:-<no repo searched>}"
+    fi
+    return 1
+}
+
 # ------------------------------------------------------------- the queue
 declare -a QUEUE=()
 add_run () {   # <arm> <seed>
@@ -139,7 +207,28 @@ fi
 
 printf '\n%s eval(s) queued\n' "${#QUEUE[@]}"
 [ "${#QUEUE[@]}" -eq 0 ] && { echo "Nothing to do."; exit 0; }
-[ "${DRY}" = "1" ] && { echo "(DRY=1, stopping here)"; exit 0; }
+if [ "${DRY}" = "1" ]; then
+    echo
+    echo "checkpoint each run would use (nothing is downloaded here):"
+    _gone=0
+    for item in "${QUEUE[@]}"; do
+        _a="${item%%|*}"; _r="${item#*|}"; _s="${_r%%|*}"; _n="${_r##*|}"
+        # The assignment carries the substitution's exit status, so this asks
+        # the Hub once per run rather than twice.
+        if _line="$(probe_ckpt "${_a}" "${_s}" "${_n}")"; then :;
+        else _gone=$((_gone + 1)); fi
+        printf '  %-12s %s\n' "${_a}:${_s}" "${_line}"
+    done
+    if [ "${_gone}" -gt 0 ]; then
+        echo
+        echo "WARNING: ${_gone} of ${#QUEUE[@]} run(s) have no usable checkpoint."
+        echo "         Without one the queue skips them and the paired error bars"
+        echo "         lose the arm -- eval_paired_se.py pairs arms inside a seed."
+    fi
+    echo
+    echo "(DRY=1, stopping here)"
+    exit 0
+fi
 
 # ---------------------------------------------------------------- guards
 # An evaluation starts its own vLLM engine and takes the whole box. The three
@@ -240,21 +329,7 @@ resolve_ckpt () {   # <arm> <seed> <run-name>
     # copy reads better -- the same rule as find_log's.
     local repo step="" found=""
     for repo in ${EVAL_REPOS}; do
-        step="$(REPO="${repo}" RUN="${rn}" python3 - <<'PY' 2>/dev/null
-import os, re
-from huggingface_hub import HfApi
-repo, run = os.environ["REPO"], os.environ["RUN"]
-steps = set()
-try:
-    for e in HfApi().list_repo_tree(repo, path_in_repo=run, recursive=True, repo_type="model"):
-        m = re.search(r"/global_step_(\d+)/", "/" + e.path + "/")
-        if m:
-            steps.add(int(m.group(1)))
-except Exception:
-    pass
-print(max(steps) if steps else "")
-PY
-)"
+        step="$(hub_step "${repo}" "${rn}")"
         [ -n "${step}" ] && { found="${repo}"; break; }
     done
     [ -n "${found}" ] || return 1

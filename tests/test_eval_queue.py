@@ -187,3 +187,49 @@ def test_the_hub_search_covers_every_repo_and_downloads_from_the_one_it_found():
     # REPO keeps its single-valued upload meaning in the queues that upload.
     for q in ("run_campaign.sh", "run_backbones.sh"):
         assert "EVAL_REPOS" not in (ROOT / "run" / q).read_text(), q
+
+
+# --- DRY says where each checkpoint would come from -------------------------
+
+def test_dry_reports_local_hub_and_missing_apart(tmp_path):
+    """DRY=1 printed the queue and not whether the queue could run.
+
+    resolve_ckpt reports "no checkpoint" identically for a run that was never
+    trained, a run whose weights only exist on another box, and a directory that
+    exists and holds no model -- and it reports it one arm at a time, an hour
+    into the queue. The three are different problems with different fixes, so
+    the probe names them apart before any GPU time is spent.
+    """
+    finished_seed1(tmp_path)
+    ck = tmp_path / "ckpt"
+    # weights present
+    d = ck / "steer-f-Qwen2.5-Math-1.5B-s1-tree-rollout/global_step_100/actor/huggingface"
+    d.mkdir(parents=True)
+    (d / "model.safetensors").write_text("")
+    # the directory exists and holds no model: config and tokenizer are written
+    # whatever save_contents says, the weights only when hf_model is in it
+    h = ck / "steer-f-Qwen2.5-Math-1.5B-s1-tree-rollout-uniform/global_step_90/actor/huggingface"
+    h.mkdir(parents=True)
+    (h / "config.json").write_text("{}")
+
+    p = queue(tmp_path, {"EVAL_RUNS": "signed:1 uniform:1 permuted:1"})
+    assert p.returncode == 0, p.stderr
+    out = p.stdout
+    assert "LOCAL  global_step_100" in out, out
+    assert "WITHOUT WEIGHTS" in out, out
+    # permuted has a finished log and nothing on disk: absent, not hollow
+    perm = [l for l in out.splitlines() if l.strip().startswith("permuted:1")][0]
+    assert "MISSING" in perm and "WITHOUT WEIGHTS" not in perm, perm
+    assert "2 of 3 run(s) have no usable checkpoint" in out, out
+
+
+def test_the_probe_does_not_download(tmp_path):
+    """It is a report, not a fetch: DRY=1 must not touch the stage directory."""
+    finished_seed1(tmp_path)
+    p = queue(tmp_path, {"EVAL_RUNS": "signed:1"})
+    assert p.returncode == 0, p.stderr
+    assert "hf download" not in p.stdout
+    body = (ROOT / "run" / "run_eval_all.sh").read_text()
+    probe = body[body.index("probe_ckpt ()"):body.index("add_run ()")]
+    for forbidden in ("HF_CLI", "rm -rf", "mkdir"):
+        assert forbidden not in probe, f"probe_ckpt must not {forbidden}"
