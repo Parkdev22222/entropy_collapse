@@ -1,0 +1,15 @@
+[gpu] single GPU: GPU_MEM_UTIL=0.35 (the paper's 0.6 does not fit
+[gpu]   alongside the resident optimizer state; results are unaffected)
+[all] GPU topology: N_GPUS=1 TP_SIZE=1 GPU_MEM_UTIL=0.35
+[all] NOTE: the paper used 8xH20. The optimisation is unchanged on fewer
+[all]       GPUs (same global batch, more gradient accumulation), but
+[all]       wall-clock scales ~inversely and 7B/14B full fine-tuning will
+[all]       likely OOM below 8 GPUs. On a small node start with
+[all]       MATH_MODELS=Qwen/Qwen2.5-Math-1.5B SEEDS=1 RUN_CODE=0 \
+[all]       RUN_EXTREME=0 RUN_RL_ALGOS=0 to validate the pipeline first.
+[preflight] WARN  GPUs: 1 visible; the paper used 8xH20. The optimisation is unchanged (same global batch, more gradient accumulation) but wall-clock scales ~inversely and 7B/14B full fine-tuning will likely OOM.
+    fix (if it OOMs): start with MATH_MODELS=Qwen/Qwen2.5-Math-1.5B SEEDS=1
+[preflight] OK (1 warnings)
+[all] SKIP  warmup-rollouts-Qwen2.5-Math-1.5B (done)
+[all] SKIP  phase1-Qwen2.5-Math-1.5B (done)
+[all] START train-math-Qwen2.5-Math-1.5B-s1  (2026-08-23 04:06:30)

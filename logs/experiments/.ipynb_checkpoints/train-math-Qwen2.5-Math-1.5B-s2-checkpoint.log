@@ -1,0 +1,140 @@
++ export PYTHONHASHSEED=42
++ PYTHONHASHSEED=42
++ export PYTORCH_SEED=42
++ PYTORCH_SEED=42
++ export CUDA_DEVICE_ORDER=PCI_BUS_ID
++ CUDA_DEVICE_ORDER=PCI_BUS_ID
++ export CUBLAS_WORKSPACE_CONFIG=:4096:8
++ CUBLAS_WORKSPACE_CONFIG=:4096:8
++ export PYTORCH_CUDA_ALLOC_CONF=garbage_collection_threshold:0.8
++ PYTORCH_CUDA_ALLOC_CONF=garbage_collection_threshold:0.8
++++ dirname run/run_steerf.sh
+++ cd run
+++ pwd
++ SCRIPT_DIR=/workspace/entropy_collapse/run
+++ cd /workspace/entropy_collapse/run/..
+++ pwd
++ STEER_ROOT=/workspace/entropy_collapse
++ . /workspace/entropy_collapse/run/_gpu_defaults.sh
+++ '[' -z 1 ']'
+++ '[' -z 1 ']'
+++ '[' 1 -eq 1 ']'
+++ '[' -z 0.35 ']'
+++ GPU_MEM_UTIL=0.35
+++ export N_GPUS TP_SIZE GPU_MEM_UTIL
++ export PYTHONPATH=/workspace/entropy_collapse:/workspace/entropy_collapse:
++ PYTHONPATH=/workspace/entropy_collapse:/workspace/entropy_collapse:
++ echo 'Current VERL path:'
+Current VERL path:
++ python3 -c 'import verl; print(verl.__file__)'
+/workspace/entropy_collapse/verl/__init__.py:18: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+/workspace/entropy_collapse/verl/__init__.py
++ python3 -c 'import steer_f; print(steer_f.__file__)'
+/workspace/entropy_collapse/steer_f/__init__.py
++ project_name=STEER-F
++ train_path=/workspace/entropy_collapse/datasets/DAPO-Math-17k.parquet
++ test_path=/workspace/entropy_collapse/datasets/aime24.parquet
++ model_path=Qwen/Qwen2.5-Math-1.5B
+++ basename Qwen/Qwen2.5-Math-1.5B
++ model_tag=Qwen2.5-Math-1.5B
++ STEERF_LAM=0.25
++ STEERF_KAPPA=2
++ STEERF_GAMMA_H=0.7
++ STEERF_CLIP_C=1.0
++ STEERF_NORM=scale
++ STEERF_BASELINE=sibling
++ STEERF_APPLY=weight
++ STEERF_MAPPING=minmax
++ STEERF_WINSOR_Q=0.01
++ STEERF_FORECAST=mtp
++ STEERF_HEADS=/workspace/entropy_collapse/checkpoints/mtp_heads_Qwen2.5-Math-1.5B-paper.pt
++ STEERF_CALIB=/workspace/entropy_collapse/checkpoints/mtp_calibration_Qwen2.5-Math-1.5B-paper.json
++ '[' 0.25 '!=' 0 ']'
++ '[' mtp = mtp ']'
++ '[' '!' -f /workspace/entropy_collapse/checkpoints/mtp_heads_Qwen2.5-Math-1.5B-paper.pt ']'
++ SCALE=paper
++ case "${SCALE}" in
++ TRAIN_BS=512
++ MINI_BS=32
++ RESP_LEN=3072
++ STEPS=200
++ VAL_N=1
++ TEST_FREQ=10
++ SAVE_FREQ=10
++ VAL_REPLICAS=32
++ ACC_AT=32
++ case "${SCALE}" in
++ SAVE_AFTER=80
++ OFFLOAD=0
++ '[' 0 = 1 ']'
++ PARAM_OFF=False
++ OPT_OFF=False
++ export WANDB_INIT_TIMEOUT=300
++ WANDB_INIT_TIMEOUT=300
++ export WANDB_TIMEOUT=300
++ WANDB_TIMEOUT=300
++ export WANDB_RETRY_DELAY=60
++ WANDB_RETRY_DELAY=60
++ export WANDB_MAX_RETRIES=10
++ WANDB_MAX_RETRIES=10
++ save_contents='['\''hf_model'\'']'
+++ date +%Y%m%d_%H%M%S
++ current_datetime=20260820_193212
++ run_name=math-Qwen2.5-Math-1.5B-s2
++ train_files='['\''/workspace/entropy_collapse/datasets/DAPO-Math-17k.parquet'\'']'
++ test_files='['\''/workspace/entropy_collapse/datasets/aime24.parquet'\'']'
++ python3 -m verl.trainer.main_ppo algorithm.adv_estimator=grpo 'data.train_files=['\''/workspace/entropy_collapse/datasets/DAPO-Math-17k.parquet'\'']' 'data.val_files=['\''/workspace/entropy_collapse/datasets/aime24.parquet'\'']' data.train_batch_size=512 data.max_prompt_length=1024 data.max_response_length=3072 data.filter_overlong_prompts=True data.truncation=left actor_rollout_ref.model.path=Qwen/Qwen2.5-Math-1.5B actor_rollout_ref.actor.optim.lr=1e-6 actor_rollout_ref.model.use_remove_padding=True actor_rollout_ref.actor.ppo_mini_batch_size=32 actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=8 actor_rollout_ref.actor.use_kl_loss=False actor_rollout_ref.actor.kl_loss_coef=0.001 actor_rollout_ref.actor.kl_loss_type=low_var_kl actor_rollout_ref.actor.entropy_coeff=0 actor_rollout_ref.actor.clip_ratio_high=0.28 actor_rollout_ref.actor.clip_ratio_low=0.2 actor_rollout_ref.actor.clip_ratio_c=10.0 actor_rollout_ref.actor.policy_loss.loss_mode=entropy_control ++actor_rollout_ref.actor.policy_loss.token_weight_min=0.7 ++actor_rollout_ref.actor.policy_loss.token_weight_max=1.0 ++actor_rollout_ref.actor.policy_loss.linear=False ++actor_rollout_ref.actor.policy_loss.steerf_lam=0.25 ++actor_rollout_ref.actor.policy_loss.steerf_kappa=2 ++actor_rollout_ref.actor.policy_loss.steerf_gamma_h=0.7 ++actor_rollout_ref.actor.policy_loss.steerf_clip_c=1.0 ++actor_rollout_ref.actor.policy_loss.steerf_norm=scale ++actor_rollout_ref.actor.policy_loss.steerf_baseline=sibling ++actor_rollout_ref.actor.policy_loss.steerf_apply=weight ++actor_rollout_ref.actor.policy_loss.steerf_mapping=minmax ++actor_rollout_ref.actor.policy_loss.steerf_winsor_q=0.01 ++actor_rollout_ref.actor.policy_loss.steerf_forecast=mtp ++actor_rollout_ref.actor.policy_loss.steerf_heads_path=/workspace/entropy_collapse/checkpoints/mtp_heads_Qwen2.5-Math-1.5B-paper.pt ++actor_rollout_ref.actor.policy_loss.steerf_calib_path=/workspace/entropy_collapse/checkpoints/mtp_calibration_Qwen2.5-Math-1.5B-paper.json actor_rollout_ref.model.enable_gradient_checkpointing=True ++actor_rollout_ref.actor.entropy_from_logits_with_chunking=True actor_rollout_ref.actor.fsdp_config.param_offload=False actor_rollout_ref.actor.fsdp_config.optimizer_offload=False actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=8 actor_rollout_ref.rollout.tensor_model_parallel_size=1 actor_rollout_ref.rollout.name=vllm actor_rollout_ref.rollout.gpu_memory_utilization=0.35 'actor_rollout_ref.actor.checkpoint.save_contents=['\''hf_model'\'']' actor_rollout_ref.rollout.n=8 actor_rollout_ref.rollout.val_kwargs.n=1 actor_rollout_ref.rollout.val_kwargs.do_sample=True actor_rollout_ref.rollout.val_kwargs.temperature=1.0 actor_rollout_ref.rollout.val_kwargs.top_p=0.7 actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=8 actor_rollout_ref.ref.fsdp_config.param_offload=False algorithm.use_kl_in_reward=False trainer.rollout_data_dir=/workspace/entropy_collapse/rollout_data/STEER-F/math-Qwen2.5-Math-1.5B-s2 trainer.critic_warmup=0 'trainer.logger=['\''console'\'','\''wandb'\'']' trainer.project_name=STEER-F trainer.experiment_name=math-Qwen2.5-Math-1.5B-s2 trainer.n_gpus_per_node=1 trainer.nnodes=1 trainer.save_freq=10 trainer.test_freq=10 trainer.total_epochs=10 trainer.total_training_steps=200 trainer.resume_mode=disable ++trainer.save_best_only=False ++trainer.delete_old_best_checkpoint=True ++trainer.save_after=80 ++trainer.best_metric_key=val-core/aime_2024_dapo_boxed/acc/mean@32 ++data.seed=2 'trainer.logger=['\''console'\'','\''tensorboard'\'']'
+/workspace/entropy_collapse/verl/__init__.py:18: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+2026-08-20 19:32:34,223	INFO worker.py:1879 -- Started a local Ray instance. View the dashboard at [1m[32mhttp://127.0.0.1:8265 [39m[22m
+[36m(pid=664860)[0m /workspace/entropy_collapse/verl/__init__.py:18: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+[36m(pid=664860)[0m   import pkg_resources
+*** SIGTERM received at time=1787254370 on cpu 1 ***
+PC: @     0x729fa3b25d71  (unknown)  (unknown)
+    @     0x729fa3ad2330  (unknown)  (unknown)
+    @     0x729fa3b28c8e        224  pthread_cond_timedwait
+    @     0x729eef05429f       1184  ray::core::GetRequest::Wait()
+    @     0x729eef056d67       1424  ray::core::CoreWorkerMemoryStore::GetImpl()
+    @     0x729eef05782e         64  ray::core::CoreWorkerMemoryStore::Get()
+    @     0x729eef057a3d        208  ray::core::CoreWorkerMemoryStore::Get()
+    @     0x729eeef6c3b6       1776  ray::core::CoreWorker::GetObjects()
+    @     0x729eeef72aa0        160  ray::core::CoreWorker::Get()
+    @     0x729eeee71260        240  __pyx_pw_3ray_7_raylet_10CoreWorker_43get_objects()
+    @           0x549cf5         32  PyObject_Vectorcall
+    @           0x5d68bf        384  _PyEval_EvalFrameDefault
+    @           0x5d4dab        128  PyEval_EvalCode
+    @           0x5d2bac        112  (unknown)
+    @           0x5818ed         64  (unknown)
+    @           0x549cf5         32  PyObject_Vectorcall
+    @           0x5d68bf        384  _PyEval_EvalFrameDefault
+    @           0x6bc192         80  (unknown)
+    @           0x6bbdc2        288  Py_RunMain
+    @           0x6bba2d         48  Py_BytesMain
+    @     0x729fa3ab71ca        160  (unknown)
+    @     0x729fa3ab728b         96  __libc_start_main
+    @           0x656a35  (unknown)  _start
+[2026-08-20 19:32:50,512 E 658113 658113] logging.cc:496: *** SIGTERM received at time=1787254370 on cpu 1 ***
+[2026-08-20 19:32:50,512 E 658113 658113] logging.cc:496: PC: @     0x729fa3b25d71  (unknown)  (unknown)
+[2026-08-20 19:32:50,512 E 658113 658113] logging.cc:496:     @     0x729fa3ad2330  (unknown)  (unknown)
+[2026-08-20 19:32:50,512 E 658113 658113] logging.cc:496:     @     0x729fa3b28c8e        224  pthread_cond_timedwait
+[2026-08-20 19:32:50,513 E 658113 658113] logging.cc:496:     @     0x729eef05429f       1184  ray::core::GetRequest::Wait()
+[2026-08-20 19:32:50,513 E 658113 658113] logging.cc:496:     @     0x729eef056d67       1424  ray::core::CoreWorkerMemoryStore::GetImpl()
+[2026-08-20 19:32:50,513 E 658113 658113] logging.cc:496:     @     0x729eef05782e         64  ray::core::CoreWorkerMemoryStore::Get()
+[2026-08-20 19:32:50,513 E 658113 658113] logging.cc:496:     @     0x729eef057a3d        208  ray::core::CoreWorkerMemoryStore::Get()
+[2026-08-20 19:32:50,513 E 658113 658113] logging.cc:496:     @     0x729eeef6c3b6       1776  ray::core::CoreWorker::GetObjects()
+[2026-08-20 19:32:50,513 E 658113 658113] logging.cc:496:     @     0x729eeef72aa0        160  ray::core::CoreWorker::Get()
+[2026-08-20 19:32:50,513 E 658113 658113] logging.cc:496:     @     0x729eeee71260        240  __pyx_pw_3ray_7_raylet_10CoreWorker_43get_objects()
+[2026-08-20 19:32:50,513 E 658113 658113] logging.cc:496:     @           0x549cf5         32  PyObject_Vectorcall
+[2026-08-20 19:32:50,513 E 658113 658113] logging.cc:496:     @           0x5d68bf        384  _PyEval_EvalFrameDefault
+[2026-08-20 19:32:50,513 E 658113 658113] logging.cc:496:     @           0x5d4dab        128  PyEval_EvalCode
+[2026-08-20 19:32:50,513 E 658113 658113] logging.cc:496:     @           0x5d2bac        112  (unknown)
+[2026-08-20 19:32:50,513 E 658113 658113] logging.cc:496:     @           0x5818ed         64  (unknown)
+[2026-08-20 19:32:50,513 E 658113 658113] logging.cc:496:     @           0x549cf5         32  PyObject_Vectorcall
+[2026-08-20 19:32:50,513 E 658113 658113] logging.cc:496:     @           0x5d68bf        384  _PyEval_EvalFrameDefault
+[2026-08-20 19:32:50,514 E 658113 658113] logging.cc:496:     @           0x6bc192         80  (unknown)
+[2026-08-20 19:32:50,514 E 658113 658113] logging.cc:496:     @           0x6bbdc2        288  Py_RunMain
+[2026-08-20 19:32:50,514 E 658113 658113] logging.cc:496:     @           0x6bba2d         48  Py_BytesMain
+[2026-08-20 19:32:50,514 E 658113 658113] logging.cc:496:     @     0x729fa3ab71ca        160  (unknown)
+[2026-08-20 19:32:50,514 E 658113 658113] logging.cc:496:     @     0x729fa3ab728b         96  __libc_start_main
+[2026-08-20 19:32:50,514 E 658113 658113] logging.cc:496:     @           0x656a35  (unknown)  _start

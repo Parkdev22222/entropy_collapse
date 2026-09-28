@@ -1,0 +1,105 @@
++++ dirname run/collect_warmup_rollouts.sh
+++ cd run
+++ pwd
++ SCRIPT_DIR=/workspace/entropy_collapse/run
+++ cd /workspace/entropy_collapse/run/..
+++ pwd
++ STEER_ROOT=/workspace/entropy_collapse
++ export PYTHONPATH=/workspace/entropy_collapse:/workspace/entropy_collapse:
++ PYTHONPATH=/workspace/entropy_collapse:/workspace/entropy_collapse:
++ model_path=meta-llama/Llama-3.2-3B-Instruct
+++ basename meta-llama/Llama-3.2-3B-Instruct
++ model_tag=Llama-3.2-3B-Instruct
++ N_STEPS=8
++ dump_dir=/workspace/entropy_collapse/rollout_data/warmup/Llama-3.2-3B-Instruct
++ python3 -m verl.trainer.main_ppo algorithm.adv_estimator=grpo 'data.train_files=['\''/workspace/entropy_collapse/datasets/DAPO-Math-17k.parquet'\'']' 'data.val_files=['\''/workspace/entropy_collapse/datasets/aime24.parquet'\'']' data.train_batch_size=512 data.max_prompt_length=1024 data.max_response_length=3072 data.filter_overlong_prompts=True data.truncation=left actor_rollout_ref.model.path=meta-llama/Llama-3.2-3B-Instruct actor_rollout_ref.actor.optim.lr=1e-6 actor_rollout_ref.model.use_remove_padding=True actor_rollout_ref.actor.ppo_mini_batch_size=32 actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=8 actor_rollout_ref.actor.use_kl_loss=False actor_rollout_ref.actor.entropy_coeff=0 actor_rollout_ref.model.enable_gradient_checkpointing=True actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=8 actor_rollout_ref.rollout.tensor_model_parallel_size=1 actor_rollout_ref.rollout.name=vllm actor_rollout_ref.rollout.gpu_memory_utilization=0.6 actor_rollout_ref.rollout.n=8 actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=8 algorithm.use_kl_in_reward=False trainer.rollout_data_dir=/workspace/entropy_collapse/rollout_data/warmup/Llama-3.2-3B-Instruct trainer.critic_warmup=0 'trainer.logger=['\''console'\'']' trainer.project_name=STEERF-warmup trainer.experiment_name=warmup-Llama-3.2-3B-Instruct trainer.n_gpus_per_node=1 trainer.nnodes=1 trainer.save_freq=-1 trainer.test_freq=-1 trainer.val_before_train=False trainer.total_training_steps=8 trainer.total_epochs=1 trainer.resume_mode=disable
+/workspace/entropy_collapse/verl/__init__.py:18: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/workspace/entropy_collapse/verl/trainer/main_ppo.py", line 279, in <module>
+    main()
+  File "/usr/local/lib/python3.12/dist-packages/hydra/main.py", line 94, in decorated_main
+    _run_hydra(
+  File "/usr/local/lib/python3.12/dist-packages/hydra/_internal/utils.py", line 394, in _run_hydra
+    _run_app(
+  File "/usr/local/lib/python3.12/dist-packages/hydra/_internal/utils.py", line 457, in _run_app
+    run_and_report(
+  File "/usr/local/lib/python3.12/dist-packages/hydra/_internal/utils.py", line 220, in run_and_report
+    return func()
+           ^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/hydra/_internal/utils.py", line 458, in <lambda>
+    lambda: hydra.run(
+            ^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/hydra/_internal/hydra.py", line 119, in run
+    ret = run_job(
+          ^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/hydra/core/utils.py", line 186, in run_job
+    ret.return_value = task_function(task_cfg)
+                       ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/entropy_collapse/verl/trainer/main_ppo.py", line 45, in main
+    run_ppo(config)
+  File "/workspace/entropy_collapse/verl/trainer/main_ppo.py", line 56, in run_ppo
+    ray.init(
+  File "/usr/local/lib/python3.12/dist-packages/ray/_private/client_mode_hook.py", line 103, in wrapper
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/ray/_private/worker.py", line 1780, in init
+    _global_node = ray._private.node.Node(
+                   ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/ray/_private/node.py", line 362, in __init__
+    self.start_head_processes()
+  File "/usr/local/lib/python3.12/dist-packages/ray/_private/node.py", line 1461, in start_head_processes
+    self.start_api_server(
+  File "/usr/local/lib/python3.12/dist-packages/ray/_private/node.py", line 1173, in start_api_server
+    self._webui_url, process_info = ray._private.services.start_api_server(
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/ray/_private/services.py", line 1257, in start_api_server
+    minimal: bool = not ray._private.utils.check_dashboard_dependencies_installed()
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/ray/_private/utils.py", line 1322, in check_dashboard_dependencies_installed
+    import ray.dashboard.optional_deps  # noqa: F401
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/ray/dashboard/optional_deps.py", line 6, in <module>
+    import aiohttp  # noqa: F401
+    ^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/aiohttp/__init__.py", line 6, in <module>
+    from .client import (
+  File "/usr/local/lib/python3.12/dist-packages/aiohttp/client.py", line 83, in <module>
+    from .connector import (
+  File "/usr/local/lib/python3.12/dist-packages/aiohttp/connector.py", line 918, in <module>
+    _SSL_CONTEXT_VERIFIED = _make_ssl_context(True)
+                            ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/aiohttp/connector.py", line 901, in _make_ssl_context
+    sslcontext = ssl.create_default_context()
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/ssl.py", line 713, in create_default_context
+    context.load_default_certs(purpose)
+  File "/usr/lib/python3.12/ssl.py", line 535, in load_default_certs
+    self.set_default_verify_paths()
+KeyboardInterrupt
+Exception ignored in atexit callback: <function shutdown at 0x70fad5b6bb00>
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.12/dist-packages/ray/_private/client_mode_hook.py", line 103, in wrapper
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/ray/_private/worker.py", line 1950, in shutdown
+    from ray.dag.compiled_dag_node import _shutdown_all_compiled_dags
+  File "/usr/local/lib/python3.12/dist-packages/ray/dag/__init__.py", line 1, in <module>
+    from ray.dag.dag_node import DAGNode
+  File "/usr/local/lib/python3.12/dist-packages/ray/dag/dag_node.py", line 25, in <module>
+    from ray.dag.compiled_dag_node import build_compiled_dag_from_ray_dag
+  File "/usr/local/lib/python3.12/dist-packages/ray/dag/compiled_dag_node.py", line 789, in <module>
+    @dataclass
+     ^^^^^^^^^
+  File "/usr/lib/python3.12/dataclasses.py", line 1268, in dataclass
+    return wrap(cls)
+           ^^^^^^^^^
+  File "/usr/lib/python3.12/dataclasses.py", line 1258, in wrap
+    return _process_class(cls, init, repr, eq, order, unsafe_hash,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/dataclasses.py", line 1079, in _process_class
+    field_list = [f for f in fields.values() if f._field_type is _FIELD]
+                  ^
+KeyboardInterrupt: 
