@@ -189,7 +189,11 @@ bash run/publish_logs.sh --push --queue-logs  # 큐 드라이버 로그도
 
 학습이 아니다. 런마다 `run/eval_steerf.sh`를 한 번 부르고, 그게 verl의 val-only 패스를
 두 번 돈다 — `avg32`(AIME24·AIME25·AMC23)와 `avg1`(MATH500·Minerva·OlympiadBench·GSM8K).
-체크포인트당 5,966 generation(패스 A 3,200 + 패스 B 2,766), H100×4에서 15~25분.
+체크포인트당 5,964 generation(패스 A 3,200 + 패스 B 2,764), H100×4에서 15~25분.
+패스 B가 2,766이 아니라 2,764인 것은 `data.filter_overlong_prompts=True`가 프롬프트
+1024 토큰을 넘는 2문제를 버리기 때문이다(`filter dataset len: 2764`, 2026-09-28 측정).
+토크나이저와 필터가 arm마다 같으므로 같은 2개가 매번 빠지고 `eval_paired_se.py`의
+문제별 짝짓기는 영향받지 않는다 — **행 수를 셀 때 기대값이 2,764**라는 것만 맞추면 된다.
 
 ### ★ 계측을 먼저 적용한다 — 안 하면 문제별 점수가 안 남는다
 

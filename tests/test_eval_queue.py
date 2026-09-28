@@ -233,3 +233,74 @@ def test_the_probe_does_not_download(tmp_path):
     probe = body[body.index("probe_ckpt ()"):body.index("add_run ()")]
     for forbidden in ("HF_CLI", "rm -rf", "mkdir"):
         assert forbidden not in probe, f"probe_ckpt must not {forbidden}"
+
+
+# --- the box has to be able to make a CUDA context ---------------------------
+
+def fake_nvidia_smi(tmp_path: Path, holder: bool) -> str:
+    """A stub nvidia-smi on PATH. Returns the bin dir to prepend."""
+    b = tmp_path / "fakebin"
+    b.mkdir(exist_ok=True)
+    body = ('#!/bin/sh\ncase "$*" in\n  *query-compute-apps*) '
+            + ('echo "999999, 41234 MiB"' if holder else ':')
+            + ' ;;\n  *) exit 0 ;;\nesac\n')
+    f = b / "nvidia-smi"
+    f.write_text(body)
+    f.chmod(0o755)
+    return str(b)
+
+
+def test_held_vram_is_refused_before_any_benchmark(tmp_path):
+    """The failure this gate exists for, and the one it had.
+
+    is_busy only greps main_ppo off a command line. A run that died leaves
+    ray::WorkerDict and vLLM engine processes holding CUDA contexts, which it
+    does not match, so the queue called the box idle and started -- and NCCL
+    died at FSDP init with "Cuda failure 401", before a single benchmark. On
+    2026-09-28 that happened twice in one invocation, the second pass dying on
+    the first pass's leftovers because nothing waited in between.
+    """
+    finished_seed1(tmp_path)
+    bin_dir = fake_nvidia_smi(tmp_path, holder=True)
+    p = queue(tmp_path, {"EVAL_RUNS": "signed:1", "GPU_WAIT": "0",
+                         "PATH": bin_dir + ":" + os.environ.get("PATH", "/usr/bin:/bin")},
+              dry="0")
+    assert p.returncode == 2, (p.returncode, p.stdout[-500:], p.stderr[-500:])
+    assert "VRAM is still held" in p.stderr, p.stderr
+    # and it says so before spending anything on a checkpoint
+    assert "MISSING checkpoint" not in p.stdout
+
+
+def test_the_vram_refusal_has_an_escape_hatch(tmp_path):
+    finished_seed1(tmp_path)
+    bin_dir = fake_nvidia_smi(tmp_path, holder=True)
+    p = queue(tmp_path, {"EVAL_RUNS": "signed:1", "GPU_WAIT": "0",
+                         "ALLOW_BUSY_GPUS": "1",
+                         "PATH": bin_dir + ":" + os.environ.get("PATH", "/usr/bin:/bin")},
+              dry="0")
+    assert "ALLOW_BUSY_GPUS=1" in p.stdout, p.stdout[-400:]
+    assert "VRAM is still held" not in p.stderr
+
+
+def test_an_idle_box_passes_the_vram_gate(tmp_path):
+    """Regression: the gate must not refuse a box that is actually free."""
+    finished_seed1(tmp_path)
+    bin_dir = fake_nvidia_smi(tmp_path, holder=False)
+    p = queue(tmp_path, {"EVAL_RUNS": "signed:1", "GPU_WAIT": "0",
+                         "PATH": bin_dir + ":" + os.environ.get("PATH", "/usr/bin:/bin")})
+    assert p.returncode == 0, p.stderr
+    assert "GPUs: no other process holds VRAM" in p.stdout, p.stdout[-400:]
+
+
+def test_the_queue_waits_between_runs_like_the_training_queues(tmp_path):
+    """Each eval is two verl passes; a dead pass leaves its workers holding VRAM.
+
+    run_campaign.sh and run_followups.sh call await_gpus both before the queue
+    and between runs. This one called it in neither place.
+    """
+    body = (ROOT / "run" / "run_eval_all.sh").read_text()
+    assert body.count("await_gpus") >= 2, "await_gpus belongs in the guard AND the loop"
+    run_loop = body[body.index("for item in \"${QUEUE[@]}\""):]
+    assert "await_gpus" in run_loop, "nothing waits between runs"
+    # the fixed sleep it replaced was a guess at the same wait
+    assert "sleep 30" not in body

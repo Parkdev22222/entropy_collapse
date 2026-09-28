@@ -8,6 +8,7 @@
 #   EVAL_SET=all bash run/run_eval_all.sh          # both
 #   REPO=user/repo bash run/run_eval_all.sh        # fetch checkpoints from the Hub
 #   EVAL_REPOS="u/a u/b" bash run/run_eval_all.sh  # ... searching several, in order
+#   ALLOW_BUSY_GPUS=1 bash run/run_eval_all.sh     # start although VRAM is held
 #
 # No training. Each run is one call to run/eval_steerf.sh, which does verl's
 # val_only pass twice (avg@32 on AIME24/AIME25/AMC23, avg@1 on MATH500 /
@@ -226,6 +227,15 @@ if [ "${DRY}" = "1" ]; then
         echo "         lose the arm -- eval_paired_se.py pairs arms inside a seed."
     fi
     echo
+    # Usable checkpoints are one precondition; a box that can make a CUDA
+    # context is the other, and it is the one that failed first.
+    if gpus_free; then
+        echo "GPUs: no other process holds VRAM"
+    else
+        echo "GPUs: VRAM is held -- NCCL would fail at init, before any benchmark:"
+        gpu_holders | head -5 | sed 's/^/  /'
+    fi
+    echo
     echo "(DRY=1, stopping here)"
     exit 0
 fi
@@ -249,7 +259,9 @@ if [ "${WAIT}" = "1" ]; then
         done
         while is_busy; do sleep "${WAIT_POLL}"; done
         echo "[eval] $(date -Is)  the box is free, starting"
-        sleep 30    # let the GPUs actually release before vLLM grabs them
+        # await_gpus, not a fixed sleep: the sleep was a guess at how long the
+        # trainer takes to release VRAM, and the gpu gate below is the measured
+        # version of the same wait.
     fi
 elif is_busy; then
     echo "REFUSE: a training process is already running on this box." >&2
@@ -260,6 +272,37 @@ elif is_busy; then
     echo "        Evaluating now would take the GPUs out from under it." >&2
     echo "        Re-run with WAIT=1 to queue behind it, or evaluate on another box." >&2
     exit 2
+fi
+# is_busy only greps main_ppo off a command line. _arms.sh's own comment at
+# gpu_holders says what that misses: a run that died leaves ray::WorkerDict and
+# vLLM engine processes holding CUDA contexts, none of which match, so the queue
+# reports an idle box and starts -- and NCCL then dies at init with
+#     Cuda failure 401 'the operation cannot be performed in the present state'
+# On 2026-09-28 that is exactly what happened to this queue, twice in one
+# invocation: the first pass died on leftovers, and the second died on the
+# first pass's own leftovers because nothing waited in between. The three
+# training queues have called await_gpus since September; this one never did.
+#
+# It REFUSES where they warn. They warn because a sixteen-hour training arm
+# should not stop unattended on a holder that is not ours; an eval is twenty to
+# forty minutes per checkpoint and costs nothing to restart, and "starting
+# anyway" is what produced two dead passes and no benchmark.
+if ! await_gpus "${GPU_WAIT:-60}"; then
+    if [ "${ALLOW_BUSY_GPUS:-0}" != "1" ]; then
+        echo "REFUSE: VRAM is still held; NCCL would fail at init, not at the benchmark." >&2
+        echo "        ray stop --force, then check nvidia-smi returns to 0 MiB." >&2
+        echo "        ALLOW_BUSY_GPUS=1 to start anyway." >&2
+        exit 2
+    fi
+    echo "[eval] ALLOW_BUSY_GPUS=1: starting on a box that still holds VRAM."
+fi
+# The other named cause of the same Cuda failure 401 (_arms.sh's flash-attn
+# gate). Reported, not enforced: the pod's --shm-size is not ours to change.
+shm_kb="$(df -k /dev/shm 2>/dev/null | awk 'NR==2{print $2}')"
+if [ -n "${shm_kb}" ] && [ "${shm_kb}" -lt 1048576 ]; then
+    echo "WARNING: /dev/shm is $((shm_kb / 1024)) MB. NCCL uses it for intra-node"
+    echo "         transport and fails obscurely when it is small -- 'Cuda failure 401'"
+    echo "         at init is one way. NCCL_SHM_DISABLE=1 works around it, slower."
 fi
 if ! bash run/instrument_phase2.sh --check >/dev/null 2>&1; then
     echo "WARNING: run/instrument_phase2.sh --check does not pass."
@@ -412,6 +455,12 @@ for item in "${QUEUE[@]}"; do
     fi
 
     [ -n "${FETCHED}" ] && { rm -rf "${FETCHED}"; echo "  staged copy removed"; }
+
+    # Between runs, as run_campaign.sh and run_followups.sh do. Each eval is two
+    # verl passes (avg32 then avg1) inside eval_steerf.sh, and a pass that died
+    # leaves its Ray workers holding VRAM; without this the next run inherits
+    # them and dies at NCCL init with a message that names neither.
+    await_gpus "${GPU_WAIT:-60}" || true
 done
 
 # --------------------------------------------------------------- summary

@@ -1709,7 +1709,10 @@ parquet 재고와 `collect_results.py` 컬럼 매핑을 실제로 열어 확인�
 
 - **avg@32 패스가 유효하다**: 세 개의 @32 셋이 정확히 32 replica를 담고 있다. `val_kwargs.n=1`이어도 verl이 `acc/mean@32`로 집계한다(학습 로그의 `val-core/aime_2024_dapo_boxed/acc/mean@32`가 증거). → **검증 항목 2는 이미 통과.**
 - **`data_source` 7개가 `collect_results.py`의 `COLUMNS`와 전부 일치**한다. 컬럼이 `-`로 비는 사고는 없다.
-- 총 생성량: 패스 A 3,200 + 패스 B 2,766 = **5,966 generation/체크포인트**.
+- 총 생성량: 패스 A 3,200 + 패스 B 2,764 = **5,964 generation/체크포인트**.
+  (2026-09-28 실측 정정: 패스 B는 2,766이 아니다 — `filter_overlong_prompts=True`가
+  1024 토큰 초과 2문제를 버려 `filter dataset len: 2764`가 된다. arm마다 같은 2개가
+  빠지므로 대응 SE의 짝짓기는 무영향.)
 - `select_best_checkpoint.py`(`--project/--run/--metric/--ckpt-root/--tb-root/--quiet`)와 `collect_results.py`(`--logs/--out`) 둘 다 `py_compile` 통과, 계획의 인자 표기가 실제와 일치.
 - `omni.parquet`은 `omni_math_test`라 `COLUMNS`에 없지만 `eval_steerf.sh`의 대상 목록에도 없으므로 무관.
 
