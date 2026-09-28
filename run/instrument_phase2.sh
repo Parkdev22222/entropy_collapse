@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Three instrumentation patches, needed by phase 2 (evaluation + follow-up
+# Four instrumentation patches, needed by phase 2 (evaluation + follow-up
 # ablations) and by nothing else.
 #
 #   bash run/instrument_phase2.sh --check     # report only, change nothing
@@ -42,6 +42,16 @@
 #      rows are which benchmark. The column is written into a *copy* of the
 #      extras dict, because process_validation_metrics() averages every value
 #      in the real one and a string column would crash the metrics it prints.
+#
+#   4. run/eval_steerf.sh's second pass takes its samples per problem from
+#      AVG1_N (default 1, the original protocol). MATH500, Minerva,
+#      OlympiadBench and GSM8K were scored on ONE sample each, so every
+#      per-problem score was a single Bernoulli draw and the paired error bar
+#      carried that noise on top of the difficulty spread. AVG1_N=32 puts them
+#      on the same footing as AIME and AMC. A different n gets its own tag
+#      (avg1x<N>) because the tag names the dump directory, and "avg32" is
+#      already pass A's -- two passes writing 0.jsonl into one directory is the
+#      collision change 1's ${tag} exists to prevent.
 #
 # Every edit is idempotent: running twice changes nothing the second time.
 
@@ -104,6 +114,19 @@ elif grep -qF 'reward_extra_infos_dict=reward_extra_infos_dict,' "${TRAINER_PY}"
     need "DUMP_DATA_SOURCE" "carry data_source into _dump_generations"
 else
     bad "no recognisable _dump_generations call -- inspect the file by hand"
+fi
+say ""
+
+# -------------------------------------------------------------------- 4
+say "$(basename "${EVAL_SH}") -- samples per problem in the second pass"
+if [ ! -f "${EVAL_SH}" ]; then
+    bad "not found -- run this on the pod checkout, not a bare clone"
+elif grep -q 'AVG1_N' "${EVAL_SH}"; then
+    ok "second pass reads AVG1_N"
+elif grep -qE '^[[:space:]]*run_eval "\$files_at1"[[:space:]]+1[[:space:]]+"avg1"[[:space:]]*$' "${EVAL_SH}"; then
+    need "EVAL_AVG1_N" "let AVG1_N set the second pass's samples per problem"
+else
+    bad "no 'run_eval \"\$files_at1\" 1 \"avg1\"' line -- inspect the file by hand"
 fi
 say ""
 
@@ -198,6 +221,28 @@ s = s.replace(old, new)
 open(p, "w", encoding="utf-8").write(s)
 PYEOF
         ok "ray_trainer.py now dumps data_source (backup ${TRAINER_PY}.bak.${stamp})"
+        ;;
+    EVAL_AVG1_N)
+        [ -f "${EVAL_SH}.bak.${stamp}" ] || cp -p "${EVAL_SH}" "${EVAL_SH}.bak.${stamp}"
+        python3 - "${EVAL_SH}" <<'PYEOF'
+import re, sys
+p = sys.argv[1]
+s = open(p, encoding="utf-8").read()
+pat = re.compile(r'^([ \t]*)run_eval "\$files_at1"[ \t]+1[ \t]+"avg1"[ \t]*$', re.M)
+found = pat.findall(s)
+assert len(found) == 1, f"expected exactly one second-pass call, found {len(found)}"
+m = pat.search(s)
+ind = m.group(1)
+new = (
+    f'{ind}# AVG1_N: samples per problem in this pass. 1 is the original protocol;\n'
+    f'{ind}# any other n gets its own tag, so its dump cannot land in pass A\'s "avg32".\n'
+    f'{ind}if [ "${{AVG1_N:-1}}" = "1" ]; then run_eval "$files_at1" 1 "avg1"\n'
+    f'{ind}else run_eval "$files_at1" "${{AVG1_N}}" "avg1x${{AVG1_N}}"; fi'
+)
+s = s[:m.start()] + new + s[m.end():]
+open(p, "w", encoding="utf-8").write(s)
+PYEOF
+        ok "second pass now reads AVG1_N (backup ${EVAL_SH}.bak.${stamp})"
         ;;
     esac
 done

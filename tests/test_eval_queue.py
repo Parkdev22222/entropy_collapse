@@ -388,7 +388,7 @@ def test_an_eval_whose_second_pass_died_is_queued_again(tmp_path):
     _eval_log(tmp_path, "signed", 1, AVG32_ONLY)
     p = queue(tmp_path, {"EVAL_RUNS": "signed:1", "GPU_WAIT": "0"})
     assert "1 eval(s) queued" in p.stdout, p.stdout
-    assert "no avg1 metric" in p.stdout, p.stdout
+    assert "no second-pass metric" in p.stdout, p.stdout
 
 
 def test_a_finished_eval_is_still_skipped(tmp_path):
@@ -476,3 +476,48 @@ def test_one_list_feeds_the_stdout_block_and_the_log_header():
     assert "for v in ${EVAL_ENV_VARS}; do" in body[body.index("env_report () {"):
                                                    body.index("# ------------------------------------------------------------- the queue")]
     assert body.count("NCCL_SHM_DISABLE NCCL_P2P_DISABLE") == 1
+
+
+# --- re-measuring at 32 samples per problem ----------------------------------
+
+K32_BOTH = ("val-core/aime_2024_dapo_boxed/acc/mean@32:0.1650\n"
+            "val-core/math500/acc/mean@32:0.6900\n")
+
+
+def test_a_k32_run_does_not_count_the_avg1_record_as_done(tmp_path):
+    """AVG1_N=32 is a different measurement with its own directory.
+
+    The avg@1 logs are what the manuscript first reported; a re-measurement
+    must neither skip because they exist nor overwrite them.
+    """
+    finished_seed1(tmp_path)
+    _eval_log(tmp_path, "signed", 1, BOTH)                 # the avg@1 record
+    p = queue(tmp_path, {"EVAL_RUNS": "signed:1", "GPU_WAIT": "0", "AVG1_N": "32"})
+    assert "1 eval(s) queued" in p.stdout, p.stdout
+    p1 = queue(tmp_path, {"EVAL_RUNS": "signed:1", "GPU_WAIT": "0"})
+    assert "already evaluated" in p1.stdout, p1.stdout
+
+
+def test_a_k32_log_needs_its_second_pass_too(tmp_path):
+    """With both passes at mean@32 a sample count no longer tells them apart.
+
+    The old predicate asked for a mean@32 key and a mean@1 key; at AVG1_N=32
+    the first pass alone would have satisfied a count-only rewrite of it.
+    """
+    finished_seed1(tmp_path)
+    k = tmp_path / "logs" / "eval-k32"
+    k.mkdir(parents=True)
+    (k / "eval-signed-s1.log").write_text(AVG32_ONLY)
+    p = queue(tmp_path, {"EVAL_RUNS": "signed:1", "GPU_WAIT": "0", "AVG1_N": "32"})
+    assert "no second-pass metric" in p.stdout, p.stdout
+    (k / "eval-signed-s1.log").write_text(K32_BOTH)
+    p = queue(tmp_path, {"EVAL_RUNS": "signed:1", "GPU_WAIT": "0", "AVG1_N": "32"})
+    assert "already evaluated" in p.stdout, p.stdout
+
+
+def test_avg1_n_is_recorded_and_validated(tmp_path):
+    finished_seed1(tmp_path)
+    p = queue(tmp_path, {"EVAL_RUNS": "signed:1", "GPU_WAIT": "0", "AVG1_N": "32"})
+    assert "AVG1_N=32" in p.stdout, "the environment block must show the sample count"
+    bad = queue(tmp_path, {"EVAL_RUNS": "signed:1", "AVG1_N": "x"})
+    assert bad.returncode == 2 and "AVG1_N must be a positive integer" in bad.stderr

@@ -9,10 +9,13 @@
 #   REPO=user/repo bash run/run_eval_all.sh        # fetch checkpoints from the Hub
 #   EVAL_REPOS="u/a u/b" bash run/run_eval_all.sh  # ... searching several, in order
 #   ALLOW_BUSY_GPUS=1 bash run/run_eval_all.sh     # start although VRAM is held
+#   AVG1_N=32 bash run/run_eval_all.sh             # second pass at 32 samples/problem
 #
 # No training. Each run is one call to run/eval_steerf.sh, which does verl's
 # val_only pass twice (avg@32 on AIME24/AIME25/AMC23, avg@1 on MATH500 /
 # Minerva / OlympiadBench / GSM8K) -- about 40 minutes per checkpoint on 2xA100.
+# With AVG1_N=32 the second pass is avg@32 too (instrument_phase2.sh change 4),
+# about 32x the samples: roughly three hours per checkpoint on 4xH100.
 #
 # THE FAILURE THIS SCRIPT EXISTS TO PREVENT
 #   The first six-benchmark attempt produced five eval logs whose MODEL_PATH
@@ -85,6 +88,22 @@ REPO=${REPO:-}
 #   EVAL_REPOS="DSDSh/steer-f_2 DSDSh/sssss" bash run/run_eval_all.sh
 EVAL_REPOS=${EVAL_REPOS:-${REPO}}
 FORCE=${FORCE:-0}                        # 1 = re-evaluate even a finished run
+# Samples per problem in the second pass (MATH500, Minerva, OlympiadBench,
+# GSM8K). 1 is the protocol the first evaluation ran under. Any other n is a
+# different measurement, so it gets its own log and dump directories: the
+# avg@1 record is what the manuscript first reported, and re-measuring must
+# not overwrite it. Same name for both, eval-k<N>, so the pairing is obvious.
+AVG1_N=${AVG1_N:-1}
+case "${AVG1_N}" in ''|*[!0-9]*|0) echo "FATAL: AVG1_N must be a positive integer, got '${AVG1_N}'" >&2; exit 2 ;; esac
+if [ "${AVG1_N}" = "1" ]; then
+    EVAL_LOG_DIR="${LOG_DIR}"
+    EVAL_VAL_ROOT="${ROOT}/validation_data/eval"
+    PASSB_TAG="avg1"
+else
+    EVAL_LOG_DIR="${LOG_DIR}/eval-k${AVG1_N}"
+    EVAL_VAL_ROOT="${ROOT}/validation_data/eval-k${AVG1_N}"
+    PASSB_TAG="avg1x${AVG1_N}"
+fi
 
 # The launch environment worth recording: vLLM's memory fraction and the
 # topology, which are the readable difference between the training launcher and
@@ -97,7 +116,7 @@ FORCE=${FORCE:-0}                        # 1 = re-evaluate even a finished run
 # stray export in the operator's shell.
 EVAL_ENV_VARS="GPU_MEM_UTIL N_GPUS TP_SIZE CUDA_VISIBLE_DEVICES CUDA_DEVICE_ORDER
     NCCL_NVLS_ENABLE NCCL_SHM_DISABLE NCCL_P2P_DISABLE NCCL_DEBUG
-    PYTORCH_CUDA_ALLOC_CONF OFFLOAD LOGP_MBS"
+    PYTORCH_CUDA_ALLOC_CONF OFFLOAD LOGP_MBS AVG1_N"
 
 banner () { printf '\n========================================\n%s\n========================================\n' "$*"; }
 free_gb () { df -BG --output=avail "${ROOT}" 2>/dev/null | tail -1 | tr -dc '0-9'; }
@@ -221,14 +240,21 @@ probe_ckpt () {   # <arm> <seed> <run-name> -> one line on stdout
 # So the predicate is the one the rest of this file already uses: evidence, not
 # presence. train_log_done greps for the final step; hf_weights_present looks
 # for weights rather than the directory. An eval is two verl passes, so it needs
-# a key from each -- mean@32 is written by the avg32 pass and mean@1 by avg1 --
-# and requiring both is what distinguishes a finished eval from one whose first
-# pass worked and whose second died. They are the same two keys the summary
-# block below prints.
+# a key from each, and requiring both is what distinguishes a finished eval from
+# one whose first pass worked and whose second died. They are the same two keys
+# the summary block below prints.
+#
+# Keyed by benchmark, not by sample count: AIME24 is only ever in the first pass
+# and MATH500 only in the second. It used to be mean@32 for one and mean@1 for
+# the other, which stopped being a way to tell the passes apart the day the
+# second pass went to 32 samples too (AVG1_N) -- a run whose second pass died
+# would then have counted as finished on its first pass's keys alone.
+passA_done () { grep -qE 'val-core/aime_2024_dapo_boxed/acc/mean@[0-9]+:' "$1"; }
+passB_done () { grep -qE 'val-core/math500/acc/mean@[0-9]+:' "$1"; }
 eval_log_done () {   # <log> -> 0 when both passes left their metric behind
     [ -s "$1" ] || return 1
-    grep -q 'val-core/[^ ]*/acc/mean@32:' "$1" || return 1
-    grep -q 'val-core/[^ ]*/acc/mean@1:'  "$1" || return 1
+    passA_done "$1" || return 1
+    passB_done "$1" || return 1
 }
 
 declare -a QUEUE=()
@@ -240,7 +266,7 @@ add_run () {   # <arm> <seed>
         printf '  skip  %-24s s%-2s %-52s (training log never reached step %s)\n' "$1" "$2" "${rn}" "${want}"
         return
     fi
-    local elog="${LOG_DIR}/eval-$1-s$2.log"
+    local elog="${EVAL_LOG_DIR}/eval-$1-s$2.log"
     if [ "${FORCE}" != "1" ] && eval_log_done "${elog}"; then
         printf '  skip  %-24s s%-2s %-52s (already evaluated)\n' "$1" "$2" "${rn}"
         return
@@ -251,8 +277,8 @@ add_run () {   # <arm> <seed>
     if [ -s "${elog}" ]; then
         printf '  RETRY %-24s s%-2s %-52s (previous attempt left no %s)\n' \
             "$1" "$2" "${rn}" \
-            "$(grep -q 'val-core/[^ ]*/acc/mean@32:' "${elog}" \
-                && echo 'avg1 metric' || echo 'metrics at all')"
+            "$(passA_done "${elog}" \
+                && echo 'second-pass metric' || echo 'metrics at all')"
     fi
     printf '  QUEUE %-24s s%-2s %-52s\n' "$1" "$2" "${rn}"
     QUEUE+=("$1|$2|${rn}")
@@ -425,7 +451,7 @@ if [ -n "${EVAL_REPOS}" ] && [ -z "${HF_CLI}" ]; then
     exit 2
 fi
 
-mkdir -p "${LOG_DIR}" "${STAGE}"
+mkdir -p "${LOG_DIR}" "${EVAL_LOG_DIR}" "${STAGE}"
 
 # -------------------------------------------------- checkpoint resolution
 # Prints the HF model directory to use, or nothing. Sets FETCHED=<dir to rm>
@@ -495,7 +521,7 @@ env_report
 declare -a FAILED=()
 for item in "${QUEUE[@]}"; do
     arm="${item%%|*}"; rest="${item#*|}"; seed="${rest%%|*}"; rn="${rest##*|}"
-    log="${LOG_DIR}/eval-${arm}-s${seed}.log"
+    log="${EVAL_LOG_DIR}/eval-${arm}-s${seed}.log"
 
     avail="$(free_gb)"
     if [ -n "${avail}" ] && [ "${avail}" -lt "${MIN_FREE_GB}" ]; then
@@ -537,8 +563,8 @@ for item in "${QUEUE[@]}"; do
     # the eval runs without per-problem scores, which is why this script
     # refuses to start until --check passes. (An EVAL_RESULTS_DIR used to be
     # exported beside it; nothing in the repo ever read that name.)
-    MODEL_PATH="${mp}" \
-    VAL_DATA_DIR="${ROOT}/validation_data/eval/${arm}-s${seed}" \
+    MODEL_PATH="${mp}" AVG1_N="${AVG1_N}" \
+    VAL_DATA_DIR="${EVAL_VAL_ROOT}/${arm}-s${seed}" \
         bash run/eval_steerf.sh >> "${log}" 2>&1
     st=$?
     printf '[eval] %s s%s exit %s after %s min\n' \
@@ -558,9 +584,9 @@ for item in "${QUEUE[@]}"; do
     if [ "${st}" -ne 0 ]; then
         FAILED+=("${arm}-s${seed}:exit${st}")
     else
-        for k in aime_2024_dapo_boxed:mean@32 math500:mean@1; do
+        for k in aime_2024_dapo_boxed math500; do
             printf '  %-28s %s\n' "${k}" \
-                "$(grep -oE "val-core/${k%%:*}/acc/${k##*:}:[0-9.]+" "${log}" | tail -1)"
+                "$(grep -oE "val-core/${k}/acc/mean@[0-9]+:[0-9.]+" "${log}" | tail -1)"
         done
     fi
 
@@ -575,7 +601,7 @@ done
 
 # --------------------------------------------------------------- summary
 banner "eval finished"
-python3 - "${LOG_DIR}" <<'PY'
+python3 - "${EVAL_LOG_DIR}" <<'PY'
 import re, sys, collections
 from pathlib import Path
 paths = collections.defaultdict(list)
@@ -605,14 +631,16 @@ collision=$?
 # (2026-09-28), and it belongs where the logs are made rather than in a chat
 # message someone has to remember to paste.
 echo
-python3 scripts/check_eval_logs.py "${LOG_DIR}"/eval-*.log
+python3 scripts/check_eval_logs.py "${EVAL_LOG_DIR}"/eval-*.log
 incoherent=$?
 [ "${incoherent}" -eq 0 ] || echo "  a log above disagrees with itself -- do not collect or publish it"
 
 echo
-echo "Next:  python3 scripts/collect_results.py --logs ${LOG_DIR} --out results/summary.tsv"
-echo "       python3 scripts/analyze_seeds.py --git-ref origin/paper --eval-table results/summary.tsv"
-echo "       python3 scripts/eval_paired_se.py --val-data ${ROOT}/validation_data/eval"
+SUMMARY_TSV="results/summary.tsv"
+[ "${AVG1_N}" = "1" ] || SUMMARY_TSV="results/summary_k${AVG1_N}.tsv"
+echo "Next:  python3 scripts/collect_results.py --logs ${EVAL_LOG_DIR} --out ${SUMMARY_TSV}"
+echo "       python3 scripts/analyze_seeds.py --git-ref origin/paper --eval-table ${SUMMARY_TSV}"
+echo "       python3 scripts/eval_paired_se.py --val-data ${EVAL_VAL_ROOT} --passes ${PASSB_TAG}"
 if [ "${#FAILED[@]}" -gt 0 ]; then
     echo
     echo "${#FAILED[@]} run(s) did not produce a clean eval:"

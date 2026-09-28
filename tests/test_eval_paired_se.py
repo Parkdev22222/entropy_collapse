@@ -207,3 +207,53 @@ def test_a_nan_never_reaches_the_page():
     s = mod.summarise([1.0], [1.0], [0.0])
     assert math.isnan(s["se_paired"])
     assert mod.fmt(s["se_paired"], "err") is None
+
+
+# ------------------------------------------- k samples per problem (AVG1_N=32)
+def write_k(root, arm, seed, per_problem, k, tag="avg1x32"):
+    """per_problem: {data_source: [number correct out of k, ...]} -> an
+    interleaved dump, each problem as k consecutive rows, the way verl's
+    repeat(interleave=True) writes it."""
+    spec = {ds: [(f"p{ds}{i}", 1 if j < c else 0) for i, c in enumerate(cs) for j in range(k)]
+            for ds, cs in per_problem.items()}
+    return write_run(root, arm, seed, spec, tag=tag)
+
+
+def test_k_samples_collapse_to_one_score_per_problem(tmp_path):
+    """Pairing is over problems, not over the 32 draws of each: 32 rows of one
+    problem are one observation with a fractional score."""
+    write_k(tmp_path, "signed", 4, {"math500": [32, 16, 0], "minerva_math": [8],
+                                    "olympiadbench": [4]}, 32)
+    write_k(tmp_path, "uniform", 4, {"math500": [16, 16, 0], "minerva_math": [8],
+                                     "olympiadbench": [0]}, 32)
+    rep = mod.analyse(mod.discover(tmp_path, ("avg1x32",)))
+    pooled = rep["contrasts"][0]["pooled"]
+    assert pooled["n_problems"] == 5
+    # per-problem differences: .5, 0, 0, 0, .125
+    assert pooled["mean_diff"] == pytest.approx((0.5 + 0.125) / 5)
+    assert pooled["discordance"] == pytest.approx((0.5 + 0.125) / 5)
+
+
+def test_one_sample_per_problem_reads_exactly_as_before(two_arms):
+    """At k=1 the generalised discordance is the old disagreement rate."""
+    rep = mod.analyse(mod.discover(two_arms))
+    pooled = rep["contrasts"][0]["pooled"]
+    assert pooled["discordance"] == pytest.approx(1 / 12)
+
+
+def test_a_block_that_is_not_one_problem_is_refused(tmp_path):
+    d = write_k(tmp_path, "signed", 4, {"math500": [2, 1]}, 2)
+    lines = (d / "0.jsonl").read_text().splitlines()
+    lines[1], lines[2] = lines[2], lines[1]          # break the interleaving
+    (d / "0.jsonl").write_text("\n".join(lines) + "\n")
+    with pytest.raises(SystemExit, match="not 2 samples of one problem"):
+        mod.discover(tmp_path, ("avg1x32",))
+
+
+def test_a_macro_prefix_keeps_two_evaluations_apart(two_arms, tmp_path):
+    tex = tmp_path / "first.tex"
+    assert mod.main(["--val-data", str(two_arms), "--out", str(tmp_path / "r.json"),
+                     "--tex", str(tex), "--macro-prefix", "First"]) == 0
+    body = tex.read_text()
+    assert "\\providecommand{\\FirstPairsigneduniform}" in body
+    assert "\\providecommand{\\Pairsigneduniform}" not in body
