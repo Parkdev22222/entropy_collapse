@@ -93,10 +93,12 @@ def test_the_contrast_is_against_signed_at_the_same_seed(tmp_path):
     """
     logs = tmp_path / "logs"
     logs.mkdir()
-    write_log(logs / f"train-steer-f-{TAG}-s1-tree-rollout.log", "0.300", "0.400")
-    write_log(logs / f"train-steer-f-{TAG}-s4-tree-rollout.log", "0.200", "0.250")
+    write_log(logs / f"train-steer-f-{TAG}-s1-tree-rollout.log",
+              "0.300", "0.400", gpus=4)
+    write_log(logs / f"train-steer-f-{TAG}-s4-tree-rollout.log",
+              "0.200", "0.250", gpus=4)
     write_log(logs / f"train-steer-f-{TAG}-s4-tree-rollout-oracle.log",
-              "0.150", "0.200")
+              "0.150", "0.200", gpus=4)
     m = run(tmp_path, logs)
     assert m["Roracleseed"] == "4"
     assert m["Fsignedoracleacc"] == "+.0500", m["Fsignedoracleacc"]
@@ -132,13 +134,17 @@ def test_the_cost_saving_is_measured_against_the_same_seed(tmp_path):
     assert m["Fsignedoraclesaving"] == "20.0", m["Fsignedoraclesaving"]
 
 
-def test_a_step_time_across_two_boxes_is_not_reported(tmp_path):
+def test_a_contrast_across_two_boxes_is_not_reported(tmp_path):
     """A seed index names a machine for the main arms, not for these.
 
     The lambda sweep ran at seed 1 on the four-GPU box while STEER-F seed 1 ran
-    on the two-GPU one; differencing those step times reports the machine as
-    the ablation, and produced a sixty-eight percent "saving" from changing a
-    damping coefficient. Without a matching topology there is no number.
+    on the two-GPU one. Differencing those step times reported the machine as
+    the ablation -- a sixty-eight percent "saving" from changing a damping
+    coefficient -- and the ACCURACY difference is worse, because the machine is
+    worth about the size of these contrasts and the larger box scores higher,
+    so the confound flatters the follow-up. A first version of this gate
+    covered the step time only. Without a matching topology there is no
+    contrast at all; the row itself is still reported, with its box.
     """
     logs = tmp_path / "logs"
     logs.mkdir()
@@ -147,9 +153,13 @@ def test_a_step_time_across_two_boxes_is_not_reported(tmp_path):
     write_log(logs / f"train-steer-f-{TAG}-s4-tree-rollout-oracle.log",
               "0.150", sec="400.0", gpus=4)
     m = run(tmp_path, logs)
-    assert m["Fsignedoracleacc"] == "+.0500", m["Fsignedoracleacc"]
-    assert m["Fsignedoraclesaving"] == "\\PENDING", m["Fsignedoraclesaving"]
-    assert m["Fsignedoraclecost"] == "\\PENDING", m["Fsignedoraclecost"]
+    # The row survives and says which box it was.
+    assert m["Roracleacc"] == ".1500", m["Roracleacc"]
+    assert m["Roraclegpus"] == "4", m["Roraclegpus"]
+    # The contrast does not.
+    for k in ("Fsignedoracleacc", "Fsignedoraclemaj",
+              "Fsignedoraclecost", "Fsignedoraclesaving"):
+        assert k not in m or m[k] == "\\PENDING", (k, m.get(k))
 
 
 def test_a_log_whose_dump_disagrees_with_its_name_is_excluded(tmp_path):

@@ -753,6 +753,19 @@ def main(argv=None) -> int:
         ssteps = per_step.get("signed", {}).get(followup_seed[stem])
         if not ssteps:
             continue
+        # SAME SEED IS NOT SAME BOX for these arms, and the whole contrast --
+        # not just its step time -- dies on that. Every seed-1 follow-up ran on
+        # the four-GPU box while signed seed 1 ran on the two-GPU one, and the
+        # machine is worth Boxdelta ~ +.009 in accuracy, which is the size of
+        # these contrasts. A first version of this gate covered only the step
+        # time and let the accuracy through; it reported the box as the
+        # ablation, in the direction that flatters the follow-up, because the
+        # larger box scores higher. No matching topology, no contrast.
+        same_box = (followup_topo.get(stem) is not None
+                    and followup_topo.get(stem) == topo.get(("signed",
+                                                             followup_seed[stem])))
+        if not same_box:
+            continue
         pts = sorted(set(ssteps) & set(fsteps))
         row: dict[str, float] = {"n": float(len(pts))}
         for metric in ("acc", "maj"):
@@ -765,18 +778,8 @@ def main(argv=None) -> int:
         # is the one the oracle arm is for, and both sides are plateau()'s
         # non-validation step mean so neither carries the validation step's
         # extra AIME24 pass.
-        #
-        # Gated on the two runs having the same box. A seed index names a
-        # machine for the main campaign (Section 12.5) but not for these arms:
-        # the lambda sweep ran at seed 1 on the four-GPU box while signed s1
-        # ran on the two-GPU one, and differencing those step times reports the
-        # machine as the ablation -- a seventy-percent "saving" from changing a
-        # damping coefficient. No topology, no number.
         sagg = per_seed["signed"][followup_seed[stem]]
-        same_box = (followup_topo.get(stem) is not None
-                    and followup_topo.get(stem) == topo.get(("signed",
-                                                             followup_seed[stem])))
-        if same_box and "s_per_step" in sagg and "s_per_step" in followups[stem]:
+        if "s_per_step" in sagg and "s_per_step" in followups[stem]:
             row["ref"] = sagg["s_per_step"]
             row["cost"] = sagg["s_per_step"] - followups[stem]["s_per_step"]
             row["saving"] = 100.0 * row["cost"] / sagg["s_per_step"]
@@ -1194,6 +1197,10 @@ def main(argv=None) -> int:
             # sentence anybody has to keep in step by hand.
             fh.write(mac(f"R{stem}seed", followup_seed.get(stem), "{:d}"))
             fh.write(mac(f"R{stem}cost", agg.get("s_per_step"), "{:.0f}"))
+            # Which box, always -- not only when it matches. A row whose box
+            # differs from its reference's has no Fsigned* contrast at all, and
+            # the caption has to be able to say why.
+            fh.write(mac(f"R{stem}gpus", followup_topo.get(stem), "{:d}"))
         for stem, st in sorted(fcontrast.items()):
             for c in ("acc", "maj"):
                 if c in st:

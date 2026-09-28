@@ -1785,8 +1785,13 @@ The seed is whichever one the arm was run at, and the release emits it with the 
 the \textsc{oracle} arm is seed $\num{Roracleseed}$, run there so that it shares a
 seed with the STEER-F and \textsc{uniform} runs the six-benchmark evaluation pairs.
 The $\lambda = 0.25$ line is the reference and is Table~\ref{tab:plateau}'s
-across-seed mean rather than one run. Each block isolates one element of the
-design.}
+across-seed mean rather than one run. Every row but \textsc{oracle} ran on the
+$\num{Rlamzerogpus}$-GPU box while the seed-1 STEER-F reference ran on the smaller
+one, so those rows carry the machine effect of Section~\ref{sec:res:seeds}
+($\num{Boxdelta}$, in the direction that flatters them) on top of whatever the
+ablation does. The release emits a same-seed contrast for \textsc{oracle} alone,
+because it is the one row whose box matches its reference's. Each block isolates one
+element of the design.}
 \label{tab:followups}
 \end{table}
 
@@ -1840,11 +1845,15 @@ margin. Its uplift, $\num{Rlamzerouplift}$, is not below STEER-F's
 $\num{Rsigneduplift}$. What remains for the forecast is the accuracy gap between
 $\num{Rlamzeroacc}$ and $\num{Rsignedacc}$.
 
-Two things keep this from being decisive, and neither rescues the original reading.
-Every cell here is one run, and the spread across this block is about twice the
-run-to-run spread measured in Section~\ref{sec:res:seeds} --- suggestive, not
-settled. And the $\lambda$ sweep is not monotone: $\lambda = .1$ sits below
-$\lambda = 0$ on accuracy, which is what noise looks like at this sample size. We
+Three things keep this from being decisive, and none of them rescues the original
+reading. Every cell here is one run, and the spread across this block is about twice
+the run-to-run spread measured in Section~\ref{sec:res:seeds} --- suggestive, not
+settled. The $\lambda$ sweep is not monotone: $\lambda = .1$ sits below
+$\lambda = 0$ on accuracy, which is what noise looks like at this sample size. And
+the row ran on the $\num{Rlamzerogpus}$-GPU box while the seed-1 references it is
+read against did not, so the $\num{Boxdelta}$ of Section~\ref{sec:res:seeds} sits
+inside this comparison and points the same way as the conclusion drawn from it: the
+sampler's share is an upper bound, not an estimate. We
 report the block as measured and do not reconcile it. The five-seed campaign of
 Appendix~\ref{sec:appendix-prereg} decides whether the sampler or the forecast
 carries the structural term; until then, \textsc{uniform} and \textsc{permuted}
