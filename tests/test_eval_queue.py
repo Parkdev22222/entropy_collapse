@@ -304,3 +304,40 @@ def test_the_queue_waits_between_runs_like_the_training_queues(tmp_path):
     assert "await_gpus" in run_loop, "nothing waits between runs"
     # the fixed sleep it replaced was a guess at the same wait
     assert "sleep 30" not in body
+
+
+# --- the log has to say what it ran under -----------------------------------
+
+def test_each_eval_log_records_its_own_environment():
+    """Three evals died at NCCL init with an identical message and no record.
+
+    The one concrete difference from the training launches that DID finish on
+    the same host -- vLLM's memory fraction -- was findable only by reading
+    verl's config dump by eye, and nothing said which NCCL knobs each attempt
+    carried. A launcher that leaves no record of its own environment cannot be
+    debugged from its logs.
+    """
+    body = (ROOT / "run" / "run_eval_all.sh").read_text()
+    loop = body[body.index("for item in \"${QUEUE[@]}\""):]
+    assert "### env" in loop, "the run log must record the launch environment"
+    for v in ("GPU_MEM_UTIL", "NCCL_NVLS_ENABLE", "CUDA_DEVICE_ORDER"):
+        assert v in loop, f"{v} is one of the knobs that differ; record it"
+    # The header is written first, so eval_steerf.sh's output has to APPEND or
+    # it truncates the very thing the header was added for.
+    assert 'bash run/eval_steerf.sh >> "${log}"' in loop
+    assert 'bash run/eval_steerf.sh > "${log}"' not in loop
+
+
+def test_the_disproven_diagnosis_is_not_asserted_in_the_comments():
+    """182f2bd's comment claimed leftover CUDA contexts were the 401's cause.
+
+    The next attempt passed the VRAM gate and died at the same line, and four
+    training runs are on record finishing on the same host with no NVLS line at
+    all -- so the box can do four-GPU NCCL and the difference is between the
+    launchers. The gate stays (the training queues all have it); the claim goes.
+    """
+    body = (ROOT / "run" / "run_eval_all.sh").read_text()
+    assert "that is exactly what happened" not in body
+    assert "two dead passes and no benchmark" not in body
+    # and the correction is recorded where the next reader will be
+    assert "the diagnosis was wrong" in body

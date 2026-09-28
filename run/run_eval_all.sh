@@ -276,17 +276,25 @@ fi
 # is_busy only greps main_ppo off a command line. _arms.sh's own comment at
 # gpu_holders says what that misses: a run that died leaves ray::WorkerDict and
 # vLLM engine processes holding CUDA contexts, none of which match, so the queue
-# reports an idle box and starts -- and NCCL then dies at init with
-#     Cuda failure 401 'the operation cannot be performed in the present state'
-# On 2026-09-28 that is exactly what happened to this queue, twice in one
-# invocation: the first pass died on leftovers, and the second died on the
-# first pass's own leftovers because nothing waited in between. The three
-# training queues have called await_gpus since September; this one never did.
+# reports an idle box and starts -- and NCCL then dies at init. The three
+# training queues have called await_gpus since September; this one never did,
+# which is a real gap and is why the call is here.
 #
-# It REFUSES where they warn. They warn because a sixteen-hour training arm
-# should not stop unattended on a holder that is not ours; an eval is twenty to
-# forty minutes per checkpoint and costs nothing to restart, and "starting
-# anyway" is what produced two dead passes and no benchmark.
+# It is NOT, however, the cause of the 2026-09-28 failure it was added for.
+# That was diagnosed as leftover contexts and the diagnosis was wrong: the
+# next attempt passed this gate and died at the same line with the same
+# "Cuda failure 401" out of transport/nvls.cc. The premise behind the
+# diagnosis -- that training works on this box and only the eval fails, so it
+# must be residue -- was half right and never checked: four training runs did
+# finish on this exact host with no NVLS line anywhere in their logs, so the
+# box can do four-GPU NCCL and the difference is between the two LAUNCHERS,
+# not between two moments on the same box. eval_steerf.sh and _gpu_defaults.sh
+# are donor-owned and absent from this branch, so the difference is not
+# readable from here; the env dump below is what makes it readable from a log.
+#
+# It REFUSES where the training queues warn. They warn because a sixteen-hour
+# training arm should not stop unattended on a holder that is not ours; an eval
+# is twenty to forty minutes per checkpoint and costs nothing to restart.
 if ! await_gpus "${GPU_WAIT:-60}"; then
     if [ "${ALLOW_BUSY_GPUS:-0}" != "1" ]; then
         echo "REFUSE: VRAM is still held; NCCL would fail at init, not at the benchmark." >&2
@@ -419,6 +427,22 @@ for item in "${QUEUE[@]}"; do
     echo "  model      ${mp}"
     echo "  log        ${log}"
     echo "  fetched    ${FETCHED:-no (local)}"
+    # What the run was launched under, into the run's own log. Three evals died
+    # at NCCL init on 2026-09-28 with an identical message and nothing anywhere
+    # said which environment each had; the one concrete difference from the
+    # training launches that did finish on the same host -- vLLM's memory
+    # fraction -- was only findable by reading verl's config dump by eye. A
+    # launcher that leaves no record of its own environment cannot be debugged
+    # from its logs, which is most of what those three attempts cost.
+    { echo "### run_eval_all.sh  run=${rn}  arm=${arm}  seed=${seed}"
+      echo "### host=$(hostname)  $(date -Is)"
+      for v in GPU_MEM_UTIL N_GPUS TP_SIZE CUDA_VISIBLE_DEVICES CUDA_DEVICE_ORDER \
+               NCCL_NVLS_ENABLE NCCL_SHM_DISABLE NCCL_P2P_DISABLE NCCL_DEBUG \
+               PYTORCH_CUDA_ALLOC_CONF OFFLOAD LOGP_MBS; do
+          printf '### env %s=%s\n' "${v}" "${!v-<unset>}"
+      done
+      echo "### shm=$(df -h /dev/shm 2>/dev/null | awk 'NR==2{print $2}')"
+    } > "${log}"
     start=$(date +%s)
 
     # VAL_DATA_DIR is the one instrument_phase2.sh reads: it inserts
@@ -429,7 +453,7 @@ for item in "${QUEUE[@]}"; do
     # exported beside it; nothing in the repo ever read that name.)
     MODEL_PATH="${mp}" \
     VAL_DATA_DIR="${ROOT}/validation_data/eval/${arm}-s${seed}" \
-        bash run/eval_steerf.sh > "${log}" 2>&1
+        bash run/eval_steerf.sh >> "${log}" 2>&1
     st=$?
     printf '[eval] %s s%s exit %s after %s min\n' \
         "${arm}" "${seed}" "${st}" "$(( ($(date +%s) - start) / 60 ))"
