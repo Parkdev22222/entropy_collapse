@@ -1685,8 +1685,8 @@ each benchmark twice on the same line, as accuracy and as the mean of a reward t
 $+1$ for a correct sample and $-1$ otherwise, so on every benchmark the accuracy must
 equal half of one plus the reward; the release checks this for every evaluation log
 (\texttt{scripts/check\_eval\_logs.py}). It is a test of coherence, not of provenance
---- an edit that moved both numbers together would pass it. The arms without a row,
-\num{Benchmissing}, have no evaluation that passes it yet. Each row averages the
+--- an edit that moved both numbers together would pass it. Not yet in the table, for
+want of an evaluation that passes it: \num{Benchmissing}. Each row averages the
 checkpoints evaluated at the seeds in its last column.
 
 One of the six is not held out. The checkpoint behind each row is the argmax of that
@@ -2189,7 +2189,7 @@ which is also the set the checkpoints were selected on. The gap this paragraph n
 is narrowed, not closed. The figure that narrows it rests on the seeds evaluated so
 far ($\num{Pairnseeds}$) and on one sample per problem at the validation temperature,
 so it carries the sampling noise of a single generation as well as the spread in
-difficulty; and \num{Benchmissing} have no evaluation in it yet.
+difficulty; and the evaluation does not yet include \num{Benchmissing}.
 
 \paragraph{One prediction of the analysis is unmeasured.}
 Section~\ref{sec:blind} argues that the two channels are anti-correlated. The
