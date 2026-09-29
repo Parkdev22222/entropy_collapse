@@ -64,7 +64,12 @@ REPORTED_ONLY = ("gsm8k_test",)
 # names STEER-F - uniform as the contrast whose straddling zero would refute
 # the paper.  scripts/analyze_seeds.py emits direction consistency for the
 # same two, from the same evaluation.
-CONTRASTS = (("signed", "uniform"), ("signed", "permuted"))
+#
+# The LoRA campaign adds a third, registered in docs/preregistration_lora.md:
+# the treatment (realised entropy) against the same treatment with the MTP
+# forecaster, which also changes exactly one thing. With no signed-mtp dumps
+# it has no shared seed and emits nothing, as before.
+CONTRASTS = (("signed", "uniform"), ("signed", "permuted"), ("signed", "signed-mtp"))
 
 # macro stem -> (contrast index or None, key, format).  tests/test_paper.py
 # reads this table to decide which slots a run can fill, so a name here is a
@@ -83,6 +88,11 @@ MACROS = {
     "Pairsignedpermutedunpse":  (1,    "se_unpaired",  "err"),
     "Pairsignedpermutedt":      (1,    "t",            "t"),
     "Pairsignedpermuteddisc":   (1,    "discordance",  "rate"),
+    "Pairsignedmtp":            (2,    "mean_diff",    "signed"),
+    "Pairsignedmtpse":          (2,    "se_paired",    "err"),
+    "Pairsignedmtpunpse":       (2,    "se_unpaired",  "err"),
+    "Pairsignedmtpt":           (2,    "t",            "t"),
+    "Pairsignedmtpdisc":        (2,    "discordance",  "rate"),
 }
 
 RUN_DIR = re.compile(r"^(?P<arm>[a-z0-9.-]+)-s(?P<seed>\d+)$")

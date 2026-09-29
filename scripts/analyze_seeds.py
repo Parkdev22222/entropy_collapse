@@ -142,6 +142,10 @@ FOLLOWUP_ARMS = {
     "opo-steer":    "oposteer",
     # Stock STEER at the released token_weight_min=0.8 rather than our 0.7.
     "wmin-steer":   "wminsteer",
+    # LoRA campaign: the treatment with the MTP forecaster (the method itself
+    # reads the realised entropy there). Three seeds; the paired six-benchmark
+    # contrast is eval_paired_se.py's third.
+    "signed-mtp":   "signedmtp",
 }
 CONTRASTS = [("signed", "grpo"), ("signed", "steer"), ("signed", "uniform"),
              ("signed", "permuted"), ("steer", "grpo"), ("uniform", "steer")]
@@ -553,6 +557,9 @@ def main(argv=None) -> int:
                     help="the default: average each arm over every seed it has")
     ap.add_argument("--long-steps", type=int, default=200,
                     help="final step of the compute-matched grpo-long control")
+    ap.add_argument("--run-prefix", default="",
+                    help="prepended to every run name, e.g. 'lora-' for the LoRA "
+                         "campaign (run/_lora_arms.sh LORA_PREFIX)")
     ap.add_argument("--macro-prefix", default="",
                     help="prepend this to every macro name, so a backbone's run "
                          "can be analysed with the same code and merged into one "
@@ -587,7 +594,7 @@ def main(argv=None) -> int:
 
     def run_name(arm: str, seed: int) -> str:
         t = args.model_tag
-        return {
+        return args.run_prefix + {
             "grpo": f"grpo-{t}-s{seed}",
             "steer": f"steer-{t}-s{seed}",
             "signed": f"steer-f-{t}-s{seed}-tree-rollout",
@@ -606,6 +613,7 @@ def main(argv=None) -> int:
             "opo-signed": f"steer-f-{t}-s{seed}-tree-rollout-opo",
             "opo-steer": f"steer-{t}-s{seed}-opo",
             "wmin-steer": f"steer-{t}-s{seed}-wmin08",
+            "signed-mtp": f"steer-f-{t}-s{seed}-tree-rollout-mtp",
         }[arm]
 
     def reached(path: Path, want: int) -> bool:

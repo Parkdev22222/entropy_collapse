@@ -169,7 +169,7 @@ def test_the_analyser_and_the_queue_agree_on_every_run_name():
     src = (Path(__file__).resolve().parent.parent
            / "scripts" / "analyze_seeds.py").read_text()
     body = re.search(r"def run_name\(arm: str, seed: int\) -> str:\n"
-                     r"\s+t = args\.model_tag\n\s+return (\{.*?\n\s+\})\[arm\]",
+                     r"\s+t = args\.model_tag\n\s+return (?:args\.run_prefix \+ )?(\{.*?\n\s+\})\[arm\]",
                      src, re.S)
     assert body, "analyze_seeds.run_name no longer has a literal table"
     arms = [k.value for k in ast.parse(body.group(1), mode="eval").body.keys]

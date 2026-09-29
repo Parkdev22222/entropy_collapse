@@ -66,3 +66,18 @@ def test_grpo_long_final_is_step_200(tmp_path):
 def test_bad_point_and_arm(tmp_path):
     assert run(tmp_path, "signed", "1", "middle").returncode == 2
     assert run(tmp_path, "nosuch", "1", "final").returncode == 2
+
+
+def test_best_equal_to_final_reuses_the_final_eval(tmp_path):
+    make_run(tmp_path, best=110)
+    final = tmp_path / "logs" / "eval-final-k32" / "eval-signed-s1.log"
+    final.parent.mkdir(parents=True)
+    final.write_text("step:0 - val-aux/aime_2024_dapo_boxed/reward/mean@32:-0.8 - "
+                     "val-core/aime_2024_dapo_boxed/acc/mean@32:0.1 - "
+                     "val-aux/math500/reward/mean@32:0.0 - "
+                     "val-core/math500/acc/mean@32:0.5\n")
+    r = run(tmp_path, "signed", "1", "best", dry=False)
+    assert r.returncode == 0, r.stderr
+    best = tmp_path / "logs" / "eval-best-k32" / "eval-signed-s1.log"
+    assert "best = final" in best.read_text()
+    assert "math500/acc/mean@32:0.5" in best.read_text()

@@ -80,6 +80,27 @@ fi
 [ -f "${ADAPTER}/adapter_model.safetensors" ] || { echo "FAIL: no adapter at ${ADAPTER}" >&2; exit 1; }
 [ "${DRY}" = 1 ] && exit 0
 
+# The best is often the last step itself. Then the two points are one
+# checkpoint, and three hours of sampling would measure it twice; the best's
+# log is the final's, marked as such. (Sampling is not seeded per eval, so two
+# evals of one checkpoint would even disagree slightly -- one record is right.)
+if [ "${POINT}" = best ] && [ "${STEP}" = "$(steps_for_arm "${ARM}")" ]; then
+    FINAL_LOG="${LOG_ROOT}/eval-final-k${N}/eval-${ARM}-s${SEED}.log"
+    if [ -f "${FINAL_LOG}" ] && grep -q "val-core/math500/acc/mean@${N}" "${FINAL_LOG}" \
+            && python3 scripts/check_eval_logs.py "${FINAL_LOG}" >/dev/null 2>&1; then
+        mkdir -p "${EVAL_DIR}"
+        { echo "### eval_lora.sh: best = final (step ${STEP}); copied from ${FINAL_LOG}"
+          cat "${FINAL_LOG}"; } > "${LOG}"
+        if [ -d "${ROOT}/validation_data/lora/eval-final-k${N}/${ARM}-s${SEED}" ]; then
+            mkdir -p "$(dirname "${VAL_DIR}")"
+            rm -rf "${VAL_DIR}"
+            cp -r "${ROOT}/validation_data/lora/eval-final-k${N}/${ARM}-s${SEED}" "${VAL_DIR}"
+        fi
+        echo "[eval-lora]   best is the final step; reused ${FINAL_LOG}"
+        exit 0
+    fi
+fi
+
 python3 scripts/merge_lora.py --base "${BASE_MODEL}" --adapter "${ADAPTER}" --out "${MERGED}" \
     || { echo "FAIL: merge of ${ADAPTER}" >&2; exit 1; }
 
