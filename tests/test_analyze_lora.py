@@ -71,3 +71,9 @@ def test_no_collapse_is_said_so(tmp_path):
 def test_without_the_flag_nothing_changes(tmp_path):
     m = analyse(tmp_path, campaign(tmp_path))
     assert "Nmtp" not in m and "Collapseverdict" not in m
+
+
+def test_verdict_words_are_emitted(tmp_path):
+    m = analyse(tmp_path, campaign(tmp_path), "--lora")
+    for k in ("Dissocverdict", "Matchcensored", "Collapseverdict"):
+        assert k in m, k

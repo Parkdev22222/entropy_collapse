@@ -22,7 +22,7 @@ them. One of them informed a design choice below and is disclosed in §4.
 |---|---|
 | Model | Qwen2.5-Math-1.5B |
 | Training data | DAPO-Math-17k, batch 512 prompts x 8 rollouts, mini-batch 32, micro-batch 8 |
-| Steps | 110 (grpo-long: 200), lr constant, no warm-up |
+| Steps | 150 for every run (about 4.4 epochs), lr constant, no warm-up |
 | LoRA | rank 64, alpha 32, all linear layers, lr 1e-5 (`run/_lora_defaults.sh`) |
 | Policy loss | clip 0.2 / 0.28 / c 10, no KL, no entropy bonus |
 | Token weights | [0.7, 1.0] for every weighted arm: STEER's published value (lambda_min 0.7, exponential map capped at 1.0); STEER-F's min-max map uses the same range |
@@ -36,8 +36,10 @@ them. One of them informed a design choice below and is disclosed in §4.
 Core, seeds 1-3: `grpo`, `steer` (lambda 0), `uniform`, `permuted`, `signed`
 (the method, STEER-V), `mtp` (STEER-V with the MTP forecaster). Follow-ups, seed 1: `lam0.1`, `lam0.5`, `lam0-tree`,
 `wmin-steer` (STEER at the released script's 0.8), `xclip-signed`, `xclip-steer`,
-`rloo-signed`, `rloo-steer`, `opo-signed`, `opo-steer`, `grpo-long`
-(compute-matched GRPO). Definitions: `run/_lora_arms.sh`.
+`rloo-signed`, `rloo-steer`, `opo-signed`, `opo-steer`. There is no separate long
+GRPO run: the compute-matched point is read off the regular GRPO run
+(censored, and said so, if GRPO is the cheaper arm). Definitions:
+`run/_lora_arms.sh`.
 
 **The method reads H_togo from the realised entropy of the rollout**
 (`STEERF_FORECAST=oracle`) -- no MTP heads, no Phase 1, no extra forward pass.
@@ -77,7 +79,7 @@ as the rest.
 
 **Secondary.** (a) The same evaluation at the AIME24-best checkpoint, labelled
 in-sample for AIME24. (b) AIME24 plateau accuracy, mean over validation steps
-40-110, paired within seed (`scripts/analyze_seeds.py`).
+40-150, paired within seed (`scripts/analyze_seeds.py`).
 
 **Registered contrasts.** signed - grpo, signed - steer, signed - uniform,
 signed - permuted, steer - grpo, uniform - steer, signed - mtp.
@@ -101,9 +103,10 @@ thing; they carry the claim.
 
 A reviewer's first question: LoRA's low-rank constraint may itself slow the
 sharpening that collapse describes, leaving the method nothing to fix. So,
-fixed now: for `grpo`, report `actor/entropy` at steps 10 and 110 per seed.
-**Collapse** = the step-110 value below half the step-10 value in all three
-seeds (the full fine-tuning pilot went .311 -> .146). If GRPO does not
+fixed now: for `grpo`, report `actor/entropy` at step 10 and at the last step
+(150) per seed. **Collapse** = the last-step value below half the step-10
+value in all three seeds (the full fine-tuning pilot went .311 -> .146 over
+110 steps). If GRPO does not
 collapse by this definition, the paper says so and does not motivate the
 method by collapse under LoRA.
 
@@ -113,7 +116,11 @@ Full fine-tuning (second paper), other backbones, pass@k, code benchmarks.
 
 ## Amendments
 
-None after the first run. One correction before it, 2026-09-29, recorded
+None after the first run. Two changes before it, recorded because this
+file had already been committed. (1) 2026-09-29: training length set to 150
+steps for every run (was 110, with a 200-step compute-matched GRPO), the
+plateau window to 40-150, and the separate long GRPO run dropped in favour
+of reading the compute-matched point off the regular GRPO run. (2) One correction, 2026-09-29, recorded
 because this file had already been committed: condition 3 first read "aggregate
 entropy orders the arms the same way accuracy does", which the full
 fine-tuning manuscript had retired as the wrong instrument (it treats the

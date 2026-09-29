@@ -16,13 +16,13 @@
 #                  seed by seed -- a queue stopped part-way leaves whole seeds
 #   eval-core      six benchmarks at 32 samples/problem, at the last step
 #                  (primary) and at the AIME24 best (secondary)
-#   followups      eleven ablations at seed 1 (run/_lora_arms.sh)
+#   followups      ten ablations at seed 1 (run/_lora_arms.sh)
 #   eval-followups the same evaluation at their last step
 #   analysis       coherence check, results tables, macros, paired errors
 #
 # WHAT A RUN IS -- run/_lora_arms.sh (arms, names, seeds), run/_lora_defaults.sh
-# (rank 64, alpha 32, lr 1e-5, all-linear), and here: checkpoints every 50
-# steps + the last + the best (KEEP_EVERY=50, verl/trainer/ppo/ckpt_policy.py),
+# (rank 64, alpha 32, lr 1e-5, all-linear; 150 steps), and here: checkpoints
+# every 50 steps + the last + the best (KEEP_EVERY=50, verl/trainer/ppo/ckpt_policy.py),
 # validation every 10 steps, resume on restart.
 #
 # TOPOLOGY -- one value for the whole campaign; the paper states it, and every
@@ -227,12 +227,14 @@ analysis_stage () {
     local seeds; seeds="$(tr ' ' ',' <<<"${LORA_SEEDS}")"
     python3 scripts/analyze_seeds.py --lora --logs "${LOG_DIR}" --run-prefix "${LORA_PREFIX}" \
         --seeds "${seeds}" --balanced --out "${RES_DIR}" \
+        --steps "${STEPS}" --plateau "40:${STEPS}" --eval-point final \
         --eval-table "${RES_DIR}/summary_final.tsv"
     # The secondary endpoint (AIME24-best checkpoint) through the same
     # analysis, every macro prefixed Best so the two cannot be confused.
     if [ -f "${RES_DIR}/summary_best.tsv" ]; then
         python3 scripts/analyze_seeds.py --lora --logs "${LOG_DIR}" --run-prefix "${LORA_PREFIX}" \
             --seeds "${seeds}" --balanced --out "${RES_DIR}/best" \
+            --steps "${STEPS}" --plateau "40:${STEPS}" --eval-point best \
             --eval-table "${RES_DIR}/summary_best.tsv" \
             --macro-prefix Best --tex-macros "${RES_DIR}/numbers-best.tex"
     fi

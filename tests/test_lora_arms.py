@@ -44,7 +44,7 @@ def test_plan_is_seed_major_then_followups():
     plan = lines("lora_plan")
     core = [p for p in plan if p.startswith("core:")]
     fol = [p for p in plan if p.startswith("followups:")]
-    assert len(core) == 6 * 3 and len(fol) == 11
+    assert len(core) == 6 * 3 and len(fol) == 10
     assert plan == core + fol
     seeds = [p.split(":")[2] for p in core]
     assert seeds == sorted(seeds, key=int)          # whole seeds, in order

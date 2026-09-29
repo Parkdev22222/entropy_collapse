@@ -74,7 +74,8 @@ def test_tp4_launches_every_run_with_the_campaign_settings(tmp_path):
     xclip = [x for x in c if "tree-rollout-xclip" in x][0]
     assert "clip_ratio_high=5" in xclip
     wmin = [x for x in c if "wmin08" in x][0]
-    assert "TOKEN_WEIGHT_MIN=0.8" in wmin and "total_training_steps=110" in wmin
+    assert "TOKEN_WEIGHT_MIN=0.8" in wmin and "total_training_steps=150" in wmin
+    assert all("STEPS=150" in x for x in c if "-long" not in x)
     assert r.stdout.count("[lora] OK") == 9
 
 

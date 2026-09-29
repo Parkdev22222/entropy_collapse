@@ -19,9 +19,15 @@
 # resumed from, a full fine-tuning run of the same arm and seed.
 
 LORA_PREFIX=${LORA_PREFIX:-lora-}
+# Every LoRA run trains 150 steps (about 4.4 epochs of the 17k set at batch
+# 512). _arms.sh's steps_for_arm reads STEPS, so the queue, the evaluation
+# (final = step 150) and the checkpoint policy (50, 100, 150) all follow it.
+STEPS=${STEPS:-150}
 LORA_SEEDS=${LORA_SEEDS:-"1 2 3"}
 LORA_CORE_ARMS=${LORA_CORE_ARMS:-"grpo steer uniform permuted signed mtp"}
-LORA_FOLLOWUP_ARMS=${LORA_FOLLOWUP_ARMS:-"lam0.1 lam0.5 lam0-tree wmin-steer xclip-signed xclip-steer rloo-signed rloo-steer opo-signed opo-steer grpo-long"}
+# No grpo-long: the method has no MTP forward, so the compute-matched point is
+# read off the regular GRPO run (analyze_seeds.py --lora), not a longer one.
+LORA_FOLLOWUP_ARMS=${LORA_FOLLOWUP_ARMS:-"lam0.1 lam0.5 lam0-tree wmin-steer xclip-signed xclip-steer rloo-signed rloo-steer opo-signed opo-steer"}
 LORA_FOLLOWUP_SEED=${LORA_FOLLOWUP_SEED:-1}
 LORA_XCLIP="actor_rollout_ref.actor.clip_ratio_high=5 actor_rollout_ref.actor.clip_ratio_low=0.99"
 

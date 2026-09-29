@@ -14,7 +14,7 @@ def run(tmp_path, *args, dry=True):
                           capture_output=True, text=True, env=env)
 
 
-def make_run(tmp_path, arm="signed", seed=1, steps=(50, 70, 100, 110), best=70):
+def make_run(tmp_path, arm="signed", seed=1, steps=(50, 70, 100, 150), best=70):
     name = subprocess.run(["bash", "-c", f"cd {ROOT}; . run/_arms.sh; . run/_lora_arms.sh; "
                                          f"lora_run_name {arm} {seed}"],
                           capture_output=True, text=True).stdout.strip()
@@ -33,7 +33,7 @@ def test_final_is_the_arms_last_step_not_the_best(tmp_path):
     make_run(tmp_path)
     r = run(tmp_path, "signed", "1", "final")
     assert r.returncode == 0, r.stderr
-    assert "step 110" in r.stdout and "global_step_110/actor/lora_adapter" in r.stdout
+    assert "step 150" in r.stdout and "global_step_150/actor/lora_adapter" in r.stdout
     assert "eval-final-k32/eval-signed-s1.log" in r.stdout
 
 
@@ -69,7 +69,7 @@ def test_bad_point_and_arm(tmp_path):
 
 
 def test_best_equal_to_final_reuses_the_final_eval(tmp_path):
-    make_run(tmp_path, best=110)
+    make_run(tmp_path, best=150)
     final = tmp_path / "logs" / "eval-final-k32" / "eval-signed-s1.log"
     final.parent.mkdir(parents=True)
     final.write_text("step:0 - val-aux/aime_2024_dapo_boxed/reward/mean@32:-0.8 - "

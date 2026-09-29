@@ -93,6 +93,9 @@ MACROS = {
     "Pairsignedmtpunpse":       (2,    "se_unpaired",  "err"),
     "Pairsignedmtpt":           (2,    "t",            "t"),
     "Pairsignedmtpdisc":        (2,    "discordance",  "rate"),
+    # docs/preregistration_lora.md section 4 reads this contrast by 2 SE, fixed
+    # before any run; the word is emitted so the text never has to pick it.
+    "Pairsignedmtpverdict":     (2,    "t",            "verdict2se"),
 }
 
 RUN_DIR = re.compile(r"^(?P<arm>[a-z0-9.-]+)-s(?P<seed>\d+)$")
@@ -336,6 +339,12 @@ def fmt(value, how):
         return f"{v:.4f}"
     if how == "t":
         return f"{v:+.2f}"
+    if how == "verdict2se":
+        if v >= 2:
+            return "STEER-V ahead by at least two standard errors"
+        if v <= -2:
+            return "the MTP variant ahead by at least two standard errors"
+        return "not distinguished at two standard errors"
     return f"{v:.3f}"
 
 
