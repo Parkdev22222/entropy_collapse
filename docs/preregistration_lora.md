@@ -110,17 +110,34 @@ value in all three seeds (the full fine-tuning pilot went .311 -> .146 over
 collapse by this definition, the paper says so and does not motivate the
 method by collapse under LoRA.
 
-## 7. Not in this campaign
+## 7. Backbones (added 2026-09-29, before any backbone run)
 
-Full fine-tuning (second paper), other backbones, pass@k, code benchmarks.
+Qwen2.5-Math-7B (scale, same family) and Llama-3.2-3B-Instruct (a different
+pre-training family), each with `grpo`, `steer` and `signed` (STEER-V) at
+seed 1, the same LoRA configuration and 150 steps. No MTP arm and no Phase 1:
+STEER-V needs no heads. The 7B validates and selects on AIME24 like the 1.5B;
+Llama validates on MATH500 (500 problems, one sample), because a model that
+scores near zero on AIME24 cannot separate arms or checkpoints there, and it
+is the instruction-tuned checkpoint because the base one answered almost no
+training problem under this protocol. Every backbone run uses the whole box.
+
+Reported, and nothing more: per backbone, the sign of STEER-V - GRPO and
+STEER-V - STEER on the plateau window and on the six benchmarks at the last
+step, and how many backbones share the 1.5B's sign. One seed per cell carries
+a sign, not a size; no accuracy is compared across backbones.
+
+## 8. Not in this campaign
+
+Full fine-tuning (second paper), Mistral-7B, pass@k, code benchmarks.
 
 ## Amendments
 
-None after the first run. Two changes before it, recorded because this
+None after the first run. Three changes before it, recorded because this
 file had already been committed. (1) 2026-09-29: training length set to 150
 steps for every run (was 110, with a 200-step compute-matched GRPO), the
 plateau window to 40-150, and the separate long GRPO run dropped in favour
-of reading the compute-matched point off the regular GRPO run. (2) One correction, 2026-09-29, recorded
+of reading the compute-matched point off the regular GRPO run. (3) 2026-09-29: the backbone section (7) added, before any backbone run.
+(2) One correction, 2026-09-29, recorded
 because this file had already been committed: condition 3 first read "aggregate
 entropy orders the arms the same way accuracy does", which the full
 fine-tuning manuscript had retired as the wrong instrument (it treats the

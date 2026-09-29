@@ -31,6 +31,36 @@ LORA_FOLLOWUP_ARMS=${LORA_FOLLOWUP_ARMS:-"lam0.1 lam0.5 lam0-tree wmin-steer xcl
 LORA_FOLLOWUP_SEED=${LORA_FOLLOWUP_SEED:-1}
 LORA_XCLIP="actor_rollout_ref.actor.clip_ratio_high=5 actor_rollout_ref.actor.clip_ratio_low=0.99"
 
+# Backbones: does the sign of the headline contrast survive a change of scale
+# (the 7B of the same family) and of pre-training family (Llama)? Three arms,
+# seed 1, the same LoRA and step count. No MTP arm: STEER-V needs no heads,
+# which is also why no backbone needs a Phase 1. Each backbone's model path,
+# validation set and best-checkpoint key come from _arms.sh:backbone_profile.
+LORA_BACKBONES=${LORA_BACKBONES:-"Qwen2.5-Math-7B Llama-3.2-3B-Instruct"}
+LORA_BACKBONE_ARMS=${LORA_BACKBONE_ARMS:-"grpo steer signed"}
+
+# The macro prefix a backbone's numbers carry (B<stem>), the names the
+# manuscript's backbone table reads and tests/test_paper.py knows.
+lora_backbone_stem () {   # <tag>
+    case "$1" in
+        Qwen2.5-Math-7B)        echo qwenbig ;;
+        Llama-3.2-3B-Instruct)  echo llama ;;
+        Mistral-7B-v0.3)        echo mistral ;;
+        *) return 1 ;;
+    esac
+}
+
+# Set up the environment of one backbone: its tag, and the model path,
+# validation parquet and best key backbone_profile assigns. The three are
+# unset first -- backbone_profile keeps a value that is already set, and
+# sourcing _arms.sh has already set them for the 1.5B, so without this a 7B
+# run would quietly train the 1.5B. Call it in a subshell.
+lora_enter_backbone () {   # <tag>
+    export MODEL_TAG="$1"
+    unset MODEL_PATH VAL_PARQUET BEST_METRIC_KEY
+    backbone_profile "$1"
+}
+
 lora_run_name () {   # <arm> <seed>
     local rn
     rn="$(run_name_for "$1" "$2")" || return 1
@@ -71,8 +101,16 @@ lora_needs_heads () {   # <arm>  -> 0 when the arm reads the MTP heads
 # Every run of the campaign, in the order it trains: the core seed by seed
 # (a queue stopped part-way leaves whole seeds, never four arms at three seeds
 # and two at one), then the follow-ups. One "stage:arm:seed" per line.
-lora_plan () {   # [core|followups|all]
-    local which=${1:-all} s a
+lora_plan () {   # [core|followups|backbones|all]
+    local which=${1:-all} s a b
+    if [ "${which}" = backbones ]; then
+        # Backbone-major: all three arms of one backbone before the next, so a
+        # stopped queue leaves whole backbones. Fourth field: the model tag.
+        for b in ${LORA_BACKBONES}; do
+            for a in ${LORA_BACKBONE_ARMS}; do echo "backbones:${a}:1:${b}"; done
+        done
+        return 0
+    fi
     if [ "${which}" != followups ]; then
         for s in ${LORA_SEEDS}; do
             for a in ${LORA_CORE_ARMS}; do echo "core:${a}:${s}"; done

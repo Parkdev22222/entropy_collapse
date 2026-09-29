@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 FAKE = r'''#!/usr/bin/env bash
 { printf 'CALL %s' "$(basename "$0")"
-  for v in SEED RUN_NAME STEPS KEEP_EVERY ARM STEERF_FORECAST STEERF_LAM TOKEN_WEIGHT_MIN \
+  for v in SEED RUN_NAME STEPS KEEP_EVERY ARM STEERF_FORECAST STEERF_LAM TOKEN_WEIGHT_MIN MODEL_PATH \
            CUDA_VISIBLE_DEVICES RAY_STOP RESUME SAVE_BEST_ONLY SAVE_AFTER_OVERRIDE; do
       [ -n "${!v:-}" ] && printf ' %s=%s' "$v" "${!v}"
   done
@@ -107,3 +107,21 @@ def test_shards_split_the_runs(tmp_path):
     run(root, bin_, tmp_path, SHARD="1/2")
     b = set(calls(tmp_path))
     assert len(a) + len(b) == 9 and not (a & b)
+
+
+def test_backbones_train_their_own_model_on_the_whole_box(tmp_path):
+    root, bin_ = tree(tmp_path)
+    r = run(root, bin_, tmp_path, STAGES="backbones", TOPOLOGY="1gpu")
+    assert r.returncode == 0, r.stdout + r.stderr
+    c = calls(tmp_path)
+    assert len(c) == 6
+    qwen = [x for x in c if "Qwen2.5-Math-7B" in x]
+    llama = [x for x in c if "Llama-3.2-3B-Instruct" in x]
+    assert len(qwen) == 3 and len(llama) == 3
+    assert all("CUDA_VISIBLE_DEVICES" not in x for x in c)          # never pinned
+    assert all("math500.parquet" in x and "math500/acc/mean@1" in x for x in llama)
+    assert all("aime24.parquet" in x for x in qwen)
+    # a second call finds them done
+    n = len(c)
+    run(root, bin_, tmp_path, STAGES="backbones")
+    assert len(calls(tmp_path)) == n

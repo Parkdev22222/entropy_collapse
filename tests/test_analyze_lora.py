@@ -77,3 +77,26 @@ def test_verdict_words_are_emitted(tmp_path):
     m = analyse(tmp_path, campaign(tmp_path), "--lora")
     for k in ("Dissocverdict", "Matchcensored", "Collapseverdict"):
         assert k in m, k
+
+
+def test_acc_key_reads_a_math500_backbone(tmp_path):
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    tag = "Llama-3.2-3B-Instruct"
+    for arm, acc in (("grpo", 0.30), ("steer", 0.29), ("signed", 0.32)):
+        name = NAMES[arm].format(t=tag, s=1)
+        body = [f"step:{k} - global_seqlen: 1"
+                + (f" - val-core/math500/acc/mean@1:{acc}" if k % 10 == 0 else "")
+                for k in range(1, 151)]
+        (logs / f"train-lora-{name}.log").write_text("\n".join(body) + "\n")
+    mac = tmp_path / "b.tex"
+    r = subprocess.run([sys.executable, str(ROOT / "scripts/analyze_seeds.py"),
+                        "--logs", str(logs), "--out", str(tmp_path / "o"), "--tex-macros", str(mac),
+                        "--run-prefix", "lora-", "--model-tag", tag, "--steps", "150",
+                        "--plateau", "40:150", "--acc-key", "val-core/math500/acc/mean@1",
+                        "--macro-prefix", "Bllama"], capture_output=True, text=True, cwd=str(ROOT))
+    assert r.returncode == 0, r.stderr + r.stdout
+    m = {x.group(1): x.group(2) for x in
+         re.finditer(r"\\providecommand\{\\([A-Za-z]+)\}\{([^}]*)\}", mac.read_text())}
+    assert m["BllamaRsignedacc"] == ".3200"
+    assert m["BllamaCsignedgrpoacc"] == "+.0200"

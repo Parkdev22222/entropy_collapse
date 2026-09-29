@@ -129,6 +129,7 @@ if [ ${#GPU_MISSING[@]} -gt 0 ]; then
     pip install vllm==${VLLM_PIN}          # torch 를 자기 핀에 맞춰 함께 설치
     pip install "ray[default]${RAY_PIN:+==${RAY_PIN}}"
     pip install "transformers<5"           # vllm 이 올렸을 수 있으니 재핀
+    pip install "cachetools<6"            # vLLM LoRA 캐시가 cachetools 6에서 깨진다 (_LRUCache__update)
     pip install flash-attn --no-cache-dir --no-build-isolation
 
   또는:  INSTALL_GPU_STACK=1 bash run/setup_env.sh
@@ -144,6 +145,7 @@ EOT
         pip install "vllm==${VLLM_PIN}"        || bad "vllm 설치 실패"
         pip install "ray[default]${RAY_PIN:+==${RAY_PIN}}" || bad "ray 설치 실패"
         pip install "transformers<5"           || bad "transformers 재핀 실패"
+        pip install "cachetools<6"             || bad "cachetools 재핀 실패"
         pip install flash-attn --no-cache-dir --no-build-isolation || bad "flash-attn 설치 실패 — verl 이 무조건 import 하므로 학습 불가"
         python3 -c "import torch; assert torch.cuda.is_available()" 2>/dev/null \
             && ok "설치 후 torch.cuda 정상 ($(pyver torch))" \

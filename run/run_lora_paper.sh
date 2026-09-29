@@ -18,6 +18,9 @@
 #                  (primary) and at the AIME24 best (secondary)
 #   followups      ten ablations at seed 1 (run/_lora_arms.sh)
 #   eval-followups the same evaluation at their last step
+#   backbones      grpo steer signed at seed 1 on Qwen2.5-Math-7B and
+#                  Llama-3.2-3B-Instruct, always on every GPU of the box
+#   eval-backbones the six benchmarks at their last step
 #   analysis       coherence check, results tables, macros, paired errors
 #
 # WHAT A RUN IS -- run/_lora_arms.sh (arms, names, seeds), run/_lora_defaults.sh
@@ -47,7 +50,7 @@ cd "${ROOT}" || exit 1
 # shellcheck source=run/_lora_arms.sh
 . run/_lora_arms.sh
 
-STAGES=${STAGES:-"preflight core eval-core followups eval-followups analysis"}
+STAGES=${STAGES:-"preflight core eval-core followups eval-followups backbones eval-backbones analysis"}
 TOPOLOGY=${TOPOLOGY:-tp4}
 SHARD=${SHARD:-0/1}
 DRY=${DRY:-0}
@@ -87,8 +90,14 @@ run_done () {   # <arm> <seed>: the log reached the last step and its adapter is
 # One definition of how an arm is launched; the 1gpu scheduler and the tp4
 # loop both call it, so the two cannot drift. Extra environment (the GPU pin)
 # arrives as leading K=V words.
-launch () {   # <arm> <seed> [K=V ...]
+launch () {   # <arm> <seed> [K=V ...] [-- hydra overrides ...]
     local a=$1 s=$2; shift 2
+    local kv=() hy=()
+    while [ "$#" -gt 0 ]; do
+        if [ "$1" = "--" ]; then shift; hy=("$@"); break; fi
+        kv+=("$1"); shift
+    done
+    set -- "${kv[@]}"
     local rn steps spec kind rest envs extra resume=""
     rn="$(lora_run_name "${a}" "${s}")"; steps="$(steps_for_arm "${a}")"
     spec="$(lora_arm_spec "${a}")"; kind="${spec%% *}"; rest="${spec#"${kind}"}"
@@ -104,15 +113,15 @@ launch () {   # <arm> <seed> [K=V ...]
     case "${kind}" in
         grpo)
             env "${common[@]}" ${envs} LOG="${LOG_DIR}/train-${rn}.log" \
-                bash run/run_grpo.sh ${extra} ;;
+                bash run/run_grpo.sh ${extra} "${hy[@]}" ;;
         tree)
-            env "${common[@]}" ${envs} bash run/run_uniform_ablation.sh ${extra} ;;
+            env "${common[@]}" ${envs} bash run/run_uniform_ablation.sh ${extra} "${hy[@]}" ;;
         plain)
             # run_steerf.sh fixes STEPS=200 in its SCALE case and writes to
             # stdout; steer_plain_args carries the step count, the logger and
             # rollout_data_dir=null.
             env "${common[@]}" ${envs} bash run/run_steerf.sh \
-                $(steer_plain_args "${steps}") ${extra} > "${LOG_DIR}/train-${rn}.log" 2>&1 ;;
+                $(steer_plain_args "${steps}") ${extra} "${hy[@]}" > "${LOG_DIR}/train-${rn}.log" 2>&1 ;;
         *) echo "[lora] unknown kind '${kind}' for ${a}" >&2; return 3 ;;
     esac
 }
@@ -205,6 +214,78 @@ eval_stage () {   # <core|followups> <points...>
     done < <(my_plan "${stage}")
 }
 
+# ---------------------------------------------------------------- backbones
+# Each plan line carries the model tag; everything that depends on it --
+# the run name, the model path, the validation set, the best key, the merge
+# base -- is set inside a subshell by lora_enter_backbone, so nothing leaks
+# into the next line or back into the 1.5B stages.
+backbone_stage () {
+    local item a s tag
+    while read -r item; do
+        [ -n "${item}" ] || continue
+        IFS=: read -r _ a s tag <<<"${item}"
+        (
+            lora_enter_backbone "${tag}" >/dev/null || exit 2
+            rn="$(lora_run_name "${a}" "${s}")"
+            if run_done "${a}" "${s}"; then
+                printf '  done  %-8s %-24s %s\n' "${a}" "${tag}" "${rn}"; exit 0
+            fi
+            printf '  QUEUE %-8s %-24s %s   [%s; val %s]\n' "${a}" "${tag}" "${rn}" \
+                "$(lora_arm_spec "${a}")" "${VAL_PARQUET}"
+            [ "${DRY}" = 1 ] && exit 0
+            mkdir -p "${LOG_DIR}"
+            # Always the whole box: a 7B does not fit one GPU, and a backbone
+            # row is compared only with its own arms, which all run this way.
+            unset N_GPUS TP_SIZE CUDA_VISIBLE_DEVICES
+            gpu_topology
+            banner "backbones: ${tag} ${a} -> ${rn}"
+            ray stop --force >/dev/null 2>&1 || true
+            await_gpus || true
+            # The launchers hardcode AIME24 and its key; the backbone's own
+            # set and key go in last, where hydra lets them win.
+            hydra=( "data.val_files=['${ROOT}/${VAL_PARQUET}']"
+                    "++trainer.best_metric_key=${BEST_METRIC_KEY}" )
+            launch "${a}" "${s}" N_GPUS="${N_GPUS}" TP_SIZE="${TP_SIZE}" \
+                MODEL_PATH="${MODEL_PATH}" -- "${hydra[@]}"
+            st=$?
+            log="${LOG_DIR}/train-${rn}.log"
+            if [ "${st}" -ne 0 ] && log_says_oom "${log}" && [ "${OOM_RETRY:-1}" = 1 ]; then
+                echo "[lora] ${tag} ${a}: CUDA OOM -- one retry with OFFLOAD=1 (optimizer on CPU;"
+                echo "[lora]   the log records it, and the paper says which rows ran that way)"
+                ray stop --force >/dev/null 2>&1 || true
+                await_gpus || true
+                launch "${a}" "${s}" N_GPUS="${N_GPUS}" TP_SIZE="${TP_SIZE}" \
+                    MODEL_PATH="${MODEL_PATH}" OFFLOAD=1 -- "${hydra[@]}"
+                st=$?
+            fi
+            report_run "${a}" "${s}" "${st}"
+        )
+    done < <(my_plan backbones)
+}
+
+backbone_eval_stage () {
+    local item a s tag
+    while read -r item; do
+        [ -n "${item}" ] || continue
+        IFS=: read -r _ a s tag <<<"${item}"
+        (
+            lora_enter_backbone "${tag}" >/dev/null || exit 2
+            if [ "${DRY}" = 1 ]; then
+                printf '  EVAL  %-8s %-24s final  %s\n' "${a}" "${tag}" "$(lora_run_name "${a}" "${s}")"
+                exit 0
+            fi
+            run_done "${a}" "${s}" || { echo "  skip ${tag} ${a}: training not finished"; exit 0; }
+            await_gpus || true
+            # Per-backbone log and dump roots: the eval logs are named
+            # eval-<arm>-s<seed>.log, which would collide with the 1.5B's.
+            LOG_ROOT="${ROOT}/logs/lora/backbones/${tag}" \
+            VAL_ROOT="${ROOT}/validation_data/lora/backbones/${tag}" \
+            BASE_MODEL="${MODEL_PATH}" bash run/eval_lora.sh "${a}" "${s}" final \
+                || echo "[lora] eval FAIL ${tag} ${a}"
+        )
+    done < <(my_plan backbones)
+}
+
 analysis_stage () {
     local p d
     mkdir -p "${RES_DIR}"
@@ -229,6 +310,25 @@ analysis_stage () {
         --seeds "${seeds}" --balanced --out "${RES_DIR}" \
         --steps "${STEPS}" --plateau "40:${STEPS}" --eval-point final \
         --eval-table "${RES_DIR}/summary_final.tsv"
+    # Each backbone through the same analysis under its own macro prefix
+    # (B<stem>), reading the accuracy key its validation set logs.
+    local tag stem d acc
+    for tag in ${LORA_BACKBONES}; do
+        stem="$(lora_backbone_stem "${tag}")" || continue
+        d="${ROOT}/logs/lora/backbones/${tag}/eval-final-k${LORA_EVAL_N}"
+        mkdir -p "${RES_DIR}/${stem}"
+        if compgen -G "${d}/eval-*.log" >/dev/null \
+                && python3 scripts/check_eval_logs.py "${d}"/eval-*.log; then
+            python3 scripts/collect_results.py --logs "${d}" --out "${RES_DIR}/${stem}/summary_final.tsv"
+        fi
+        acc="$( (lora_enter_backbone "${tag}" >/dev/null && echo "${BEST_METRIC_KEY}") )"
+        python3 scripts/analyze_seeds.py --model-tag "${tag}" --logs "${LOG_DIR}" \
+            --run-prefix "${LORA_PREFIX}" --steps "${STEPS}" --plateau "40:${STEPS}" \
+            --acc-key "${acc}" --eval-point final \
+            --eval-table "${RES_DIR}/${stem}/summary_final.tsv" --out "${RES_DIR}/${stem}" \
+            --macro-prefix "B${stem}" --tex-macros "${RES_DIR}/numbers-${stem}.tex" \
+            || echo "[lora] analysis of ${tag} failed (no logs yet?)"
+    done
     # The secondary endpoint (AIME24-best checkpoint) through the same
     # analysis, every macro prefixed Best so the two cannot be confused.
     if [ -f "${RES_DIR}/summary_best.tsv" ]; then
@@ -245,6 +345,29 @@ preflight () {
     banner "preflight"
     if ! env_preflight "${ROOT}"; then
         echo "FAIL: training stack does not import (bash run/setup_env.sh)"; rc=1
+    fi
+    # vLLM's LoRA cache calls a private cachetools method that cachetools 6
+    # removed, so every LoRA run dies building the rollout engine with
+    # "'LoRALRUCache' object has no attribute '_LRUCache__update'" -- a path
+    # full fine-tuning never takes. Exercise that exact call rather than
+    # checking a version number.
+    if ! python3 - <<'PY' 2>/dev/null
+import sys
+try:
+    from vllm.utils import LRUCache
+except Exception:
+    sys.exit(0)            # no vllm here; env_preflight reports that
+c = LRUCache(2)
+c.put(1, 1)
+try:
+    c.touch(1)
+except AttributeError:
+    sys.exit(1)
+PY
+    then
+        echo "FAIL: vLLM's LoRA cache is broken by cachetools>=6 (the '_LRUCache__update' error)."
+        echo "      Fix: pip install \"cachetools<6\""
+        rc=1
     fi
     for f in datasets/DAPO-Math-17k.parquet datasets/aime24.parquet; do
         [ -f "${f}" ] || { echo "FAIL: ${f} missing"; rc=1; }
@@ -274,6 +397,8 @@ has_stage core           && { banner "core";           train_stage core; }
 has_stage eval-core      && { banner "eval-core";      eval_stage core final best; }
 has_stage followups      && { banner "followups";      train_stage followups; }
 has_stage eval-followups && { banner "eval-followups"; eval_stage followups final; }
+has_stage backbones      && { banner "backbones";      backbone_stage; }
+has_stage eval-backbones && { banner "eval-backbones"; backbone_eval_stage; }
 if has_stage analysis && [ "${DRY}" != 1 ]; then
     banner "analysis"; analysis_stage
 fi

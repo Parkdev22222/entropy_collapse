@@ -87,3 +87,21 @@ def test_launchers_append_lora_args_before_the_command_line():
     assert steerf.index('"${LORA_ARGS[@]}"') < steerf.rindex('"$@"')
     grpo = (ROOT / "run/run_grpo.sh").read_text()
     assert grpo.index('ARGS+=("${LORA_ARGS[@]}")') < grpo.index('main_ppo "${ARGS[@]}" "$@"')
+
+
+def test_backbone_plan_is_backbone_major_and_carries_the_tag():
+    plan = lines("lora_plan backbones")
+    assert plan == [f"backbones:{a}:1:{b}"
+                    for b in ("Qwen2.5-Math-7B", "Llama-3.2-3B-Instruct")
+                    for a in ("grpo", "steer", "signed")]
+
+
+def test_entering_a_backbone_replaces_the_1_5b_profile():
+    out = lines("( lora_enter_backbone Qwen2.5-Math-7B >/dev/null; "
+                "echo $MODEL_PATH; lora_run_name signed 1 ); "
+                "( lora_enter_backbone Llama-3.2-3B-Instruct >/dev/null; "
+                "echo $MODEL_PATH $VAL_PARQUET $BEST_METRIC_KEY )")
+    assert out[0] == "Qwen/Qwen2.5-Math-7B"
+    assert out[1] == "lora-steer-f-Qwen2.5-Math-7B-s1-tree-rollout"
+    assert out[2].split() == ["meta-llama/Llama-3.2-3B-Instruct", "datasets/math500.parquet",
+                              "val-core/math500/acc/mean@1"]

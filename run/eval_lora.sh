@@ -61,7 +61,8 @@ ADAPTER="${RUN_DIR}/global_step_${STEP}/actor/lora_adapter"
 MERGED="${RUN_DIR}/global_step_${STEP}/actor/merged"
 EVAL_DIR="${LOG_ROOT}/eval-${POINT}-k${N}"
 LOG="${EVAL_DIR}/eval-${ARM}-s${SEED}.log"
-VAL_DIR="${ROOT}/validation_data/lora/eval-${POINT}-k${N}/${ARM}-s${SEED}"
+VAL_ROOT=${VAL_ROOT:-${ROOT}/validation_data/lora}
+VAL_DIR="${VAL_ROOT}/eval-${POINT}-k${N}/${ARM}-s${SEED}"
 
 eval_done () {   # both passes' headline keys are in the log, and it is coherent
     [ -f "${LOG}" ] || return 1
@@ -91,10 +92,10 @@ if [ "${POINT}" = best ] && [ "${STEP}" = "$(steps_for_arm "${ARM}")" ]; then
         mkdir -p "${EVAL_DIR}"
         { echo "### eval_lora.sh: best = final (step ${STEP}); copied from ${FINAL_LOG}"
           cat "${FINAL_LOG}"; } > "${LOG}"
-        if [ -d "${ROOT}/validation_data/lora/eval-final-k${N}/${ARM}-s${SEED}" ]; then
+        if [ -d "${VAL_ROOT}/eval-final-k${N}/${ARM}-s${SEED}" ]; then
             mkdir -p "$(dirname "${VAL_DIR}")"
             rm -rf "${VAL_DIR}"
-            cp -r "${ROOT}/validation_data/lora/eval-final-k${N}/${ARM}-s${SEED}" "${VAL_DIR}"
+            cp -r "${VAL_ROOT}/eval-final-k${N}/${ARM}-s${SEED}" "${VAL_DIR}"
         fi
         echo "[eval-lora]   best is the final step; reused ${FINAL_LOG}"
         exit 0

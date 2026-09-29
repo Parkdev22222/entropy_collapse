@@ -132,7 +132,8 @@ LORA_LABEL = {"signed": "\\textbf{STEER-V}", "mtp": "STEER-V (MTP)"}
 
 # What main() resets to on every call, so a --lora invocation cannot leak its
 # arms into the next one within one process (the tests call main repeatedly).
-_DEFAULTS = (list(MAIN_ARMS), list(BENCH_ARMS), dict(ARM_LABEL))
+_DEFAULTS = (list(MAIN_ARMS), list(BENCH_ARMS), dict(ARM_LABEL), dict(METRICS))
+ACC_KEY_DEFAULT = "val-core/aime_2024_dapo_boxed/acc/mean@32"
 
 # The follow-up ablations of Table 10, and the compute-matched control. They
 # are seed 1 only and are not part of the seed-level statistics, so they live
@@ -571,6 +572,9 @@ def main(argv=None) -> int:
                     help="which checkpoint the --eval-table evaluated: 'best' marks "
                          "AIME24 in-sample (the checkpoint was chosen on it), "
                          "'final' does not")
+    ap.add_argument("--acc-key", default=None,
+                    help="the log key read as accuracy (default: AIME24 mean@32); "
+                         "val-core/math500/acc/mean@1 for a backbone validated on MATH500")
     ap.add_argument("--lora", action="store_true",
                     help="the LoRA campaign: add the mtp arm and its contrast, "
                          "label the method STEER-V, emit the collapse check")
@@ -591,6 +595,13 @@ def main(argv=None) -> int:
                     help="also emit \\newcommand macros the manuscript can \\input "
                          "(default: <out>/numbers.tex)")
     args = ap.parse_args(argv)
+    METRICS.clear()
+    METRICS.update(_DEFAULTS[3])
+    if args.acc_key and args.acc_key != ACC_KEY_DEFAULT:
+        # A backbone that validates on MATH500 logs its accuracy under that
+        # benchmark's key; read that as "acc", or the whole row stays empty.
+        del METRICS[ACC_KEY_DEFAULT]
+        METRICS[args.acc_key] = "acc"
     MAIN_ARMS[:] = _DEFAULTS[0]
     BENCH_ARMS[:] = _DEFAULTS[1]
     ARM_LABEL.clear()
