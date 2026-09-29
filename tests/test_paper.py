@@ -225,7 +225,11 @@ def emittable_names():
     # again: its table is the source, not a copy kept here.
     pse = (ROOT / "scripts" / "eval_paired_se.py").read_text()
     body = re.search(r"MACROS = \{(.*?)\n\}", pse, re.S)
-    extra |= set(re.findall(r'"([A-Za-z]+)":\s*\(', body.group(1)))
+    pse_names = set(re.findall(r'"([A-Za-z]+)":\s*\(', body.group(1)))
+    extra |= pse_names
+    # The LoRA paper's best-checkpoint paired errors: the same emitter under
+    # --macro-prefix Best (run/run_lora_paper.sh, analysis stage).
+    extra |= {"Best" + n for n in pse_names}
 
     return names | prefixed | extra
 
