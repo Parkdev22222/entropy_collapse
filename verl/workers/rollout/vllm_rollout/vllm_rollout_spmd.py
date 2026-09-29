@@ -156,7 +156,11 @@ class vLLMRollout_TreeMixin:
     """
 
     @torch.no_grad()
-    def _generate_tree(self, vllm_inputs):
+    def _generate_tree(self, vllm_inputs, lora_id=None):
+        # LoRA: the tree calls vLLM once per stage with a different number of
+        # prompts each time, so the per-row request list verl builds for the
+        # original batch does not fit. There is one adapter (max_loras=1), so
+        # every stage gets one request per prompt of that stage.
         from steer_f.tree_rollout import generate_tree
 
         if any("multi_modal_data" in inp for inp in vllm_inputs):
@@ -164,12 +168,6 @@ class vLLMRollout_TreeMixin:
                 "steerf tree rollout does not support multi_modal_data: a branch has to "
                 "re-condition on `prompt + trunk` token ids, and the image payload would "
                 "have to be threaded through every stage. Unset steerf_tree_depths."
-            )
-        if self.lora_kwargs:
-            raise NotImplementedError(
-                "steerf tree rollout does not support LoRA: verl builds one LoRARequest per "
-                "row of the ORIGINAL batch, and the tree's stages have different batch sizes. "
-                "Unset steerf_tree_depths."
             )
 
         want_logprobs = bool(self.config.calculate_log_probs)
@@ -182,7 +180,9 @@ class vLLMRollout_TreeMixin:
                 outputs = self.inference_engine.generate(
                     prompts=[{"prompt_token_ids": list(ids)} for ids in prompt_token_ids],
                     sampling_params=self.sampling_params,
-                    lora_request=None,
+                    lora_request=None if lora_id is None else [
+                        LoRARequest(lora_name=f"{lora_id}", lora_int_id=lora_id, lora_path="/simon-stub-path")
+                    ] * len(prompt_token_ids),
                     use_tqdm=False,
                 )
             return _tree_samples_from_vllm(outputs, want_logprobs)
@@ -406,12 +406,14 @@ class vLLMRollout(vLLMRollout_TreeMixin, BaseRollout):
                 "n": 1,  # if validate, already repeat in ray_trainer
             }
 
+        from steer_f.lora_request import active_lora_id
+
+        # Raises when LoRA is on and no adapter (base-model rollouts) or more
+        # than one (a stale policy) is registered -- upstream fell back to None.
+        lora_int_id = active_lora_id(bool(self.lora_kwargs), self.inference_engine.llm_engine.list_loras() if self.lora_kwargs else ())
         lora_requests = None
-        if self.lora_kwargs:
-            lora_int_ids = list(self.inference_engine.llm_engine.list_loras())
-            if len(lora_int_ids) > 0:
-                lora_int_id = lora_int_ids[0]
-                lora_requests = [LoRARequest(lora_name=f"{lora_int_id}", lora_int_id=lora_int_id, lora_path="/simon-stub-path")] * batch_size
+        if lora_int_id is not None:
+            lora_requests = [LoRARequest(lora_name=f"{lora_int_id}", lora_int_id=lora_int_id, lora_path="/simon-stub-path")] * batch_size
 
         # The tree is a training-time device: it exists to give A_H's sibling
         # baseline a support, and validation neither computes A_H nor may have
@@ -421,7 +423,7 @@ class vLLMRollout(vLLMRollout_TreeMixin, BaseRollout):
         # users can customize different sampling_params at different run
         with self.update_sampling_params(**kwargs):
             if use_tree:
-                response, rollout_log_probs = self._generate_tree(vllm_inputs)
+                response, rollout_log_probs = self._generate_tree(vllm_inputs, lora_int_id)
             else:
                 outputs = self.inference_engine.generate(
                     prompts=vllm_inputs,  # because we have already convert it to prompt token id

@@ -818,6 +818,10 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
                             json.dump(peft_config, f, ensure_ascii=False, indent=4)
             except Exception as e:
                 log_with_rank(f"Save LoRA Adapter Error ({e})", rank=dist.get_rank(), logger=logger, log_only_rank_0=True)
+                # The adapter is the only evaluable copy of a LoRA run (actor/
+                # huggingface holds PEFT-shaped keys), and the line below used to
+                # report it saved anyway. Fail the save instead.
+                raise
 
             dist.barrier()
             log_with_rank(f"[rank-{self.rank}]: Saved LoRA adapter to: {lora_save_path}", rank=dist.get_rank(), logger=logger, log_only_rank_0=True)

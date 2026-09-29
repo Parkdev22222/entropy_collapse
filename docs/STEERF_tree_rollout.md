@@ -317,8 +317,10 @@ caching off the tree is slower, and the rollout logs a warning saying so.
 its sampling distribution altered, so `acc/mean@32`, `pass@32` and `maj@32`
 remain comparable to every run in the table.
 
-**5. Not supported: multi-modal prompts and LoRA.** A branch re-conditions on
-`prompt + trunk` token ids, which cannot carry an image payload; and verl
-builds one `LoRARequest` per row of the original batch, while the tree's stages
-have different batch sizes. Both raise `NotImplementedError` at rollout time
-rather than producing quietly wrong data.
+**5. Not supported: multi-modal prompts.** A branch re-conditions on
+`prompt + trunk` token ids, which cannot carry an image payload, so it raises
+`NotImplementedError` at rollout time rather than producing quietly wrong data.
+LoRA is supported (lora branch): verl keeps one adapter (`max_loras=1`), so each
+stage passes one `LoRARequest` per prompt of that stage, and
+`steer_f/lora_request.py` stops the run when LoRA is on and vLLM holds no
+adapter (base-model rollouts) or more than one (a stale policy).
