@@ -20,6 +20,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+# phase3_port_model imports phase1_validate, whose steer_f-lineage copy (the one
+# the trainer runs) imports torch at module level.
+import pytest  # noqa: E402
+pytest.importorskip("torch")
+
 from scripts.emit_probe_numbers import MACROS, emit  # noqa: E402
 from scripts.phase3_port_model import gate_verdict   # noqa: E402
 

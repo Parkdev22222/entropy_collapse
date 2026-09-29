@@ -1,156 +1,187 @@
-"""verl 통합 헬퍼의 형상/의미 계약 테스트 (verl·GPU 불필요, 모의 텐서 사용)."""
+"""The verl glue: index alignment and the batch-level A_H assembly.
+
+The index offset tested here is the one silent-failure mode of the whole
+project — an off-by-one makes H_togo condition on the wrong token, A_H become
+noise, and gate G1 fail for a reason no correlation plot would reveal.
+"""
+
+import sys
+from pathlib import Path
 
 import pytest
 import torch
 import torch.nn as nn
 
-from steer_f.mtp_heads import MTPHeads
-from steer_f.verl_integration import (
-    attach_entropy_advantage,
-    compute_h_togo_packed,
-    measure_forecast_drift,
-    mtp_auxiliary_loss,
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from steer_f.entropy_forecast import HeadCalibration  # noqa: E402
+from steer_f.mtp_heads import MTPHeads  # noqa: E402
+from steer_f.omega_tilde import SteerFConfig  # noqa: E402
+from steer_f.verl_integration import (  # noqa: E402
+    compute_a_h,
+    forecast_h_togo,
+    slice_response_hidden,
 )
 
-H, V, K = 24, 41, 4
+H, V, K = 16, 32, 4
 
 
-def make_heads():
-    return MTPHeads(hidden_size=H, num_heads=K, head_hidden=32, vocab_size=V), nn.Linear(H, V, bias=False)
+def make_heads(**kw):
+    return MTPHeads(hidden_size=H, vocab_size=V, num_heads=K, head_hidden=8, **kw)
 
 
-def test_compute_h_togo_packed_layout():
-    heads, lm_head = make_heads()
-    packed = torch.randn(37, H)
-    out = compute_h_togo_packed(heads, packed, lm_head, kappa=2, gamma_h=0.85)
-    assert out.shape == (37,)
-    assert torch.isfinite(out).all()
+# ----------------------------------------------------------------------
+# index alignment
+# ----------------------------------------------------------------------
+def test_slice_takes_the_last_response_length_positions():
+    prompt_len, resp_len = 5, 3
+    hidden = torch.arange(prompt_len + resp_len).float().view(1, -1, 1).expand(1, -1, H)
+    out = slice_response_hidden(hidden, resp_len)
+    assert out.shape == (1, resp_len, H)
+    torch.testing.assert_close(out[0, :, 0], torch.tensor([5.0, 6.0, 7.0]))
 
 
-def test_compute_h_togo_batched_layout():
-    heads, lm_head = make_heads()
-    out = compute_h_togo_packed(heads, torch.randn(3, 9, H), lm_head, kappa=3, gamma_h=0.7)
-    assert out.shape == (3, 9)
+def test_slice_is_one_step_later_than_verls_logprob_slice():
+    """verl uses [-T-1:-1] for log-probs; the MTP conditioning state is [-T:].
 
-
-def test_compute_h_togo_is_positive_and_discount_monotone():
-    """엔트로피는 음이 아니므로 H_togo는 κ에 대해 단조 증가한다 (γ_H > 0)."""
-    heads, lm_head = make_heads()
-    hidden = torch.randn(2, 6, H)
-    a = compute_h_togo_packed(heads, hidden, lm_head, kappa=1, gamma_h=1.0)
-    b = compute_h_togo_packed(heads, hidden, lm_head, kappa=3, gamma_h=1.0)
-    assert torch.all(a >= 0)
-    assert torch.all(b >= a - 1e-5)
-
-
-def test_attach_entropy_advantage_fills_baseline():
-    b, t, g = 4, 5, 2
-    td = {
-        "h_togo": torch.rand(b, t) * 3,
-        "responses": torch.randint(0, 7, (b, t)),
-        "response_mask": torch.ones(b, t),
-    }
-    stats = attach_entropy_advantage(td, group_size=g)
-    assert td["baseline_h_togo"].shape == (b, t)
-    assert "steerf/h_togo_mean" in stats
-    assert 0.0 <= stats["steerf/a_h_zero_frac"] <= 1.0
-
-
-def test_attach_entropy_advantage_accepts_dataproto_like():
-    class Fake:
-        def __init__(self, td):
-            self.batch = td
-
-    td = {
-        "h_togo": torch.rand(2, 4),
-        "responses": torch.ones(2, 4, dtype=torch.long),
-        "response_mask": torch.ones(2, 4),
-    }
-    attach_entropy_advantage(Fake(td), group_size=2)
-    assert "baseline_h_togo" in td
-
-
-def test_attach_entropy_advantage_derives_mask_from_attention():
-    b, t = 2, 4
-    td = {
-        "h_togo": torch.rand(b, t),
-        "responses": torch.ones(b, t, dtype=torch.long),
-        "attention_mask": torch.ones(b, t + 3),  # prompt + response
-    }
-    attach_entropy_advantage(td, group_size=2)
-    assert td["baseline_h_togo"].shape == (b, t)
-
-
-def test_identical_rollouts_give_zero_advantage():
-    """완전히 같은 rollout끼리는 A_H = 0.
-
-    baseline은 **shift된** h_togo와 같아진다 (entropy_advantage가 y_t 조건 정렬을
-    위해 한 칸 당기기 때문). 따라서 h 자체가 아니라 A_H가 0인지로 확인한다.
+    Asserting the exact one-step relationship documents the offset rather than
+    leaving it implicit in a slice expression.
     """
-    b, t = 4, 5
-    h = torch.rand(1, t).expand(b, t).contiguous()
-    td = {
-        "h_togo": h,
-        "responses": torch.ones(b, t, dtype=torch.long),
-        "response_mask": torch.ones(b, t),
-    }
-    stats = attach_entropy_advantage(td, group_size=4)
-    assert stats["steerf/a_h_zero_frac"] == pytest.approx(1.0)
-    shifted = torch.cat([h[:, 1:], h[:, -1:]], dim=1)
-    torch.testing.assert_close(td["baseline_h_togo"], shifted, atol=1e-5, rtol=1e-5)
+    seq, resp_len = 9, 4
+    hidden = torch.arange(seq).float().view(1, seq, 1).expand(1, seq, H)
+    verl_logprob_slice = hidden[:, -resp_len - 1 : -1, :]
+    steerf_slice = slice_response_hidden(hidden, resp_len)
+    torch.testing.assert_close(steerf_slice[0, :, 0] - verl_logprob_slice[0, :, 0],
+                               torch.ones(resp_len))
 
 
-def test_mtp_auxiliary_loss_scales_with_beta():
-    heads, lm_head = make_heads()
+def test_slice_rejects_a_too_short_sequence():
+    with pytest.raises(ValueError):
+        slice_response_hidden(torch.randn(1, 3, H), response_length=5)
+
+
+def test_slice_rejects_wrong_rank():
+    with pytest.raises(ValueError):
+        slice_response_hidden(torch.randn(7, H), response_length=3)
+
+
+def test_full_response_prompt_free_case():
+    hidden = torch.randn(2, 4, H)
+    torch.testing.assert_close(slice_response_hidden(hidden, 4), hidden)
+
+
+# ----------------------------------------------------------------------
+# forecast
+# ----------------------------------------------------------------------
+def test_forecast_shape_matches_the_response_grid():
+    heads, lm_head = make_heads(), nn.Linear(H, V, bias=False)
+    cfg = SteerFConfig(kappa=3, gamma_h=0.85)
+    out = forecast_h_togo(torch.randn(2, 10, H), lm_head, heads, response_length=6, cfg=cfg)
+    assert out.shape == (2, 6)
+    assert (out >= 0).all()
+
+
+def test_forecast_respects_kappa():
+    heads, lm_head = make_heads(), nn.Linear(H, V, bias=False)
     hidden = torch.randn(2, 8, H)
-    ids = torch.randint(0, V, (2, 8))
-    mask = torch.ones(2, 8)
-    l1, s1 = mtp_auxiliary_loss(heads, hidden, lm_head, ids, mask, beta_mtp=0.05)
-    l2, _ = mtp_auxiliary_loss(heads, hidden, lm_head, ids, mask, beta_mtp=0.10)
-    assert float(l2.detach()) == pytest.approx(2 * float(l1.detach()), rel=1e-4)
-    assert "steerf/mtp_ce" in s1
+    small = forecast_h_togo(hidden, lm_head, heads, 5, SteerFConfig(kappa=1, gamma_h=1.0))
+    large = forecast_h_togo(hidden, lm_head, heads, 5, SteerFConfig(kappa=4, gamma_h=1.0))
+    assert (large >= small - 1e-5).all(), "adding heads cannot reduce an undiscounted sum"
 
 
-def test_mtp_auxiliary_loss_zero_beta_is_freeze():
-    """β=0은 헤드 freeze와 동치 (Ablation A7) — 손실 0, 통계 없음."""
-    heads, lm_head = make_heads()
-    loss, stats = mtp_auxiliary_loss(
-        heads, torch.randn(2, 6, H), lm_head, torch.randint(0, V, (2, 6)), torch.ones(2, 6), beta_mtp=0.0
+def test_forecast_applies_calibration():
+    heads, lm_head = make_heads(), nn.Linear(H, V, bias=False)
+    hidden = torch.randn(2, 8, H)
+    cfg = SteerFConfig(kappa=2, gamma_h=1.0)
+    plain = forecast_h_togo(hidden, lm_head, heads, 5, cfg)
+    shrunk = forecast_h_togo(
+        hidden, lm_head, heads, 5, cfg,
+        calib=HeadCalibration([1.0, 1.0], [0.5, 0.5], [0.0, 0.0]),
     )
-    assert float(loss) == 0.0 and stats == {}
+    torch.testing.assert_close(shrunk, plain * 0.5, rtol=1e-4, atol=1e-4)
 
 
-def test_mtp_auxiliary_loss_is_differentiable_wrt_heads_only():
-    heads, lm_head = make_heads()
-    hidden = torch.randn(2, 8, H, requires_grad=True)
-    loss, _ = mtp_auxiliary_loss(
-        heads, hidden, lm_head, torch.randint(0, V, (2, 8)), torch.ones(2, 8), beta_mtp=1.0
+def test_forecast_accepts_pre_sliced_hidden():
+    heads, lm_head = make_heads(), nn.Linear(H, V, bias=False)
+    cfg = SteerFConfig(kappa=2, gamma_h=0.9)
+    hidden = torch.randn(2, 6, H)
+    a = forecast_h_togo(hidden, lm_head, heads, 6, cfg)
+    b = forecast_h_togo(hidden, lm_head, heads, 6, cfg, already_sliced=True)
+    torch.testing.assert_close(a, b)
+
+
+def test_temperature_raises_forecast_entropy():
+    """Same temperature convention as verl's own entropys — a scale check."""
+    heads, lm_head = make_heads(zero_init_output=False), nn.Linear(H, V, bias=False)
+    hidden = torch.randn(2, 6, H) * 3
+    cfg = SteerFConfig(kappa=2, gamma_h=1.0)
+    cold = forecast_h_togo(hidden, lm_head, heads, 6, cfg, temperature=0.5)
+    hot = forecast_h_togo(hidden, lm_head, heads, 6, cfg, temperature=2.0)
+    assert (hot > cold).all()
+
+
+# ----------------------------------------------------------------------
+# batch-level A_H
+# ----------------------------------------------------------------------
+def test_compute_a_h_returns_the_batch_grid():
+    cfg = SteerFConfig(baseline="sibling")
+    a_h = compute_a_h(
+        torch.rand(4, 6),
+        torch.randint(0, V, (4, 6)),
+        torch.ones(4, 6),
+        ["p0", "p0", "p1", "p1"],
+        cfg,
     )
-    loss.backward()
-    assert any(p.grad is not None and torch.any(p.grad != 0) for p in heads.projs.parameters())
+    assert a_h.shape == (4, 6) and a_h.dtype == torch.float32
 
 
-def test_measure_forecast_drift_zero_when_head_matches_policy():
-    """0-초기화 residual 헤드는 본체와 같은 분포 → 정렬이 맞으면 KL ≈ 0."""
-    heads, lm_head = make_heads()
-    hidden = torch.randn(2, 7, H)
-    policy_logits = lm_head(hidden)
-    # 헤드 +1(위치 t)은 정책의 위치 t+1과 비교된다. 헤드가 항등이면 KL은
-    # H(t) vs H(t+1) 차이만큼 나온다. 히든을 상수로 두면 정확히 0이어야 한다.
-    const = torch.randn(1, 1, H).expand(2, 7, H).contiguous()
-    kl = measure_forecast_drift(heads, const, lm_head, lm_head(const))
-    assert kl == pytest.approx(0.0, abs=1e-4)
-    assert measure_forecast_drift(heads, hidden, lm_head, policy_logits) >= 0.0
+def test_compute_a_h_honours_the_baseline_choice():
+    responses = torch.tensor([[1, 5, 5], [1, 9, 9]])
+    h = torch.tensor([[0.0, 0.0, 1.0], [0.0, 0.0, 9.0]])
+    mask = torch.ones(2, 3)
+    sib = compute_a_h(h, responses, mask, ["p", "p"], SteerFConfig(baseline="sibling"))
+    grp = compute_a_h(h, responses, mask, ["p", "p"], SteerFConfig(baseline="group"))
+    assert float(sib[0, 2]) == 0.0
+    assert float(grp[0, 2]) != 0.0
 
 
-def test_measure_forecast_drift_short_sequence():
-    heads, lm_head = make_heads()
-    assert measure_forecast_drift(heads, torch.randn(2, 1, H), lm_head, torch.randn(2, 1, V)) == 0.0
+def test_compute_a_h_rejects_shape_mismatch():
+    with pytest.raises(ValueError):
+        compute_a_h(torch.rand(2, 5), torch.zeros(2, 4, dtype=torch.long),
+                    torch.ones(2, 5), ["p", "p"], SteerFConfig())
 
 
-def test_measure_forecast_drift_all_masked():
-    heads, lm_head = make_heads()
-    kl = measure_forecast_drift(
-        heads, torch.randn(2, 5, H), lm_head, torch.randn(2, 5, V), response_mask=torch.zeros(2, 5)
-    )
-    assert kl == 0.0
+def test_a_h_is_finite_for_a_realistic_batch():
+    """A rollout batch with ragged lengths and shared prefixes must stay finite."""
+    torch.manual_seed(0)
+    b, t = 8, 12
+    responses = torch.randint(0, V, (b, t))
+    responses[:, :4] = responses[0, :4]  # a shared prefix, as GRPO groups have
+    mask = torch.ones(b, t)
+    mask[3, 7:] = 0
+    mask[5, 9:] = 0
+    a_h = compute_a_h(torch.rand(b, t) * 5, responses, mask,
+                      ["p0"] * 4 + ["p1"] * 4, SteerFConfig())
+    assert torch.isfinite(a_h).all()
+    assert torch.equal(a_h[3, 7:], torch.zeros(t - 7))
+
+
+def test_end_to_end_forecast_to_a_h():
+    """hidden states -> H_togo -> A_H, the shape contract the patches rely on."""
+    torch.manual_seed(0)
+    heads, lm_head = make_heads(zero_init_output=False), nn.Linear(H, V, bias=False)
+    cfg = SteerFConfig(kappa=3, gamma_h=0.85, baseline="sibling")
+    b, prompt_len, resp_len = 4, 5, 7
+
+    hidden = torch.randn(b, prompt_len + resp_len, H)
+    responses = torch.randint(0, V, (b, resp_len))
+    responses[:, :2] = responses[0, :2]
+    mask = torch.ones(b, resp_len)
+
+    h_vals = forecast_h_togo(hidden, lm_head, heads, resp_len, cfg)
+    a_h = compute_a_h(h_vals, responses, mask, ["p"] * b, cfg)
+
+    assert a_h.shape == (b, resp_len)
+    assert torch.isfinite(a_h).all()
+    # A_H is a centred advantage within each sibling set
+    torch.testing.assert_close(a_h[:, 0].sum(), torch.tensor(0.0), atol=1e-4, rtol=1e-4)

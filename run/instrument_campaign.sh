@@ -66,6 +66,12 @@ except Exception:
     print("")
 PY
 )"
+# The lora branch vendors verl in the tree, so the file is there even on a
+# machine whose Python cannot import it (no torch). Patch that copy -- it is
+# the one the trainer runs, since the launchers put ${ROOT} first on PYTHONPATH.
+if [ -z "${RT}" ] && [ -f "${ROOT}/verl/trainer/ppo/ray_trainer.py" ]; then
+    RT="${ROOT}/verl/trainer/ppo/ray_trainer.py"
+fi
 
 # steer_f is taken from the donor branch on a pod (run/bootstrap_pod.sh:35-51):
 # this branch carries a steer_f of a different lineage, and patching that one
