@@ -250,6 +250,7 @@ python3 -m verl.trainer.main_ppo \
     ++trainer.delete_old_best_checkpoint=True \
     ++trainer.save_after=${SAVE_AFTER} \
     ${MAX_CKPT_KEEP:+++trainer.max_actor_ckpt_to_keep=${MAX_CKPT_KEEP}} \
+    ${KEEP_EVERY:+++trainer.keep_every=${KEEP_EVERY}} \
     ++trainer.best_metric_key=val-core/aime_2024_dapo_boxed/acc/mean@${ACC_AT} \
     ${SEED:+"++data.seed=${SEED}"} \
     "${LORA_ARGS[@]}" \

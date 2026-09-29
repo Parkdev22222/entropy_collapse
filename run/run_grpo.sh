@@ -224,6 +224,10 @@ ARGS=(
     ++trainer.best_metric_key=val-core/aime_2024_dapo_boxed/acc/mean@32
 )
 ARGS+=("${LORA_ARGS[@]}")
+# Keep every KEEP_EVERY steps, the last and the best (verl/trainer/ppo/ckpt_policy.py).
+[ -n "${KEEP_EVERY:-}" ] && ARGS+=("++trainer.keep_every=${KEEP_EVERY}")
+# max_actor_ckpt_to_keep was never passed here; say so only when asked, like run_steerf.sh.
+[ -n "${MAX_CKPT_KEEP:-}" ] && ARGS+=("++trainer.max_actor_ckpt_to_keep=${MAX_CKPT_KEEP}")
 
 if [ "${DRY_RUN:-0}" = "1" ]; then
     echo "DRY RUN -- would execute:"

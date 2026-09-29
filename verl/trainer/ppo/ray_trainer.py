@@ -917,12 +917,60 @@ class RayPPOTrainer:
 
         # Check if save_after steps have been reached
         save_after = self.config.trainer.get("save_after", 0)
+        if int(self.config.trainer.get("keep_every", 0) or 0) > 0 and save_after > 0:
+            raise ValueError(f"keep_every is set but save_after={save_after}: the early keep points "
+                             "and bests would be skipped; set save_after=0")
         if self.global_steps < save_after:
             print(f"⏳ Skipping checkpoint save. Current step: {self.global_steps}, save_after: {save_after}")
             return
 
+        # keep_every > 0: keep every keep_every steps, the last step and the best
+        # (verl/trainer/ppo/ckpt_policy.py). It replaces save_best_only, which
+        # keeps a new best and nothing else -- not even the last step.
+        keep_every = int(self.config.trainer.get("keep_every", 0) or 0)
+        keep_policy = keep_every > 0
+        superseded = []
+        if keep_policy:
+            from verl.trainer.ppo import ckpt_policy
+
+            ckpt_policy.validate(keep_every, self.config.trainer.save_freq, self.config.trainer.test_freq)
+            if self.config.trainer.get("max_actor_ckpt_to_keep", None):
+                raise ValueError("keep_every and max_actor_ckpt_to_keep both set: the FIFO rotation "
+                                 "would delete the best checkpoint once it is the oldest")
+            best_metric_key = self.config.trainer.get("best_metric_key", "val-core/math_dapo/acc/mean@32")
+            best_checkpoint_info_path = os.path.join(self.config.trainer.default_local_dir, "best_checkpoint_info.json")
+            best_metric_value = float("-inf")
+            best_checkpoint_step = None
+            if os.path.exists(best_checkpoint_info_path):
+                with open(best_checkpoint_info_path) as f:
+                    best_info = json.load(f)
+                best_metric_value = float(best_info.get("best_metric_value", float("-inf")))
+                best_checkpoint_step = best_info.get("best_checkpoint_step", None)
+                # After a resume, a best that is no longer on disk cannot be
+                # evaluated, so it cannot stand as the best either.
+                if best_checkpoint_step is not None and not os.path.isdir(
+                        os.path.join(self.config.trainer.default_local_dir, f"global_step_{best_checkpoint_step}")):
+                    print(f"best_checkpoint_info.json names step {best_checkpoint_step}, which is not on disk; resetting the best")
+                    best_metric_value, best_checkpoint_step = float("-inf"), None
+            metric = None
+            if metrics:
+                if best_metric_key not in metrics:
+                    raise KeyError(f"best_metric_key {best_metric_key!r} is not among the validation metrics "
+                                   f"{sorted(k for k in metrics if k.startswith('val'))}")
+                metric = float(metrics[best_metric_key])
+            decision = ckpt_policy.plan(self.global_steps, self.total_training_steps, metric,
+                                        best_metric_value, best_checkpoint_step, keep_every)
+            if not decision["save"]:
+                print(f"Skipping checkpoint save at step {self.global_steps}: not a {keep_every}-step point, "
+                      f"not the last step, not a new best ({metric} vs {best_metric_value})")
+                return
+            if decision["new_best"]:
+                print(f"New best {best_metric_key}: {metric:.4f} at step {self.global_steps} (previous: {best_metric_value:.4f})")
+            superseded = decision["delete"]
+            best_metric_value, best_checkpoint_step = decision["best_value"], decision["best_step"]
+
         # If best checkpoint saving is enabled, check if saving is needed
-        if self.config.trainer.get("save_best_only", False) and metrics is not None:
+        elif self.config.trainer.get("save_best_only", False) and metrics is not None:
             best_metric_key = self.config.trainer.get("best_metric_key", "val-core/math_dapo/acc/mean@32")
             current_metric_value = metrics.get(best_metric_key, float('-inf'))
             
@@ -994,7 +1042,7 @@ class RayPPOTrainer:
             f.write(str(self.global_steps))
 
         # If best checkpoint saving is enabled, save best checkpoint info
-        if self.config.trainer.get("save_best_only", False):
+        if keep_policy or self.config.trainer.get("save_best_only", False):
             best_checkpoint_info_path = os.path.join(self.config.trainer.default_local_dir, "best_checkpoint_info.json")
             best_checkpoint_info = {
                 "best_metric_key": best_metric_key,
@@ -1004,6 +1052,16 @@ class RayPPOTrainer:
             }
             with open(best_checkpoint_info_path, 'w') as f:
                 json.dump(best_checkpoint_info, f, indent=2)
+
+        # Superseded bests go only after the new checkpoint and the json naming
+        # it are written, so a crash in between leaves two bests, never none.
+        for old_step in superseded:
+            old_checkpoint_path = os.path.join(self.config.trainer.default_local_dir, f"global_step_{old_step}")
+            if os.path.exists(old_checkpoint_path):
+                import shutil
+
+                shutil.rmtree(old_checkpoint_path)
+                print(f"Deleted superseded best checkpoint: {old_checkpoint_path}")
 
     def _load_checkpoint(self):
         if self.config.trainer.resume_mode == "disable":
