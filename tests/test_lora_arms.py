@@ -34,10 +34,10 @@ def test_method_arms_read_the_realised_entropy_and_only_mtp_needs_heads():
     for a in ALL:
         spec = lines(f"lora_arm_spec {a}")[0]
         if spec.startswith("tree"):
-            want = "mtp" if a == "signed-mtp" else "oracle"
+            want = "mtp" if a == "mtp" else "oracle"
             assert f"STEERF_FORECAST={want}" in spec, (a, spec)
         needs = sh(f"lora_needs_heads {a}").returncode == 0
-        assert needs == (a == "signed-mtp"), a
+        assert needs == (a == "mtp"), a
 
 
 def test_plan_is_seed_major_then_followups():

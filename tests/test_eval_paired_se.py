@@ -188,7 +188,7 @@ def test_every_macro_in_the_table_is_written_when_the_data_is_there(tmp_path):
     for arm, bits in (("signed",   [1, 1, 1, 0, 0, 0, 1, 0]),
                       ("uniform",  [1, 0, 1, 0, 0, 0, 1, 0]),
                       ("permuted", [1, 1, 0, 0, 0, 0, 1, 0]),
-                      ("signed-mtp", [1, 0, 0, 1, 0, 0, 1, 0])):
+                      ("mtp", [1, 0, 0, 1, 0, 0, 1, 0])):
         for seed in (3, 4):
             write_run(tmp_path, arm, seed, spec_from({
                 "math500": bits, "minerva_math": bits[:4],

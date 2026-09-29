@@ -7,7 +7,7 @@
 # rollout verl has already computed (STEERF_FORECAST=oracle): no MTP heads, no
 # Phase 1, no extra forward pass. uniform and permuted -- the controls the
 # registered contrasts pair it with -- read the same quantity, so a contrast
-# changes one thing. signed-mtp is the same treatment with the MTP forecaster,
+# changes one thing. mtp is the same treatment with the MTP forecaster,
 # at every core seed, which is how the paper answers "does the forecaster
 # matter" under its own configuration.
 #
@@ -20,7 +20,7 @@
 
 LORA_PREFIX=${LORA_PREFIX:-lora-}
 LORA_SEEDS=${LORA_SEEDS:-"1 2 3"}
-LORA_CORE_ARMS=${LORA_CORE_ARMS:-"grpo steer uniform permuted signed signed-mtp"}
+LORA_CORE_ARMS=${LORA_CORE_ARMS:-"grpo steer uniform permuted signed mtp"}
 LORA_FOLLOWUP_ARMS=${LORA_FOLLOWUP_ARMS:-"lam0.1 lam0.5 lam0-tree wmin-steer xclip-signed xclip-steer rloo-signed rloo-steer opo-signed opo-steer grpo-long"}
 LORA_FOLLOWUP_SEED=${LORA_FOLLOWUP_SEED:-1}
 LORA_XCLIP="actor_rollout_ref.actor.clip_ratio_high=5 actor_rollout_ref.actor.clip_ratio_low=0.99"
@@ -42,7 +42,7 @@ lora_arm_spec () {   # <arm>
         signed)         echo "tree ARM=signed STEERF_LAM=0.25 STEERF_FORECAST=oracle" ;;
         uniform)        echo "tree ARM=uniform STEERF_LAM=0.25 STEERF_FORECAST=oracle" ;;
         permuted)       echo "tree ARM=permuted STEERF_LAM=0.25 STEERF_FORECAST=oracle" ;;
-        signed-mtp)     echo "tree ARM=signed STEERF_LAM=0.25 STEERF_FORECAST=mtp" ;;
+        mtp)     echo "tree ARM=signed STEERF_LAM=0.25 STEERF_FORECAST=mtp" ;;
         lam0.1)         echo "tree ARM=signed STEERF_LAM=0.1 STEERF_FORECAST=oracle" ;;
         lam0.5)         echo "tree ARM=signed STEERF_LAM=0.5 STEERF_FORECAST=oracle" ;;
         lam0-tree)      echo "tree ARM=signed STEERF_LAM=0 STEERF_FORECAST=oracle" ;;

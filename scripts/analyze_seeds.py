@@ -121,6 +121,19 @@ ARM_LABEL = {"grpo": "GRPO", "steer": "\\textsc{steer}",
 # control rather than one of the five registered arms.
 BENCH_ARMS = MAIN_ARMS + ["oracle"]
 
+# The LoRA campaign (--lora, run/_lora_arms.sh). Its method reads H_togo from
+# the realised entropy, so `signed` is STEER-V there, and `mtp` -- the same
+# treatment with the MTP forecaster, at every core seed -- joins the main arms,
+# with its contrast against the method registered in
+# docs/preregistration_lora.md. The oracle follow-up is not part of it.
+LORA_ARMS = ["mtp"]
+LORA_CONTRAST = ("signed", "mtp")
+LORA_LABEL = {"signed": "\\textbf{STEER-V}", "mtp": "STEER-V (MTP)"}
+
+# What main() resets to on every call, so a --lora invocation cannot leak its
+# arms into the next one within one process (the tests call main repeatedly).
+_DEFAULTS = (list(MAIN_ARMS), list(BENCH_ARMS), dict(ARM_LABEL))
+
 # The follow-up ablations of Table 10, and the compute-matched control. They
 # are seed 1 only and are not part of the seed-level statistics, so they live
 # outside MAIN_ARMS -- but the manuscript has a slot for each, and until this
@@ -142,10 +155,6 @@ FOLLOWUP_ARMS = {
     "opo-steer":    "oposteer",
     # Stock STEER at the released token_weight_min=0.8 rather than our 0.7.
     "wmin-steer":   "wminsteer",
-    # LoRA campaign: the treatment with the MTP forecaster (the method itself
-    # reads the realised entropy there). Three seeds; the paired six-benchmark
-    # contrast is eval_paired_se.py's third.
-    "signed-mtp":   "signedmtp",
 }
 CONTRASTS = [("signed", "grpo"), ("signed", "steer"), ("signed", "uniform"),
              ("signed", "permuted"), ("steer", "grpo"), ("uniform", "steer")]
@@ -557,6 +566,9 @@ def main(argv=None) -> int:
                     help="the default: average each arm over every seed it has")
     ap.add_argument("--long-steps", type=int, default=200,
                     help="final step of the compute-matched grpo-long control")
+    ap.add_argument("--lora", action="store_true",
+                    help="the LoRA campaign: add the mtp arm and its contrast, "
+                         "label the method STEER-V, emit the collapse check")
     ap.add_argument("--run-prefix", default="",
                     help="prepended to every run name, e.g. 'lora-' for the LoRA "
                          "campaign (run/_lora_arms.sh LORA_PREFIX)")
@@ -574,6 +586,16 @@ def main(argv=None) -> int:
                     help="also emit \\newcommand macros the manuscript can \\input "
                          "(default: <out>/numbers.tex)")
     args = ap.parse_args(argv)
+    MAIN_ARMS[:] = _DEFAULTS[0]
+    BENCH_ARMS[:] = _DEFAULTS[1]
+    ARM_LABEL.clear()
+    ARM_LABEL.update(_DEFAULTS[2])
+    CONTRASTS[:] = [c for c in CONTRASTS if c != LORA_CONTRAST]
+    if args.lora:
+        MAIN_ARMS.extend(LORA_ARMS)
+        BENCH_ARMS[:] = list(MAIN_ARMS)
+        ARM_LABEL.update(LORA_LABEL)
+        CONTRASTS.append(LORA_CONTRAST)
 
     lo, hi = (int(v) for v in args.plateau.split(":"))
     tmp = None
@@ -613,7 +635,7 @@ def main(argv=None) -> int:
             "opo-signed": f"steer-f-{t}-s{seed}-tree-rollout-opo",
             "opo-steer": f"steer-{t}-s{seed}-opo",
             "wmin-steer": f"steer-{t}-s{seed}-wmin08",
-            "signed-mtp": f"steer-f-{t}-s{seed}-tree-rollout-mtp",
+            "mtp": f"steer-f-{t}-s{seed}-tree-rollout-mtp",
         }[arm]
 
     def reached(path: Path, want: int) -> bool:
@@ -1100,6 +1122,31 @@ def main(argv=None) -> int:
         fh.write(mac("STDaime", (sum(allstd) / len(allstd)) if allstd else None))
         fh.write(mac("SEaime", (sum(allstd) / len(allstd) / math.sqrt(30))
                      if allstd else None))
+        # Does GRPO collapse under LoRA at all? docs/preregistration_lora.md
+        # section 6, fixed before any LoRA run: collapse = the last step's
+        # actor/entropy below half its step-10 value, in every seed. If the
+        # low-rank constraint already holds the policy's entropy up, the method
+        # has nothing to fix under LoRA and the paper has to say so.
+        if args.lora:
+            starts, ends = [], []
+            for s_ in sorted(per_seed.get("grpo", {})):
+                f_ = find_log(run_name("grpo", s_), args.steps)
+                if f_ is None:
+                    continue
+                ent = {k: v["entropy"] for k, v in parse_log(f_).items() if "entropy" in v}
+                if 10 in ent and args.steps in ent and ent[10] > 0:
+                    starts.append(ent[10])
+                    ends.append(ent[args.steps])
+            n_c = len(starts)
+            hit = sum(e < 0.5 * b for b, e in zip(starts, ends))
+            fh.write(mac("Collapsenseeds", n_c or None, "{:d}"))
+            fh.write(mac("Collapsencollapsed", hit if n_c else None, "{:d}"))
+            fh.write(mac("Collapsestart", sum(starts) / n_c if n_c else None))
+            fh.write(mac("Collapseend", sum(ends) / n_c if n_c else None))
+            fh.write(mac("Collapseratio", sum(e / b for b, e in zip(starts, ends)) / n_c
+                         if n_c else None, "{:.2f}"))
+            fh.write(mac("Collapseverdict", None if not n_c else
+                         ("collapses" if hit == n_c else "does not collapse"), "{:s}"))
         # The machine effect, measured inside ONE arm so nothing else varies.
         # Seed 1,2 ran on a two-GPU box and 3,4 on a four-GPU box, so a seed
         # index also names a machine; an arm that has finished on both is the

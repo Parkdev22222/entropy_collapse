@@ -10,9 +10,9 @@
 #
 # STAGES (in this order; each skips what is already done, so re-running after a
 # crash or a reboot continues where it stopped)
-#   preflight      environment, data, the MTP heads if signed-mtp is planned,
+#   preflight      environment, data, the MTP heads if mtp is planned,
 #                  no other trainer on the box
-#   core           grpo steer uniform permuted signed signed-mtp, seeds 1 2 3,
+#   core           grpo steer uniform permuted signed mtp, seeds 1 2 3,
 #                  seed by seed -- a queue stopped part-way leaves whole seeds
 #   eval-core      six benchmarks at 32 samples/problem, at the last step
 #                  (primary) and at the AIME24 best (secondary)
@@ -224,9 +224,18 @@ analysis_stage () {
     # Training curves, plateau table, contrasts, follow-up rows: from the
     # training logs, over the campaign's seeds. The six-benchmark table is the
     # primary endpoint's (the last step).
-    python3 scripts/analyze_seeds.py --logs "${LOG_DIR}" --run-prefix "${LORA_PREFIX}" \
-        --seeds "$(tr ' ' ',' <<<"${LORA_SEEDS}")" --balanced --out "${RES_DIR}" \
+    local seeds; seeds="$(tr ' ' ',' <<<"${LORA_SEEDS}")"
+    python3 scripts/analyze_seeds.py --lora --logs "${LOG_DIR}" --run-prefix "${LORA_PREFIX}" \
+        --seeds "${seeds}" --balanced --out "${RES_DIR}" \
         --eval-table "${RES_DIR}/summary_final.tsv"
+    # The secondary endpoint (AIME24-best checkpoint) through the same
+    # analysis, every macro prefixed Best so the two cannot be confused.
+    if [ -f "${RES_DIR}/summary_best.tsv" ]; then
+        python3 scripts/analyze_seeds.py --lora --logs "${LOG_DIR}" --run-prefix "${LORA_PREFIX}" \
+            --seeds "${seeds}" --balanced --out "${RES_DIR}/best" \
+            --eval-table "${RES_DIR}/summary_best.tsv" \
+            --macro-prefix Best --tex-macros "${RES_DIR}/numbers-best.tex"
+    fi
 }
 
 preflight () {
@@ -242,8 +251,8 @@ preflight () {
     if [ "${need_heads}" = 1 ]; then
         for f in "${STEERF_HEADS:-checkpoints/mtp_heads_Qwen2.5-Math-1.5B-paper.pt}" \
                  "${STEERF_CALIB:-checkpoints/mtp_calibration_Qwen2.5-Math-1.5B-paper.json}"; do
-            [ -f "${f}" ] || { echo "FAIL: ${f} missing -- signed-mtp needs it" \
-                "(REPO=<hub repo> bash run/migrate_pod.sh --import, or drop signed-mtp" \
+            [ -f "${f}" ] || { echo "FAIL: ${f} missing -- mtp needs it" \
+                "(REPO=<hub repo> bash run/migrate_pod.sh --import, or drop mtp" \
                 "from LORA_CORE_ARMS)"; rc=1; }
         done
     fi

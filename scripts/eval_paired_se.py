@@ -67,9 +67,9 @@ REPORTED_ONLY = ("gsm8k_test",)
 #
 # The LoRA campaign adds a third, registered in docs/preregistration_lora.md:
 # the treatment (realised entropy) against the same treatment with the MTP
-# forecaster, which also changes exactly one thing. With no signed-mtp dumps
+# forecaster, which also changes exactly one thing. With no mtp dumps
 # it has no shared seed and emits nothing, as before.
-CONTRASTS = (("signed", "uniform"), ("signed", "permuted"), ("signed", "signed-mtp"))
+CONTRASTS = (("signed", "uniform"), ("signed", "permuted"), ("signed", "mtp"))
 
 # macro stem -> (contrast index or None, key, format).  tests/test_paper.py
 # reads this table to decide which slots a run can fill, so a name here is a

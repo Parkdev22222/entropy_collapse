@@ -102,6 +102,10 @@ def emittable_names():
     src = (ROOT / "scripts" / "analyze_seeds.py").read_text()
     arms = re.search(r"MAIN_ARMS = \[([^\]]*)\]", src).group(1)
     arms = re.findall(r'"([a-z-]+)"', arms)
+    # The LoRA campaign's extra main arm (--lora) is emitted the same way.
+    lora = re.search(r"LORA_ARMS = \[([^\]]*)\]", src)
+    if lora:
+        arms += re.findall(r'"([a-z-]+)"', lora.group(1))
     stems = re.findall(r'"[a-z0-9.-]+":\s*"([a-z]+)"', src)
     # The metric list is read out of the emitter, not restated here. A copy
     # kept in this file goes stale in silence: on 2026-09-21 analyze_seeds.py
@@ -200,9 +204,10 @@ def emittable_names():
     names |= set(re.findall(r'"([A-Za-z]+)":\s*\(', body.group(1)))
     names |= set(re.findall(r'out\["([A-Za-z]+)"\]', loc))
 
-    # backbone rows are the same analysis under --macro-prefix
+    # backbone rows, and the LoRA paper's best-checkpoint evaluation, are the
+    # same analysis under --macro-prefix
     prefixed = set()
-    for pre in ("Bqwenbig", "Bllama", "Bmistral"):
+    for pre in ("Bqwenbig", "Bllama", "Bmistral", "Best"):
         prefixed |= {pre + n for n in names}
 
     # The go/no-go probes carry their own full names rather than a prefix, so

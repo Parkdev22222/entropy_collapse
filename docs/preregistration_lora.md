@@ -34,7 +34,7 @@ them. One of them informed a design choice below and is disclosed in §4.
 ## 3. Arms
 
 Core, seeds 1-3: `grpo`, `steer` (lambda 0), `uniform`, `permuted`, `signed`
-(the method), `signed-mtp`. Follow-ups, seed 1: `lam0.1`, `lam0.5`, `lam0-tree`,
+(the method, STEER-V), `mtp` (STEER-V with the MTP forecaster). Follow-ups, seed 1: `lam0.1`, `lam0.5`, `lam0-tree`,
 `wmin-steer` (STEER at the released script's 0.8), `xclip-signed`, `xclip-steer`,
 `rloo-signed`, `rloo-steer`, `opo-signed`, `opo-steer`, `grpo-long`
 (compute-matched GRPO). Definitions: `run/_lora_arms.sh`.
@@ -51,14 +51,14 @@ the full fine-tuning pilot) and because it removes Phase 1 and the head
 calibration. In the one pilot that compared the two at the same seed (full
 fine-tuning, seed 4, n = 1), the MTP forecaster led by +.0112 plateau
 accuracy. One run per side does not measure a difference, but it points the
-other way, so the choice is tested rather than assumed: `signed-mtp` runs at
-every core seed, and the paper reports `signed - signed-mtp` whatever it is.
+other way, so the choice is tested rather than assumed: `mtp` runs at
+every core seed, and the paper reports `signed - mtp` whatever it is.
 
 Reading, fixed now (paired six-benchmark difference at the last step, pooled
 MATH500/OlympiadBench/Minerva, across-problem SE over the three seeds):
 - |diff| < 2 SE: the two are not distinguished at this resolution; the paper
   says that, not "equivalent".
-- signed-mtp ahead by >= 2 SE: the paper says the forecaster carries accuracy
+- mtp ahead by >= 2 SE: the paper says the forecaster carries accuracy
   that the realised value does not, and presents the method as the cheaper
   variant with that cost stated.
 - signed ahead by >= 2 SE: reported as measured.
@@ -80,7 +80,7 @@ in-sample for AIME24. (b) AIME24 plateau accuracy, mean over validation steps
 40-110, paired within seed (`scripts/analyze_seeds.py`).
 
 **Registered contrasts.** signed - grpo, signed - steer, signed - uniform,
-signed - permuted, steer - grpo, uniform - steer, signed - signed-mtp.
+signed - permuted, steer - grpo, uniform - steer, signed - mtp.
 signed - uniform and signed - permuted are the two that change exactly one
 thing; they carry the claim.
 
@@ -89,8 +89,11 @@ thing; they carry the claim.
    pooled paired difference, or is equivocal/against by direction consistency:
    the sign of the weighting is not what helps.
 2. The same for `signed - permuted`: the forecast's information is not what helps.
-3. Aggregate policy entropy orders the arms the same way accuracy does: the
-   effect is an entropy-level effect, not the token-level one claimed.
+3. **The dissociation fails.** The construction predicts that the damping
+   apparatus moves the aggregate entropy and A_H's contents do not: the
+   apparatus contrasts (steer - grpo, uniform - steer) should move converged
+   `actor/entropy` and the A_H contrasts (signed - uniform, signed - permuted)
+   should not. If the |t| of the two groups overlap, the claim fails.
 4. Mean token weight leaves [0.99, 1.0] for `signed`: the arm is a learning-rate
    change, not a reweighting.
 
@@ -110,4 +113,10 @@ Full fine-tuning (second paper), other backbones, pass@k, code benchmarks.
 
 ## Amendments
 
-None.
+None after the first run. One correction before it, 2026-09-29, recorded
+because this file had already been committed: condition 3 first read "aggregate
+entropy orders the arms the same way accuracy does", which the full
+fine-tuning manuscript had retired as the wrong instrument (it treats the
+aggregate as a signal about A_H, which Section "The correction cannot move the
+mean" says it cannot be). It was replaced by the dissociation test above, the
+one that manuscript registered instead, before any LoRA run existed.
