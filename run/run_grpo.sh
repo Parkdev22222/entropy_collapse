@@ -67,6 +67,8 @@ STEER_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # shellcheck source=run/_gpu_defaults.sh
 . "${SCRIPT_DIR}/_gpu_defaults.sh"
+# shellcheck source=run/_lora_defaults.sh
+. "${SCRIPT_DIR}/_lora_defaults.sh"
 
 export PYTHONPATH="${STEER_ROOT}:${PYTHONPATH:-}"
 export PYTHONHASHSEED=42
@@ -221,6 +223,7 @@ ARGS=(
     ++trainer.save_after="${SAVE_AFTER}"
     ++trainer.best_metric_key=val-core/aime_2024_dapo_boxed/acc/mean@32
 )
+ARGS+=("${LORA_ARGS[@]}")
 
 if [ "${DRY_RUN:-0}" = "1" ]; then
     echo "DRY RUN -- would execute:"
@@ -230,8 +233,13 @@ if [ "${DRY_RUN:-0}" = "1" ]; then
     exit 0
 fi
 
-ray stop --force >/dev/null 2>&1 || true
-sleep 5
+# RAY_STOP=0 when several one-GPU trainers share the box (run_lora_paper.sh
+# TOPOLOGY=1gpu): each has its own local Ray, and stopping "the" Ray here
+# would kill the neighbours'.
+if [ "${RAY_STOP:-1}" = "1" ]; then
+    ray stop --force >/dev/null 2>&1 || true
+    sleep 5
+fi
 
 # Write the exact invocation into the log before running. `set -x` would send
 # the trace to this shell's stderr, i.e. the terminal, not to ${LOG} -- which

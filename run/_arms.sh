@@ -228,6 +228,9 @@ run_name_for () {   # <arm> <seed>  -> the trainer's experiment_name
         # calibration constant. oracle_h_togo runs that quantity through
         # the same path with no heads, no Phase 1 and no extra forward.
         oracle)       echo "steer-f-${MODEL_TAG}-s$2-tree-rollout-oracle" ;;
+        # The LoRA campaign's forecaster ablation: the treatment with the MTP
+        # heads, against a treatment that reads the realised entropy (oracle).
+        signed-mtp)   echo "steer-f-${MODEL_TAG}-s$2-tree-rollout-mtp" ;;
         xclip-signed) echo "steer-f-${MODEL_TAG}-s$2-tree-rollout-xclip" ;;
         xclip-steer)  echo "steer-${MODEL_TAG}-s$2-xclip" ;;
         rloo-signed)  echo "steer-f-${MODEL_TAG}-s$2-tree-rollout-rloo" ;;

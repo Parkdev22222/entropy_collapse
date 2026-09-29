@@ -85,10 +85,11 @@ def _git(*args):
 
 @pytest.mark.skipif(_git("rev-parse", "--verify", "origin/paper").returncode != 0,
                     reason="origin/paper not fetched here")
-def test_this_branch_steer_f_does_not_satisfy_the_donor_verl():
-    """The finding itself, pinned. If this ever starts failing, the two
-    lineages have converged and bootstrap_pod.sh's override can be dropped --
-    check that deliberately rather than deleting this test."""
+def test_this_branch_carries_the_steer_f_the_vendored_verl_calls():
+    """The lora branch vendors verl and takes the donor lineage of steer_f with
+    it (the two lineages were never versions of one package). So every symbol
+    the trainer imports by name must be defined in the committed steer_f --
+    the arms would otherwise die inside worker init."""
     need = {
         "steer_f/verl_integration.py": ["forecast_h_togo", "compute_a_h"],
         "steer_f/entropy_forecast.py": ["sibling_support", "oracle_h_togo",
@@ -96,13 +97,9 @@ def test_this_branch_steer_f_does_not_satisfy_the_donor_verl():
         "steer_f/monitors.py": ["token_weight_distribution"],
     }
     for path, names in need.items():
-        donor = _git("show", f"origin/paper:{path}").stdout
         here = _git("show", f"HEAD:{path}").stdout
         for name in names:
-            assert f"def {name}" in donor, f"{path}:{name} missing from origin/paper"
-            assert f"def {name}" not in here, (
-                f"{path}:{name} now exists on this branch too -- revisit "
-                "bootstrap_pod.sh's RUNTIME_RE override")
+            assert f"def {name}" in here, f"{path}:{name} missing from this branch"
 
 
 def make_call_site(root: Path, *, call: str, in_queue: bool) -> None:

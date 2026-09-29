@@ -46,6 +46,8 @@ STEER_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # shellcheck source=run/_gpu_defaults.sh
 . "${SCRIPT_DIR}/_gpu_defaults.sh"
+# shellcheck source=run/_lora_defaults.sh
+. "${SCRIPT_DIR}/_lora_defaults.sh"
 
 export PYTHONPATH="${STEER_ROOT}:$PYTHONPATH"
 echo "Current VERL path:"
@@ -250,4 +252,5 @@ python3 -m verl.trainer.main_ppo \
     ${MAX_CKPT_KEEP:+++trainer.max_actor_ckpt_to_keep=${MAX_CKPT_KEEP}} \
     ++trainer.best_metric_key=val-core/aime_2024_dapo_boxed/acc/mean@${ACC_AT} \
     ${SEED:+"++data.seed=${SEED}"} \
+    "${LORA_ARGS[@]}" \
     "$@"

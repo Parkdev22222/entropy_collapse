@@ -65,6 +65,9 @@ LORA_ARGS=(
     actor_rollout_ref.rollout.load_format=safetensors
 )
 COMMON_ARGS=( trainer.val_before_train=False )
+# On the lora branch the launchers train LoRA unless FULL_FT=1, so the full
+# fine-tuning cases pass it; an older launcher ignores it and the explicit
+# LORA_ARGS below are what turn LoRA on there.
 
 # ---- guards -----------------------------------------------------------------
 if [ ! -f "${LAUNCHER}" ]; then
@@ -72,7 +75,11 @@ if [ ! -f "${LAUNCHER}" ]; then
     echo "        run 'bash run/bootstrap_pod.sh' first." >&2
     exit 1
 fi
-if [ "$(grep -c '^ray stop --force' "${LAUNCHER}")" != "1" ]; then
+# A launcher that honours RAY_STOP (the lora branch) is used as it is; an older
+# one gets a copy with its 'ray stop' line removed.
+if grep -q 'RAY_STOP:-1' "${LAUNCHER}"; then
+    HONOURS_RAY_STOP=1
+elif [ "$(grep -c '^ray stop --force' "${LAUNCHER}")" != "1" ]; then
     echo "REFUSE: expected exactly one 'ray stop --force' line in ${LAUNCHER}." >&2
     echo "        The side-by-side cases remove it from a copy so the four trainers" >&2
     echo "        do not stop each other's Ray; with a different launcher that edit" >&2
@@ -116,14 +123,18 @@ run_serial() {   # <case> <lora:0|1>
     CASE_LOGS[$c]="${BENCH_DIR}/train-${name}.log"
     echo "[bench] ${c}: ${NGPU} GPUs, tp=${NGPU}  -> ${CASE_LOGS[$c]}"
     # shellcheck disable=SC2046
-    env $(base_env "${name}") N_GPUS="${NGPU}" TP_SIZE="${NGPU}" \
+    env $(base_env "${name}") FULL_FT=$((1 - lora)) N_GPUS="${NGPU}" TP_SIZE="${NGPU}" \
         DRY_RUN="${DRY}" bash "${LAUNCHER}" "${extra[@]}"
 }
 
 run_side_by_side() {   # <case> <lora:0|1>
     local c=$1 lora=$2 i name logs="" pids=() extra=("${COMMON_ARGS[@]}") mem_env=()
     [ "${lora}" = 1 ] && { extra+=("${LORA_ARGS[@]}"); mem_env=(GPU_MEM_UTIL="${LORA_1GPU_MEM}"); }
-    sed -e '/^ray stop --force/d' "${LAUNCHER}" > "${NR_LAUNCHER}"
+    if [ "${HONOURS_RAY_STOP:-0}" = 1 ]; then
+        cp "${LAUNCHER}" "${NR_LAUNCHER}"
+    else
+        sed -e '/^ray stop --force/d' "${LAUNCHER}" > "${NR_LAUNCHER}"
+    fi
     [ "${DRY}" = 1 ] || { ray stop --force >/dev/null 2>&1 || true; sleep 5; }
     for ((i = 0; i < NGPU; i++)); do
         name="bench-${TS}-${c}-g${i}"
@@ -132,8 +143,8 @@ run_side_by_side() {   # <case> <lora:0|1>
         # Separate RAY_TMPDIR per trainer: each starts its own local Ray, and
         # a shared temp dir is how one of them would find and join another's.
         # shellcheck disable=SC2046
-        env $(base_env "${name}") "${mem_env[@]}" CUDA_VISIBLE_DEVICES="${i}" \
-            N_GPUS=1 TP_SIZE=1 FORCE_CONCURRENT=1 RAY_TMPDIR="/tmp/rb${i}" \
+        env $(base_env "${name}") "${mem_env[@]}" FULL_FT=$((1 - lora)) CUDA_VISIBLE_DEVICES="${i}" \
+            N_GPUS=1 TP_SIZE=1 FORCE_CONCURRENT=1 RAY_STOP=0 RAY_TMPDIR="/tmp/rb${i}" \
             DRY_RUN="${DRY}" bash "${NR_LAUNCHER}" "${extra[@]}" &
         pids+=($!)
         [ "${DRY}" = 1 ] || sleep 20   # stagger start-up, not the timed steps

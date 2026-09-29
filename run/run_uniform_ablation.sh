@@ -184,8 +184,13 @@ if [ "${DRY_RUN:-0}" = "1" ]; then
     exit 0
 fi
 
-ray stop --force >/dev/null 2>&1 || true
-sleep 5
+# RAY_STOP=0 when several one-GPU trainers share the box (run_lora_paper.sh
+# TOPOLOGY=1gpu): each has its own local Ray, and stopping "the" Ray here
+# would kill the neighbours'.
+if [ "${RAY_STOP:-1}" = "1" ]; then
+    ray stop --force >/dev/null 2>&1 || true
+    sleep 5
+fi
 
 # `set -e` would abort before the summary below, so capture instead of trap.
 status=0
