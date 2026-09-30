@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 FAKE = r'''#!/usr/bin/env bash
 { printf 'CALL %s' "$(basename "$0")"
   for v in SEED RUN_NAME STEPS KEEP_EVERY ARM STEERF_FORECAST STEERF_LAM TOKEN_WEIGHT_MIN MODEL_PATH \
-           CUDA_VISIBLE_DEVICES RAY_STOP RESUME SAVE_BEST_ONLY SAVE_AFTER_OVERRIDE; do
+           CUDA_VISIBLE_DEVICES RAY_STOP RESUME SAVE_BEST_ONLY SAVE_AFTER_OVERRIDE ROLLOUT_EAGER; do
       [ -n "${!v:-}" ] && printf ' %s=%s' "$v" "${!v}"
   done
   printf ' ARGS=%s\n' "$*"; } >> "${FAKE_CALLS}"
@@ -125,3 +125,46 @@ def test_backbones_train_their_own_model_on_the_whole_box(tmp_path):
     n = len(c)
     run(root, bin_, tmp_path, STAGES="backbones")
     assert len(calls(tmp_path)) == n
+
+
+def test_rollout_eager_reaches_every_launcher(tmp_path):
+    root, bin_ = tree(tmp_path)
+    r = run(root, bin_, tmp_path, ROLLOUT_EAGER="0")
+    assert r.returncode == 0, r.stdout + r.stderr
+    c = calls(tmp_path)
+    assert c and all("ROLLOUT_EAGER=0" in x for x in c)
+    assert "rollout_eager 0" in r.stdout
+
+
+def test_campaign_settings_are_locked_across_invocations(tmp_path):
+    root, bin_ = tree(tmp_path)
+    settings = root / "logs/lora/campaign_settings"
+    r = run(root, bin_, tmp_path, STAGES="core", LORA_CORE_ARMS="grpo")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert settings.read_text().split() == ["topology=tp4", "rollout_eager=1"]
+    n = len(calls(tmp_path))
+    for env in ({"TOPOLOGY": "1gpu"}, {"ROLLOUT_EAGER": "0"}):
+        r = run(root, bin_, tmp_path, STAGES="core", LORA_CORE_ARMS="grpo steer", **env)
+        assert r.returncode == 2 and "REFUSE" in r.stderr, env
+        assert len(calls(tmp_path)) == n                  # nothing launched
+    r = run(root, bin_, tmp_path, STAGES="core", LORA_CORE_ARMS="grpo steer",
+            TOPOLOGY="1gpu", CAMPAIGN_SETTINGS_OVERRIDE="1")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert len(calls(tmp_path)) > n
+    assert settings.read_text().split() == ["topology=tp4", "rollout_eager=1"]   # not rewritten
+
+
+def test_backbones_lock_only_the_engine_setting(tmp_path):
+    root, bin_ = tree(tmp_path)
+    run(root, bin_, tmp_path, STAGES="core", LORA_CORE_ARMS="grpo", TOPOLOGY="1gpu")
+    r = run(root, bin_, tmp_path, STAGES="backbones")      # tp4 default: topology not theirs
+    assert r.returncode == 0, r.stdout + r.stderr
+    r = run(root, bin_, tmp_path, STAGES="backbones", ROLLOUT_EAGER="0")
+    assert r.returncode == 2
+
+
+def test_dry_run_records_nothing(tmp_path):
+    root, bin_ = tree(tmp_path)
+    r = run(root, bin_, tmp_path, DRY="1")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert not (root / "logs/lora/campaign_settings").exists()

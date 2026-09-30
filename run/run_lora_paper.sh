@@ -35,6 +35,14 @@
 #         (RAY_TMPDIR) and the launchers skip `ray stop` (RAY_STOP=0).
 #         Choose it only after run/bench_lora.sh says it is faster.
 # Evaluation always runs one checkpoint at a time on all GPUs.
+# ROLLOUT_EAGER -- 1 (verl's default) or 0 (vLLM CUDA graphs); run/_lora_defaults.sh.
+#
+# Both are locked: the first training invocation writes them to
+# logs/lora/campaign_settings, and a later one (a restart, another shard on
+# this box) that asks for different values is refused, so a campaign cannot
+# drift from one setting to another between arms. CAMPAIGN_SETTINGS_OVERRIDE=1
+# lets it through. TOPOLOGY is locked only by the core and follow-up stages
+# (backbones always use the whole box); ROLLOUT_EAGER by every training stage.
 #
 # SHARDS -- every box computes the same plan and takes lines k with
 # k mod N == i. No coordination; the boxes need the same LORA_* settings and,
@@ -70,6 +78,10 @@ case "${SHARD_I}:${SHARD_N}" in
 esac
 [ "${SHARD_I}" -lt "${SHARD_N}" ] || { echo "FATAL: SHARD ${SHARD}: i must be < N" >&2; exit 2; }
 case "${TOPOLOGY}" in tp4|1gpu) ;; *) echo "FATAL: TOPOLOGY must be tp4 or 1gpu" >&2; exit 2 ;; esac
+ROLLOUT_EAGER=${ROLLOUT_EAGER:-1}
+case "${ROLLOUT_EAGER}" in 0|1) ;; *) echo "FATAL: ROLLOUT_EAGER must be 0 or 1" >&2; exit 2 ;; esac
+export ROLLOUT_EAGER
+SETTINGS_FILE=${SETTINGS_FILE:-${ROOT}/logs/lora/campaign_settings}
 
 banner () { printf '\n========================================\n%s\n========================================\n' "$*"; }
 has_stage () { case " ${STAGES} " in *" $1 "*) return 0 ;; esac; return 1; }
@@ -388,8 +400,43 @@ PY
     return "${rc}"
 }
 
+# ---------------------------------------------------------- settings lock
+# One "key=value" per line. A key this invocation depends on is compared with
+# the recorded value, or recorded if absent. Nothing is written on DRY.
+lock_settings () {
+    local kv key want have bad=0 keys=()
+    if has_stage core || has_stage followups; then keys+=("topology=${TOPOLOGY}"); fi
+    if has_stage core || has_stage followups || has_stage backbones; then
+        keys+=("rollout_eager=${ROLLOUT_EAGER}")
+    fi
+    for kv in "${keys[@]}"; do
+        key="${kv%%=*}"; want="${kv#*=}"
+        have="$(grep -m1 "^${key}=" "${SETTINGS_FILE}" 2>/dev/null | cut -d= -f2-)"
+        if [ -z "${have}" ]; then
+            [ "${DRY}" = 1 ] && continue
+            mkdir -p "$(dirname "${SETTINGS_FILE}")"
+            echo "${kv}" >> "${SETTINGS_FILE}"
+            echo "[lora] campaign setting recorded: ${kv} -> ${SETTINGS_FILE}"
+        elif [ "${have}" != "${want}" ]; then
+            echo "REFUSE: ${key}=${want}, but this campaign runs ${key}=${have} (${SETTINGS_FILE})." >&2
+            bad=1
+        fi
+    done
+    if [ "${bad}" = 1 ]; then
+        if [ "${CAMPAIGN_SETTINGS_OVERRIDE:-0}" = 1 ]; then
+            echo "[lora] CAMPAIGN_SETTINGS_OVERRIDE=1: continuing with mixed settings." >&2
+            return 0
+        fi
+        echo "        Every arm of a table must share these. Start from the recorded values," >&2
+        echo "        or archive the campaign's runs and that file to start a new one." >&2
+        return 1
+    fi
+    return 0
+}
+
 # -------------------------------------------------------------------- main
-banner "LoRA campaign: stages [${STAGES}]  topology ${TOPOLOGY}  shard ${SHARD}  keep_every ${KEEP_EVERY}"
+banner "LoRA campaign: stages [${STAGES}]  topology ${TOPOLOGY}  rollout_eager ${ROLLOUT_EAGER}  shard ${SHARD}  keep_every ${KEEP_EVERY}"
+lock_settings || exit 2
 if has_stage preflight && [ "${DRY}" != 1 ]; then
     preflight || { echo "STOP: preflight failed" >&2; exit 1; }
 fi

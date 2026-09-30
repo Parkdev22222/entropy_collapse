@@ -105,3 +105,11 @@ def test_entering_a_backbone_replaces_the_1_5b_profile():
     assert out[1] == "lora-steer-f-Qwen2.5-Math-7B-s1-tree-rollout"
     assert out[2].split() == ["meta-llama/Llama-3.2-3B-Instruct", "datasets/math500.parquet",
                               "val-core/math500/acc/mean@1"]
+
+
+def test_rollout_eager_is_one_switch_for_every_arm():
+    assert "enforce_eager" not in _defaults("").stdout
+    graphs = _defaults("ROLLOUT_EAGER=0")
+    assert graphs.returncode == 0
+    assert "actor_rollout_ref.rollout.enforce_eager=False" in graphs.stdout
+    assert _defaults("ROLLOUT_EAGER=no").returncode == 2

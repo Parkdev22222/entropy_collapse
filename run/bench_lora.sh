@@ -5,6 +5,8 @@
 #   bash run/bench_lora.sh                          # all cases, 4 steps each
 #   BENCH_CASES="lora_1gpu_x4 full_tp4" bash run/bench_lora.sh
 #   DRY=1 bash run/bench_lora.sh                    # print the commands only
+#   BENCH_ARM=signed BENCH_CASES="lora_1gpu_x4_graph" \
+#     BENCH_BASELINE_LOG=<a campaign STEER-V log> bash run/bench_lora.sh
 #
 # WHY
 #   The step-time breakdown of the full fine-tuning runs (4x H100, seed 3):
@@ -29,7 +31,17 @@
 #   full_1gpu_x4   full fine-tuning, four one-GPU trainers at once -- separates
 #                  "running four at once" from "LoRA"; may OOM, which is itself
 #                  the answer
+#   lora_tp4_graph      lora_tp4 with vLLM CUDA graphs (ROLLOUT_EAGER=0)
+#   lora_1gpu_x4_graph  lora_1gpu_x4 with vLLM CUDA graphs
 #   LoRA = rank 64, alpha 32, all-linear, lr 1e-5, load_format=safetensors.
+#
+# BENCH_ARM=signed times the paper's method instead of GRPO: the tree arm
+# (run/run_uniform_ablation.sh) with the environment _lora_arms.sh gives it,
+# so the number is the campaign's own step, not a proxy. BENCH_BASELINE names
+# the case the speedup is taken against (default full_tp4); with
+# BENCH_BASELINE_LOG=<log> an existing tp=4 training log -- e.g. the campaign
+# run that was stopped to make room for this -- is summarised as lora_tp4 and
+# becomes the baseline, so it need not be re-timed.
 #
 # COST: a step is ~8 min at tp=4 and several times that on one GPU, so four
 # steps per case is roughly 35 min (tp=4) to 1.5 h (x4) per case. Run the
@@ -44,6 +56,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT}" || exit 1
 # shellcheck source=run/_arms.sh
 . run/_arms.sh
+# shellcheck source=run/_lora_arms.sh
+. run/_lora_arms.sh
 
 CASES=${BENCH_CASES:-"lora_1gpu_x4 full_tp4 lora_tp4 full_1gpu_x4"}
 STEPS=${BENCH_STEPS:-4}
@@ -55,7 +69,21 @@ LORA_1GPU_MEM=${LORA_1GPU_MEM:-0.6}
 DRY=${DRY:-0}
 TS=$(date +%Y%m%d_%H%M%S)
 BENCH_DIR=${BENCH_DIR:-logs/bench/${TS}}
-LAUNCHER=run/run_grpo.sh
+BENCH_ARM=${BENCH_ARM:-grpo}
+BENCH_BASELINE=${BENCH_BASELINE:-full_tp4}
+BENCH_BASELINE_LOG=${BENCH_BASELINE_LOG:-}
+ARM_ENV=()
+case "${BENCH_ARM}" in
+    grpo)   LAUNCHER=run/run_grpo.sh ;;
+    signed) LAUNCHER=run/run_uniform_ablation.sh
+            # "tree ARM=signed STEERF_LAM=... STEERF_FORECAST=oracle": the words after the kind
+            read -r -a ARM_ENV <<<"$(lora_arm_spec signed | cut -d' ' -f2-)" ;;
+    *) echo "FATAL: BENCH_ARM must be grpo or signed, got '${BENCH_ARM}'" >&2; exit 2 ;;
+esac
+if [ -n "${BENCH_BASELINE_LOG}" ]; then
+    [ -f "${BENCH_BASELINE_LOG}" ] || { echo "FATAL: BENCH_BASELINE_LOG ${BENCH_BASELINE_LOG} not found" >&2; exit 2; }
+    BENCH_BASELINE=lora_tp4
+fi
 
 LORA_ARGS=(
     actor_rollout_ref.model.lora_rank="${LORA_RANK}"
@@ -64,7 +92,9 @@ LORA_ARGS=(
     actor_rollout_ref.actor.optim.lr="${LORA_LR}"
     actor_rollout_ref.rollout.load_format=safetensors
 )
-COMMON_ARGS=( trainer.val_before_train=False )
+# test_freq/save_freq here too: the tree launcher's SCALE block fixes both at
+# 10 and reads no env for them; a later hydra value wins.
+COMMON_ARGS=( trainer.val_before_train=False trainer.test_freq=-1 trainer.save_freq=-1 )
 # On the lora branch the launchers train LoRA unless FULL_FT=1, so the full
 # fine-tuning cases pass it; an older launcher ignores it and the explicit
 # LORA_ARGS below are what turn LoRA on there.
@@ -117,19 +147,21 @@ base_env() {   # <run-name>
 
 declare -A CASE_LOGS=()
 
-run_serial() {   # <case> <lora:0|1>
-    local c=$1 lora=$2 name="bench-${TS}-$1" extra=("${COMMON_ARGS[@]}")
+run_serial() {   # <case> <lora:0|1> [eager:0|1]
+    local c=$1 lora=$2 eager=${3:-1} name="bench-${TS}-$1" extra=("${COMMON_ARGS[@]}")
     [ "${lora}" = 1 ] && extra+=("${LORA_ARGS[@]}")
+    [ "${eager}" = 0 ] && extra+=(actor_rollout_ref.rollout.enforce_eager=False)
     CASE_LOGS[$c]="${BENCH_DIR}/train-${name}.log"
     echo "[bench] ${c}: ${NGPU} GPUs, tp=${NGPU}  -> ${CASE_LOGS[$c]}"
     # shellcheck disable=SC2046
-    env $(base_env "${name}") FULL_FT=$((1 - lora)) N_GPUS="${NGPU}" TP_SIZE="${NGPU}" \
-        DRY_RUN="${DRY}" bash "${LAUNCHER}" "${extra[@]}"
+    env $(base_env "${name}") "${ARM_ENV[@]}" FULL_FT=$((1 - lora)) ROLLOUT_EAGER="${eager}" \
+        N_GPUS="${NGPU}" TP_SIZE="${NGPU}" DRY_RUN="${DRY}" bash "${LAUNCHER}" "${extra[@]}"
 }
 
-run_side_by_side() {   # <case> <lora:0|1>
-    local c=$1 lora=$2 i name logs="" pids=() extra=("${COMMON_ARGS[@]}") mem_env=()
+run_side_by_side() {   # <case> <lora:0|1> [eager:0|1]
+    local c=$1 lora=$2 eager=${3:-1} i name logs="" pids=() extra=("${COMMON_ARGS[@]}") mem_env=()
     [ "${lora}" = 1 ] && { extra+=("${LORA_ARGS[@]}"); mem_env=(GPU_MEM_UTIL="${LORA_1GPU_MEM}"); }
+    [ "${eager}" = 0 ] && extra+=(actor_rollout_ref.rollout.enforce_eager=False)
     if [ "${HONOURS_RAY_STOP:-0}" = 1 ]; then
         cp "${LAUNCHER}" "${NR_LAUNCHER}"
     else
@@ -143,7 +175,8 @@ run_side_by_side() {   # <case> <lora:0|1>
         # Separate RAY_TMPDIR per trainer: each starts its own local Ray, and
         # a shared temp dir is how one of them would find and join another's.
         # shellcheck disable=SC2046
-        env $(base_env "${name}") "${mem_env[@]}" FULL_FT=$((1 - lora)) CUDA_VISIBLE_DEVICES="${i}" \
+        env $(base_env "${name}") "${ARM_ENV[@]}" "${mem_env[@]}" FULL_FT=$((1 - lora)) \
+            ROLLOUT_EAGER="${eager}" CUDA_VISIBLE_DEVICES="${i}" \
             N_GPUS=1 TP_SIZE=1 FORCE_CONCURRENT=1 RAY_STOP=0 RAY_TMPDIR="/tmp/rb${i}" \
             DRY_RUN="${DRY}" bash "${NR_LAUNCHER}" "${extra[@]}" &
         pids+=($!)
@@ -158,6 +191,8 @@ for c in ${CASES}; do
         full_tp4)     run_serial "${c}" 0 ;;
         lora_tp4)     run_serial "${c}" 1 ;;
         lora_1gpu_x4) run_side_by_side "${c}" 1 ;;
+        lora_tp4_graph)     run_serial "${c}" 1 0 ;;
+        lora_1gpu_x4_graph) run_side_by_side "${c}" 1 0 ;;
         full_1gpu_x4) run_side_by_side "${c}" 0 ;;
         *) echo "[bench] unknown case '${c}', skipped" >&2 ;;
     esac
@@ -166,8 +201,10 @@ done
 [ "${DRY}" = 1 ] && exit 0
 
 specs=()
+[ -n "${BENCH_BASELINE_LOG}" ] && specs+=(--case "lora_tp4=${BENCH_BASELINE_LOG}")
 for c in ${CASES}; do [ -n "${CASE_LOGS[$c]:-}" ] && specs+=(--case "${c}=${CASE_LOGS[$c]}"); done
 echo
-echo "[bench] box throughput (median of steps 2..$((STEPS - 1)); speedup vs full_tp4):"
-python3 scripts/bench_lora_summary.py --steps "${STEPS}" "${specs[@]}" --out "${BENCH_DIR}/summary.tsv"
+echo "[bench] box throughput (median of steps 2..$((STEPS - 1)); speedup vs ${BENCH_BASELINE}):"
+python3 scripts/bench_lora_summary.py --steps "${STEPS}" --baseline "${BENCH_BASELINE}" \
+    "${specs[@]}" --out "${BENCH_DIR}/summary.tsv"
 echo "[bench] table -> ${BENCH_DIR}/summary.tsv"

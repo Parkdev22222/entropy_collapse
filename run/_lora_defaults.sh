@@ -22,6 +22,12 @@ LORA_RANK=${LORA_RANK:-64}
 LORA_ALPHA=${LORA_ALPHA:-32}
 LORA_TARGET=${LORA_TARGET:-all-linear}
 LORA_LR=${LORA_LR:-1e-5}
+# ROLLOUT_EAGER=0 lets vLLM capture CUDA graphs (enforce_eager=False). verl's
+# default is eager; under LoRA a 1.5B decode step is launch-bound (every linear
+# layer adds the adapter's kernels), so graphs are a speed setting. It changes
+# no hyperparameter, but it is one value for the whole campaign
+# (run_lora_paper.sh locks it with TOPOLOGY), never mixed across arms.
+ROLLOUT_EAGER=${ROLLOUT_EAGER:-1}
 
 if [ "${FULL_FT:-0}" = "1" ]; then
     LORA_ARGS=()
@@ -33,6 +39,11 @@ else
             echo "        to run full fine-tuning on purpose." >&2
             exit 2 ;;
     esac
+    case "${ROLLOUT_EAGER}" in
+        0|1) ;;
+        *) echo "REFUSE: ROLLOUT_EAGER='${ROLLOUT_EAGER}' (0 = CUDA graphs, 1 = eager)." >&2
+           exit 2 ;;
+    esac
     LORA_ARGS=(
         actor_rollout_ref.model.lora_rank="${LORA_RANK}"
         actor_rollout_ref.model.lora_alpha="${LORA_ALPHA}"
@@ -40,11 +51,12 @@ else
         actor_rollout_ref.actor.optim.lr="${LORA_LR}"
         actor_rollout_ref.rollout.load_format=safetensors
     )
+    [ "${ROLLOUT_EAGER}" = 0 ] && LORA_ARGS+=(actor_rollout_ref.rollout.enforce_eager=False)
     # huggingface/ under LoRA holds PEFT-shaped keys that no loader maps back
     # onto the model, so it is not an evaluable checkpoint -- the adapter in
     # actor/lora_adapter/ is, and verl writes it on every save. Keep the
     # sharded state for resuming instead of the hf_model copy.
     SAVE_CONTENTS=${SAVE_CONTENTS:-"['model','optimizer','extra']"}
-    echo "[lora] rank=${LORA_RANK} alpha=${LORA_ALPHA} target=${LORA_TARGET} lr=${LORA_LR}"
+    echo "[lora] rank=${LORA_RANK} alpha=${LORA_ALPHA} target=${LORA_TARGET} lr=${LORA_LR} rollout_eager=${ROLLOUT_EAGER}"
 fi
 export SAVE_CONTENTS
