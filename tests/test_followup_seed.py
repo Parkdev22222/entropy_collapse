@@ -191,3 +191,34 @@ def test_the_search_moves_on_from_a_mislabelled_candidate(tmp_path):
     m = run(tmp_path, logs)
     assert m["Roracleseed"] == "4", m["Roracleseed"]
     assert m["Roracleacc"] == ".5000", m["Roracleacc"]
+
+
+def test_an_unfinished_followup_emits_its_stop_and_no_accuracy(tmp_path):
+    """A run that stopped early has no registered window to report.
+
+    The relaxed-clipping STEER control stopped at step 62. Its 40--60 mean was
+    printed in the same column as a finished 40--110 row, two different
+    windows with nothing saying so. The row now carries its seed and the step
+    it stopped at, and no accuracy.
+    """
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    write_log(logs / f"train-steer-{TAG}-s1-xclip.log", "0.140", last=62,
+              sec="500.0")
+    m = run(tmp_path, logs)
+    for k in ("Rxclipsteeracc", "Rxclipsteermaj", "Rxclipsteeruplift",
+              "Rxclipsteercost"):
+        assert k not in m or m[k] == "\\PENDING", (k, m.get(k))
+    assert m["Rxclipsteerlaststep"] == "62", m.get("Rxclipsteerlaststep")
+    assert m["Rxclipsteerseed"] == "1", m.get("Rxclipsteerseed")
+    assert "FOLLOW-UP INCOMPLETE xclipsteer seed 1" in m["__stdout__"]
+
+
+def test_a_finished_followup_is_unchanged_by_the_gate(tmp_path):
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    write_log(logs / f"train-steer-{TAG}-s1-xclip.log", "0.140")
+    m = run(tmp_path, logs)
+    assert m["Rxclipsteeracc"] == ".1400", m["Rxclipsteeracc"]
+    assert "Rxclipsteerlaststep" not in m
+    assert "FOLLOW-UP INCOMPLETE" not in m["__stdout__"]

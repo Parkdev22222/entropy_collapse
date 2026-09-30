@@ -207,9 +207,11 @@ and cannot tell us about it, not a paper claiming an accuracy gain.
 \label{sec:related}
 
 \paragraph{Entropy collapse in RLVR.}
-Entropy decay under policy-gradient fine-tuning is well documented, and a range of
-interventions add an explicit entropy term to the objective or constrain the update
-so that high-entropy positions are preserved. Recent analyses report that naive
+Entropy decay under policy-gradient fine-tuning is well documented
+\citep{cui2025bentropy}, and a range of interventions add an explicit entropy term
+to the objective, in the tradition of maximum-entropy reinforcement learning
+\citep{ziebart2008maximum,haarnoja2018soft}, or constrain the update so that
+high-entropy positions are preserved. Recent analyses report that naive
 entropy regularization does not prevent the collapse and that continuing to train
 under it degrades accuracy \citep{rethinkingentropyreg}, which is consistent with
 our reading: the regularizer acts on the local channel, and the local channel is
@@ -940,11 +942,11 @@ copy of its error.
 
 \subsection{Model, data, and optimization}
 
-All runs fine-tune the same base model, Qwen2.5-Math-1.5B, on the same data with
+All runs fine-tune the same base model, Qwen2.5-Math-1.5B \citep{yang2024aqwen}, on the same data with
 the same optimizer settings, and differ only in the intervention; the five-arm
 decomposition and every ablation are run on it. We run no second backbone, and the
 Limitations say what that leaves open. All runs train on the same $17$k-problem
-competition-mathematics set. With a training batch of $512$ prompts,
+competition-mathematics set, DAPO-Math-17k \citep{yu2025dapo}. With a training batch of $512$ prompts,
 $110$ optimization steps correspond to about $3.2$ epochs.
 
 
@@ -961,11 +963,12 @@ selection, since a benchmark this noisy chooses between nearby checkpoints partl
 chance. Where a checkpoint is selected (the six-benchmark evaluation of
 Section~\ref{sec:res:bench}), the AIME24 column is therefore marked in-sample.
 
-Optimization uses GRPO with $n = 8$ responses per prompt, a constant learning rate
+Optimization uses GRPO \citep{shao2024deepseekmath} with $n = 8$ responses per prompt, a constant learning rate
 of $1\mathrm{e}{-6}$ with no warm-up (so that the schedule is independent of the
 declared total step count), a maximum response length of $3072$ tokens, no entropy
-bonus, and no KL loss. The clipped surrogate is asymmetric,
-$\varepsilon_{\mathrm{low}} = 0.2$ and $\varepsilon_{\mathrm{high}} = 0.28$, with
+bonus, and no KL loss. The clipped surrogate \citep{schulman2017proximal} is
+asymmetric, $\varepsilon_{\mathrm{low}} = 0.2$ and
+$\varepsilon_{\mathrm{high}} = 0.28$ as in \citet{yu2025dapo}, with
 the dual-clip lower bound at $c = 10$; we state this because ``GRPO'' with a
 symmetric $\varepsilon = 0.2$ and a KL term is a different baseline, and because
 the follow-up arm of Section~\ref{sec:res:ablate} is defined by moving these two
@@ -983,13 +986,11 @@ per-head calibration of Eq.~\eqref{eq:a3}. The combination uses $\lambda = 0.25$
 RMS normalization, clip $c = 1.0$, and the sibling-prefix baseline. The weight map
 is the base method's exponential map of Eq.~\eqref{eq:steermap}, taken
 un-rescaled, at $\lambda_{\min} = 0.7$, so weights land in $[0.7, 1]$ and can only
-attenuate. The released configuration of the base method sets $\lambda_{\min} = 0.8$;
-every other value in that launcher matches it. We state plainly how ours was
-chosen, because it bears on which contrasts can be read: $0.7$ was selected on
-\emph{our} method, not on the base method, so the baseline runs at a damping
-strength picked for the treatment and $1.5$ times the maximum attenuation its own
-release uses. Section~\ref{sec:res:ablate} reports the base method at
-$\lambda_{\min} = 0.8$ for this reason.\footnote{Our implementation exposes an optional reshaping of
+attenuate. This is the value the base method's paper sets, inside the range $[0.6, 0.8]$ over
+which it reports the method performing consistently
+\citep[App.~F.1]{steer}; it was taken from there and not tuned on these runs. The
+base method's released launcher uses $\lambda_{\min} = 0.8$, and every other value
+in that launcher matches ours.\footnote{Our implementation exposes an optional reshaping of
 $\Omt$ before this map (winsorizing or rank-transforming it); every run reported
 here uses the identity setting, so the base method's map sees exactly what it would
 have seen.} The tree sampler uses a single root, cuts at depths
@@ -1537,7 +1538,7 @@ rollouts, whose sibling support therefore sits early in the response rather
 than at the scheduled branch depths. The head-free arm of
 Table~\ref{tab:followups} is the direct test, and it has now been run.
 \textsc{oracle} reads $\Htogo$ from the policy's realised entropy, which verl
-computes in the same pass, so it carries none of the MTP overhead of
+\citep{sheng2025hybridflow} computes in the same pass, so it carries none of the MTP overhead of
 Section~\ref{sec:res:cost} --- $\num{Roraclecost}$\,s per optimization step
 against STEER-F's $\num{Fsignedoracleref}$ at the same seed on the four-GPU box,
 $\num{Fsignedoraclesaving}\%$ less. It is also
@@ -1625,7 +1626,8 @@ the spread.
 A single $30$-question benchmark cannot separate a method from a lucky draw, so each
 run's selected checkpoint is re-evaluated on six mathematics benchmarks
 (Table~\ref{tab:bench}) under the protocol of Section~\ref{sec:setup}: AIME24, AIME25
-and AMC23 at $\mathrm{avg@}32$, MATH500, Minerva and OlympiadBench at
+and AMC23 at $\mathrm{avg@}32$, MATH500 \citep{hendrycks2021measuring}, Minerva
+\citep{lewkowycz2022solving} and OlympiadBench \citep{he2024olympiadbench} at
 $\mathrm{avg@}1$.
 
 An evaluation enters the table only if its log agrees with itself. The trainer prints
@@ -1747,18 +1749,8 @@ $\lambda = 0$, tree & tree only & \num{Rlamzeroacc} & \num{Rlamzeromaj} \\
 \multicolumn{4}{@{}l}{\emph{the forecaster, replaced by what the trainer already has}} \\
 \textsc{oracle} & no heads & \num{Roracleacc} & \num{Roraclemaj} \\
 \midrule
-\multicolumn{4}{@{}l}{\emph{the base method at its released damping strength}} \\
-\textsc{steer}, $\lambda_{\min}{=}0.8$ & weaker & \num{Rwminsteeracc} & \num{Rwminsteermaj} \\
-\midrule
 \multicolumn{4}{@{}l}{\emph{relaxed ratio clipping} ($\epsilon_{\mathrm{hi}}{=}5$, $\epsilon_{\mathrm{lo}}{=}0.99$)} \\
 STEER-F        & --- & \num{Rxclipsignedacc} & \num{Rxclipsignedmaj} \\
-\textsc{steer} & --- & \num{Rxclipsteeracc}  & \num{Rxclipsteermaj}  \\
-\midrule
-\multicolumn{4}{@{}l}{\emph{other advantage estimators}} \\
-RLOO, STEER-F        & --- & \num{Rrloosignedacc} & \num{Rrloosignedmaj} \\
-RLOO, \textsc{steer} & --- & \num{Rrloosteeracc}  & \num{Rrloosteermaj}  \\
-OPO, STEER-F         & --- & \num{Roposignedacc}  & \num{Roposignedmaj}  \\
-OPO, \textsc{steer}  & --- & \num{Roposteeracc}   & \num{Roposteermaj}   \\
 \bottomrule
 \end{tabular}
 \caption{Follow-up ablations, converged window, one seed per row and no error bar.
@@ -1772,7 +1764,11 @@ one, so those rows carry the machine effect of Section~\ref{sec:res:seeds}
 ($\num{Boxdelta}$, in the direction that flatters them) on top of whatever the
 ablation does. The release emits a same-seed contrast for \textsc{oracle} alone,
 because it is the one row whose box matches its reference's. Each block isolates one
-element of the design.}
+element of the design. The relaxed-clipping block has no \textsc{steer} control: that
+run stopped at training step $\num{Rxclipsteerlaststep}$, before the converged window
+closes, and a mean over the part of the window it reached is not the quantity the
+other rows report. Arms that were planned and did not produce a finished run are
+listed in Appendix~\ref{sec:appendix-prereg}.}
 \label{tab:followups}
 \end{table}
 
@@ -1783,31 +1779,31 @@ edge. A flat response across $0.1$--$0.5$ would say the method is insensitive to
 a peak at $0.25$ with both neighbours below would say it is a tuned quantity and must
 be reported as one.
 
-\paragraph{The damping strength, and what it does and does not reach.} We
+\paragraph{The base method against GRPO, and what it does and does not reach.} We
 measure \textsc{steer} below GRPO by $\num{Csteergrpoacc}$ over
-$\num{Nseedsused}$ seeds, which the base method's own results contradict. The
-explanation is not a difference in the code --- we read the released weighting
-function against ours and it agrees line for line, as do every other value in the
-two launchers --- but in $\lambda_{\min}$, which we set to $0.7$ by selecting it
-on STEER-F while the released script uses $0.8$. The baseline is therefore running
-at a damping strength chosen for the method it is the control for, and one that
-attenuates half again as hard as its own default. Section~\ref{sec:blind} predicts
-the sign of that: if the local channel is blind at branch points and
-anti-correlated away from them, more of it should cost accuracy. This arm is stock
-\textsc{steer} ($\lambda = 0$) at the released value, and separates a failure to
-reproduce from an over-damped control.
+$\num{Nseedsused}$ seeds, where the base method's own results place it above. We
+read the released weighting function against ours and it agrees line for line, as
+does every other value in the two launchers except $\lambda_{\min}$, which we set to
+the paper's $0.7$ where the released script uses $0.8$. That difference does not
+explain the gap on the base method's own evidence: both values lie in the range its
+sensitivity analysis reports as performing consistently. The settings that do differ
+from the base method's main experiments are the schedule ($110$ steps against its
+$200$), the checkpoint rule (a fixed window against its best checkpoint) and the
+number of runs, and we have no measurement that separates them. We did not run the
+base method at the released $0.8$, so the question of why it lands below GRPO here
+is left open rather than attributed.
 
-The reach of the problem is bounded, and by the design rather than by luck. All
-four damped arms share $\lambda_{\min} = 0.7$ exactly, so it cancels in any
-contrast between two of them. STEER-F $-$ \textsc{uniform} and STEER-F $-$
+What this discrepancy can reach is bounded, and by the design rather than by
+luck. All four damped arms share $\lambda_{\min} = 0.7$ exactly, so the setting
+cancels in any contrast between two of them. STEER-F $-$ \textsc{uniform} and STEER-F $-$
 \textsc{permuted} --- the pair that carries this paper's central claim, that the
 forecast's \emph{value} is what matters --- hold $\lambda_{\min}$, $\lambda$,
 the sampler and the weight map all fixed and vary only what $\AH$ contains. Those
-two are unaffected by how $\lambda_{\min}$ was chosen. What the choice does reach
-is the two contrasts against an arm that does not share it: STEER-F $-$
-\textsc{steer}, where only the treatment's side was tuned, and \textsc{steer} $-$
-GRPO, where GRPO has no such knob at all. We report those two with this stated
-rather than resolved.
+two do not depend on whatever puts the base method below GRPO here. What it does
+reach is how two other contrasts read. \textsc{steer} $-$ GRPO is the discrepancy
+itself. STEER-F $-$ \textsc{steer} is measured against a base method that is not
+showing its reported gain over GRPO, so it is not a measurement of improvement on
+top of that gain. We report both with this stated rather than resolved.
 
 \paragraph{The sampler.} This is the cell no other arm supplies. Tree rollouts make a
 group share prefixes, which changes the GRPO advantage estimate itself, quite apart
@@ -1868,14 +1864,13 @@ GRPO's, $\num{Sgrpoacc}$. It orders the two arms on this seed; it does not measu
 the difference between them, and the measurement that would is this arm at more
 seeds.
 
-\paragraph{Clipping and the advantage estimator.} The relaxed-clipping setting is
-where entropy interventions are supposed to matter most, because ratio clipping
-otherwise removes much of the update a token weight would have scaled. The RLOO and
-OPO rows test whether the construction depends on GRPO specifically: the
-sibling-prefix baseline of Eq.~\eqref{eq:ah} depends only on the group sharing a
-prefix, which those estimators also provide, so the method should transfer unchanged.
-Each is reported beside its own base-method control, so every comparison stays within
-one estimator.
+\paragraph{Clipping.} The relaxed-clipping setting is where entropy interventions
+are supposed to matter most, because ratio clipping otherwise removes much of the
+update a token weight would have scaled. The row is one STEER-F run with no
+finished control under the same clipping, and it ran on a different machine from the
+seed-$\num{Rxclipsignedseed}$ STEER-F reference, so it carries no contrast in either
+direction. It shows that the method trains to the end of the schedule with the clip
+relaxed; it does not say whether relaxing the clip changes what the method does.
 
 \subsection{Compute-matched comparison}
 \label{sec:res:compute}
@@ -2099,23 +2094,21 @@ $2(n-1)/T$, on the order of a percent for our settings. Whether the effect scale
 with $n$, or with a branching schedule chosen adaptively rather than at fixed
 depths, is untested.
 
-\paragraph{One hyperparameter was selected on the method and applied to its
-baseline.} $\lambda_{\min}$, the floor of the weight map, is $0.7$ throughout,
-chosen because it was best for STEER-F; the base method's released script uses
-$0.8$. The base method therefore appears here at a damping strength picked for the
-method it controls for, and at $1.5$ times the maximum attenuation of its own
-default, which is the most likely reason we measure it below GRPO where its
-authors do not. We did not re-tune $\lambda_{\min}$ per arm, and a reader who
-wants each method at its own best setting will not find it here.
+\paragraph{The base method does not reproduce its reported gain.} We run the
+base method with $\lambda_{\min} = 0.7$, the value its paper sets; its released
+launcher uses $0.8$, and both lie in the range its paper reports as performing
+consistently. Under our schedule it lands below GRPO, where its authors report it
+above, and Section~\ref{sec:res:ablate} lists the setting differences we cannot
+separate: schedule length, checkpoint rule and number of runs. We did not run it at
+the released $0.8$ or at its full schedule, and we did not tune $\lambda_{\min}$ per
+arm.
 
 What this does not reach is the claim the paper makes. All four damped arms carry
 the same $\lambda_{\min}$, so it cancels between any two of them, and the
 contrasts that separate the forecast's value from its apparatus --- STEER-F
 against \textsc{uniform} and against \textsc{permuted} --- hold it fixed along
-with everything else. The two contrasts it does reach, STEER-F $-$ \textsc{steer}
-and \textsc{steer} $-$ GRPO, are reported with the confound stated;
-Section~\ref{sec:res:ablate} adds the base method at its released value so the
-reproduction question can be read on its own.
+with everything else. The two contrasts the discrepancy does reach, STEER-F $-$
+\textsc{steer} and \textsc{steer} $-$ GRPO, are reported with it stated.
 
 \paragraph{An assumption with no remedy.}
 Approximation B2 --- that a token's update does not change the conditional
@@ -2150,7 +2143,6 @@ computational cost of the method (a forward pass through a set of small predicti
 heads at every optimization step) is a real environmental cost, which we quantify in
 Section~\ref{sec:res:cost} so that it can be weighed against the benefit.
 
-\nocite{*}
 \bibliography{custom}
 
 \appendix
@@ -2279,7 +2271,12 @@ evaluation covers one seed per arm and no \textsc{steer} checkpoint
 comparison was not completed; Section~\ref{sec:res:compute} reports what the step
 costs support instead. (v) The planned second backbones were not run. (vi) The
 support-restricted split registered below is instrumented but carried by no run
-reported here. The choice to analyse on the common seed set was made after
+reported here. (vii) Follow-up arms: the four advantage-estimator runs (RLOO and
+OPO, each with STEER-F and \textsc{steer}) failed at start-up on infrastructure
+errors and completed no training step; the base method at the released
+$\lambda_{\min} = 0.8$ was not launched; the relaxed-clipping \textsc{steer} control
+stopped at step $\num{Rxclipsteerlaststep}$. None of them enters
+Table~\ref{tab:followups}, and their logs are released. The choice to analyse on the common seed set was made after
 per-seed results were visible; it is the only set on which all five arms exist, and
 every run outside it is released.
 

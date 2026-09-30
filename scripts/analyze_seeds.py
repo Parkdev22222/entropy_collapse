@@ -774,6 +774,14 @@ def main(argv=None) -> int:
     followup_seed: dict[str, int] = {}
     followup_steps: dict[str, dict[int, dict[str, float]]] = {}
     followup_topo: dict[str, int | None] = {}
+    # A follow-up whose chosen log never reached the final step. It keeps its
+    # seed and the step it stopped at, and nothing else: a window mean over the
+    # few points it has is not the registered window, and printing it in the
+    # same column as a finished row compares two different windows. This is
+    # the main loop's partial gate applied to Table 10. The relaxed-clipping
+    # STEER control stopped at step 62 and its 40--60 mean sat beside a
+    # finished 40--110 row with nothing saying so.
+    followup_incomplete: dict[str, tuple[int, int]] = {}
     for arm, stem in FOLLOWUP_ARMS.items():
         cands = [(s, find_log(run_name(arm, s), args.steps)) for s in range(1, 6)]
         cands = [(s, f) for s, f in cands if f is not None]
@@ -804,6 +812,9 @@ def main(argv=None) -> int:
         if got_name is not None and got_name != run_name(arm, seed):
             renamed.append((f.name, run_name(arm, seed), got_name))
         steps = parse_log(f)
+        if not reached(f, args.steps):
+            followup_incomplete[stem] = (seed, max(steps, default=0))
+            continue
         agg = plateau(steps, lo, hi)
         if not agg:
             continue
@@ -1357,6 +1368,9 @@ def main(argv=None) -> int:
             # differs from its reference's has no Fsigned* contrast at all, and
             # the caption has to be able to say why.
             fh.write(mac(f"R{stem}gpus", followup_topo.get(stem), "{:d}"))
+        for stem, (s_, last) in sorted(followup_incomplete.items()):
+            fh.write(mac(f"R{stem}seed", s_, "{:d}"))
+            fh.write(mac(f"R{stem}laststep", last, "{:d}"))
         for stem, st in sorted(fcontrast.items()):
             for c in ("acc", "maj"):
                 if c in st:
@@ -1418,6 +1432,9 @@ def main(argv=None) -> int:
                   + (f", {ggpu} GPU(s)" if ggpu is not None else ""))
         print("    A file name is a label; the dump is what the trainer recorded."
               " Rename the file, or publish the run it actually is.")
+    for stem, (s_, last) in sorted(followup_incomplete.items()):
+        print(f"  FOLLOW-UP INCOMPLETE {stem} seed {s_}: last step {last} of "
+              f"{args.steps} -- seed and last step emitted, no accuracy")
     if renamed:
         print(f"  {len(renamed)} log(s) carry an older experiment_name "
               f"(same seed, so kept):")
