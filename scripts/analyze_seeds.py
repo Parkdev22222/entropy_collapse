@@ -700,6 +700,13 @@ def main(argv=None) -> int:
             if not agg:
                 missing.append(f"{arm} s{seed} (no validation point in {lo}-{hi})")
                 continue
+            # How much picking the best validation point would have flattered
+            # this run: max over every validation up to the window's end, minus
+            # the window mean. The manuscript quoted this per arm from the
+            # single-seed draft; emitted so it follows the seed set.
+            vals = [r["acc"] for s_, r in steps.items() if s_ <= hi and "acc" in r]
+            if vals and "acc" in agg:
+                agg["sel_lift"] = max(vals) - agg["acc"]
             agg["log"] = f.name
             agg["stack"] = offloaded(f)
             # ONE gate, before per_seed, per_seed_partial and topo are fed, so
@@ -913,8 +920,8 @@ def main(argv=None) -> int:
     cols = ["acc", "maj", "uplift", "entropy", "brentropy", "nbrentropy",
             "brgap", "supentropy", "nsupentropy", "supgap",
             "resp_len", "s_per_step",
-            "s_per_val_step", "branch_frac", "tw_mean", "n_val_points",
-            "partial"]
+            "s_per_val_step", "branch_frac", "tw_mean", "sel_lift",
+            "n_val_points", "partial"]
 
     with (out_dir / "per_seed.tsv").open("w") as fh:
         # `excluded` goes BEFORE stack/log on purpose: tests read the log as the
@@ -1176,6 +1183,55 @@ def main(argv=None) -> int:
                  else mac("Seedset", None))
         fh.write(mac("Nseedsused", len(used), "{:d}") if used
                  else mac("Nseedsused", None))
+
+        # Section 12.3's support ceiling, 2(n-1)/T, on the tree arms' measured
+        # mean response length over the seed set, and each arm's share of it.
+        tree = [per_seed[a_][s_] for a_ in ("uniform", "permuted", "signed")
+                for s_ in used if s_ in per_seed.get(a_, {}) and "resp_len" in per_seed[a_][s_]]
+        tlen = (sum(r["resp_len"] for r in tree) / len(tree)) if tree else None
+        fh.write(mac("Treelen", tlen, "{:.0f}"))
+        bound = (2 * (8 - 1) / tlen) if tlen else None
+        fh.write(mac("Supportbound", bound))
+        fr = [sum(per_seed[a_][s_]["branch_frac"] for s_ in used) / len(used)
+              for a_ in ("uniform", "permuted", "signed")
+              if used and all("branch_frac" in per_seed.get(a_, {}).get(s_, {}) for s_ in used)]
+        fh.write(mac("Supportpctlo", 100 * min(fr) / bound if fr and bound else None, "{:.0f}"))
+        fh.write(mac("Supportpcthi", 100 * max(fr) / bound if fr and bound else None, "{:.0f}"))
+
+        # Compute, split by machine. No long GRPO run exists, so the matched
+        # point cannot be read off a trajectory; what the logs do give is each
+        # seed's cost ratio. Where STEER-F costs no more than GRPO per step, an
+        # equal-step comparison is already compute-fair; where it costs more,
+        # the compute-matched GRPO step lies past GRPO's last logged step and is
+        # reported as that (censored), with the contrast on the other box
+        # beside it.
+        by_box: dict[int, list[tuple[int, float, float]]] = defaultdict(list)
+        for s_ in used:
+            sg, gr = per_seed.get("signed", {}).get(s_), per_seed.get("grpo", {}).get(s_)
+            if not sg or not gr or "s_per_step" not in sg or "s_per_step" not in gr:
+                continue
+            box = topo.get(("signed", s_))
+            if box is None or box != topo.get(("grpo", s_)):
+                continue
+            by_box[box].append((s_, sg["s_per_step"] / gr["s_per_step"],
+                                sg["acc"] - gr["acc"]))
+        boxes = sorted(by_box)
+        lo_rows = by_box.get(boxes[0], []) if boxes else []
+        hi_rows = by_box.get(boxes[-1], []) if len(boxes) > 1 else []
+
+        def box_stats(rows_):
+            if not rows_:
+                return None, None, None, None, None
+            ratio = sum(r[1] for r in rows_) / len(rows_)
+            return (", ".join(str(r[0]) for r in rows_), len(rows_), ratio,
+                    round(args.steps * ratio), sum(r[2] for r in rows_) / len(rows_))
+        for rows_, names in ((lo_rows, ("Cmloseeds", "Cmlon", "Cmloratio", "Cmlostep",
+                                        "Cmlosignedgrpoacc")),
+                             (hi_rows, ("Cmhiseeds", "Cmhin", "Cmhiratio", "Cmhistep",
+                                        "Cmhisignedgrpoacc"))):
+            vals = box_stats(rows_)
+            for nm, v, fmt in zip(names, vals, ("{:s}", "{:d}", "{:.2f}", "{:d}", "{:+.4f}")):
+                fh.write(mac(nm, v, fmt))
         fh.write(mac("Plateaulo", lo, "{:d}"))
         fh.write(mac("Plateauhi", hi, "{:d}"))
         for arm in MAIN_ARMS:
@@ -1210,7 +1266,10 @@ def main(argv=None) -> int:
             # hand on both sides of the test.
             for c in ("acc", "maj", "uplift", "entropy",
                       "brentropy", "nbrentropy", "brgap",
-                      "supentropy", "nsupentropy", "supgap", "tw_mean"):
+                      "supentropy", "nsupentropy", "supgap", "tw_mean",
+                      "sel_lift", "branch_frac"):
+                # sel_lift (the argmax checkpoint's bias) and branch_frac (the
+                # measured support) were typed by hand in the single-seed draft.
                 v = [r[c] for r in rows if c in r]
                 fh.write(mac(f"R{arm}{c}", (sum(v) / len(v)) if v else None))
                 fh.write(mac(f"E{arm}{c}",
