@@ -3,7 +3,8 @@
 # Licensed under the Apache License, Version 2.0
 """Check that the installed packages satisfy the pins the training stack declares.
 
-    python3 scripts/check_env_pins.py            # 0 = clean, 1 = violations, 2 = cannot tell
+    python3 scripts/check_env_pins.py            # 0 = clean, 1 = violations, 2 = cannot tell,
+                                                 # 3 = only the accepted exceptions below
     python3 scripts/check_env_pins.py --quiet    # print only the fix command
 
 WHY THIS EXISTS
@@ -48,6 +49,22 @@ except ImportError:  # packaging ships with pip; if it is gone, say so rather th
 WATCH = ["transformers", "tokenizers", "vllm", "ray", "datasets", "accelerate", "peft"]
 
 GREEN, YELLOW, RED, OFF = "\033[32m", "\033[33m", "\033[31m", "\033[0m"
+
+# Declared-only conflicts that are resolved on purpose, not by accident. They are
+# reported, never "fixed": the fix line used to pin them back, and following it
+# broke the stack. vllm 0.8.4 declares opentelemetry-*<1.27 and uses it only for
+# optional tracing; ray 2.58's dashboard needs a much newer opentelemetry, and
+# with 1.26 installed ray.init() times out ("The current node timed out during
+# startup"). run/setup_env.sh records the same decision next to RAY_PIN.
+ACCEPTED = {("vllm", "opentelemetry-"):
+            "ray 2.58 needs a newer opentelemetry; vllm uses it only for optional tracing"}
+
+
+def _accepted(holder: str, name: str) -> str | None:
+    for (h, prefix), why in ACCEPTED.items():
+        if holder.lower() == h and name.lower().startswith(prefix):
+            return why
+    return None
 
 
 def _requirements(dist: str) -> list[Requirement]:
@@ -128,10 +145,25 @@ def main(argv=None) -> int:
               file=sys.stderr)
         return 2
 
+    # An accepted conflict stays accepted only while its holder does not enforce
+    # it at import; if a future vllm re-checks the range, it is a real failure.
+    noted = []
+    for v in list(violations):
+        holder, req, got = v
+        why = _accepted(holder, req.name)
+        enforced = _enforced_at_import(holder) if why else None
+        if why and enforced is not None and req.name.lower() not in enforced:
+            noted.append((holder, req, got, why))
+            violations.remove(v)
+
     if not violations:
         if not args.quiet:
-            print(f"  {GREEN}OK{OFF}    {checked} distribution(s), every declared pin satisfied")
-        return 0
+            for holder, req, got, why in noted:
+                print(f"  {YELLOW}NOTE{OFF}  {holder} declares {req.name}{req.specifier}, "
+                      f"{req.name}=={got} installed -- accepted: {why}")
+            print(f"  {GREEN}OK{OFF}    {checked} distribution(s), every declared pin satisfied"
+                  + (" apart from the accepted exceptions above" if noted else ""))
+        return 3 if noted else 0
 
     if not args.quiet:
         print()

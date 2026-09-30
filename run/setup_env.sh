@@ -135,7 +135,7 @@ if [ ${#GPU_MISSING[@]} -gt 0 ]; then
   또는:  INSTALL_GPU_STACK=1 bash run/setup_env.sh
 
   flash-attn 은 건너뛸 수 없습니다. 소스 빌드가 30~60분 걸려도 해야 합니다 --
-  verl 의 dp_actor.py:43 이 `if is_cuda_available:` 아래에서 flash_attn.bert_padding
+  verl 의 dp_actor.py:43 이 'if is_cuda_available:' 아래에서 flash_attn.bert_padding
   을 무조건 import 합니다. 옆의 elif 는 Ascend NPU 용이고 이 경로에 sdpa 폴백은
   없습니다. 건너뛰면 워커 초기화에서 ImportError 로 죽습니다 -- 프리플라이트를
   통과한 1~2분 뒤에.
@@ -178,6 +178,8 @@ if [ -f "${STEER_ROOT}/scripts/check_env_pins.py" ]; then
     PIN_OUT="$(python3 "${STEER_ROOT}/scripts/check_env_pins.py" 2>&1)"; PIN_RC=$?
     case "${PIN_RC}" in
         0) ok "선언된 버전 핀 전부 충족" ;;
+        3) printf '%s\n' "${PIN_OUT}" | grep -E "NOTE|OK" | sed 's/^/  /'
+           ok "선언된 버전 핀 충족 (알려진 예외만 남음 — 조치하지 마세요)" ;;
         1) printf '%s\n' "${PIN_OUT}" | sed 's/^/  /'
            bad "버전 핀 위반 — import 시점에 학습이 죽습니다"
            FIXCMD="$(printf '%s\n' "${PIN_OUT}" | sed -n 's/^ *fix: //p' | tail -1)"
@@ -246,7 +248,7 @@ if [ "${INSTALLED}" = "1" ] && [ -f "${STEER_ROOT}/scripts/check_env_pins.py" ];
     say "5b. 설치 후 핀 재검사"
     PIN_OUT2="$(python3 "${STEER_ROOT}/scripts/check_env_pins.py" 2>&1)"; PIN_RC2=$?
     case "${PIN_RC2}" in
-        0) ok "설치 후에도 핀 충족" ;;
+        0|3) ok "설치 후에도 핀 충족" ;;
         1) printf '%s\n' "${PIN_OUT2}" | sed 's/^/  /'
            if [ "${PIN_RC:-9}" = "0" ]; then
                bad "방금 실행한 설치가 핀을 깼습니다 — 설치 전에는 통과했습니다"
