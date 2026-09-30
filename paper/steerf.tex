@@ -1008,8 +1008,10 @@ $\varepsilon_{\mathrm{high}} = 0.28$, with the dual-clip bound at $c = 10$; we s
 this because ``GRPO'' with a symmetric $\varepsilon$ and a KL term is a different
 baseline, and because the follow-up arm of Section~\ref{sec:res:ablate} is defined by
 moving these numbers. Rollouts are sampled at temperature $1.0$ without nucleus
-truncation. All runs share one hardware configuration and parallel layout, recorded in
-each released log.
+truncation. Each Qwen2.5-Math-1.5B run trains on a single H100 (80\,GB), four runs
+side by side on one node, with the rollout engine's CUDA graphs enabled; the
+backbone runs of Section~\ref{sec:backbones} use the whole four-GPU node. Every
+arm of a table shares its layout, which each released log records.
 
 \paragraph{Validation and checkpoints.} Every $10$ steps each run is validated on
 AIME 2024 ($30$ problems, $32$ samples each, temperature $1.0$, top-$p$ $0.7$). A

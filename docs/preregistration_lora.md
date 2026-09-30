@@ -29,7 +29,7 @@ them. One of them informed a design choice below and is disclosed in §4.
 | Validation | AIME24, 32 samples, every 10 steps, temperature 1.0, top-p 0.7 |
 | Checkpoints | every 50 steps, the last step, and the AIME24-best (`verl/trainer/ppo/ckpt_policy.py`) |
 | Seeds | 1, 2, 3 (core); 1 (follow-ups) |
-| Topology | one value for the whole campaign, recorded in every log (`TOPOLOGY` in `run/run_lora_paper.sh`) |
+| Topology | 1.5B runs: one run per H100 80GB, four side by side, vLLM with CUDA graphs (`TOPOLOGY=1gpu ROLLOUT_EAGER=0`, locked in `logs/lora/campaign_settings`). Backbone runs: the whole four-GPU node, same vLLM setting. Every arm of a table shares its layout. Recorded in every log |
 
 ## 3. Arms
 
@@ -132,8 +132,8 @@ Full fine-tuning (second paper), Mistral-7B, pass@k, code benchmarks.
 
 ## Amendments
 
-None after the first run. Three changes before it, recorded because this
-file had already been committed. (1) 2026-09-29: training length set to 150
+One after the first run, (4) below. Three changes before it, recorded because
+this file had already been committed. (1) 2026-09-29: training length set to 150
 steps for every run (was 110, with a 200-step compute-matched GRPO), the
 plateau window to 40-150, and the separate long GRPO run dropped in favour
 of reading the compute-matched point off the regular GRPO run. (3) 2026-09-29: the backbone section (7) added, before any backbone run.
@@ -144,3 +144,19 @@ fine-tuning manuscript had retired as the wrong instrument (it treats the
 aggregate as a signal about A_H, which Section "The correction cannot move the
 mean" says it cannot be). It was replaced by the dissociation test above, the
 one that manuscript registered instead, before any LoRA run existed.
+
+(4) 2026-09-30, after the first run had started. The first campaign run
+(STEER-V, seed 1) was stopped at about step 12 and discarded, and the campaign
+restarted from scratch with a different parallel layout. The decision used
+step time and GPU memory only; no accuracy, entropy or validation value
+entered it. Measured on the method's own step (`run/bench_lora.sh`,
+`BENCH_ARM=signed`, median of steps 2-3), four H100s:
+
+| layout | runs at once | s/step per run | peak memory | node steps/hour |
+|---|---|---|---|---|
+| one run on four GPUs (tp=4), eager vLLM | 1 | 848 | 62 GB | 4.24 |
+| one run per GPU, vLLM CUDA graphs | 4 | 1063 | 72 GB | 13.55 |
+
+The second is 3.2x the throughput and became the campaign's layout before any
+kept run began. The stopped run's checkpoints and logs are archived, not
+deleted, and are not used.

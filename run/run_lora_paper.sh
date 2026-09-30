@@ -34,6 +34,9 @@
 #   1gpu  one trainer per GPU, up to that many at once. Each has its own Ray
 #         (RAY_TMPDIR) and the launchers skip `ray stop` (RAY_STOP=0).
 #         Choose it only after run/bench_lora.sh says it is faster.
+#         This campaign runs TOPOLOGY=1gpu ROLLOUT_EAGER=0: on the method's
+#         own step it gave 3.2x the node's steps/hour of tp4 + eager
+#         (bench 20260930_020304; docs/preregistration_lora.md, amendment 4).
 # Evaluation always runs one checkpoint at a time on all GPUs.
 # ROLLOUT_EAGER -- 1 (verl's default) or 0 (vLLM CUDA graphs); run/_lora_defaults.sh.
 #
