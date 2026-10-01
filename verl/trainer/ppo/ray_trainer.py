@@ -43,6 +43,7 @@ from verl.single_controller.ray import RayClassWithInitArgs, RayResourcePool, Ra
 from verl.single_controller.ray.base import create_colocated_worker_cls
 from verl.trainer.ppo import core_algos
 from verl.trainer.ppo.core_algos import AdvantageEstimator, agg_loss
+from verl.trainer.ppo.group_metrics import compute_group_metrics
 from verl.trainer.ppo.metric_utils import (
     compute_data_metrics,
     compute_throughout_metrics,
@@ -1522,6 +1523,23 @@ class RayPPOTrainer:
                 )
                 # collect metrics
                 metrics.update(compute_data_metrics(batch=batch, use_critic=self.use_critic))
+                # Tied GRPO groups and prefix-shared reward agreement, on every
+                # arm, so tree and i.i.d. rollouts are read off the same number
+                # (verl/trainer/ppo/group_metrics.py). A metric must never stop
+                # a run: on any failure log group/error and train on.
+                try:
+                    metrics.update(
+                        compute_group_metrics(
+                            scores=batch.batch["token_level_scores"].sum(-1).float().cpu().numpy(),
+                            uids=batch.non_tensor_batch["uid"],
+                            responses=batch.batch["responses"].cpu().numpy(),
+                            response_mask=batch.batch["response_mask"].bool().cpu().numpy(),
+                            advantages=batch.batch["advantages"].float().cpu().numpy(),
+                        )
+                    )
+                except Exception as e:  # noqa: BLE001
+                    print(f"[group_metrics] skipped: {type(e).__name__}: {e}")
+                    metrics["group/error"] = 1.0
                 metrics.update(compute_timing_metrics(batch=batch, timing_raw=timing_raw))
                 n_gpus = self.resource_pool_manager.get_n_gpus()
                 metrics.update(compute_throughout_metrics(batch=batch, timing_raw=timing_raw, n_gpus=n_gpus))
