@@ -61,6 +61,37 @@ what the stock sampler would have produced -- and the fraction of slots filled
 that way is reported as ``refill_frac`` so it can be read off rather than
 guessed at.
 
+Where to cut: fixed depths, or the first high-entropy token
+-----------------------------------------------------------
+``cut_mode="fixed"`` cuts every trunk at its design depth, whatever token sits
+there.  If that token is near-deterministic the children all draw it, carry
+on down the same road and score the same, and GRPO gets a tied group.
+
+``cut_mode="entropy"`` keeps the tree's shape and moves each cut into a window
+just past the fixed depth: level ``i`` generates its usual gap ``g_i`` (the
+fixed design's stage budget) plus a window of ``w_i`` tokens, and is cut at
+the **first** position in ``[g_i, g_i + w_i]`` whose next-token entropy is at
+least ``tau_i``; if none is, at the window's end.  The token at the cut and
+everything after it is thrown away and every child redraws it.
+
+Why the *first* crossing and not the window's maximum: the first crossing is a
+stopping time.  Whether the trunk is cut at ``k`` depends only on the entropies
+at ``<= k``, which are functions of the tokens before ``k``, and the token at
+``k`` itself is redrawn.  So every rollout is still, token for token, a draw
+from the policy given its own prefix -- the tree changes which draws are
+shared, not their distribution.  The window maximum looks at tokens after the
+cut and would break that.  ``tau_i`` is the ``cut_quantile`` of level ``i``'s
+window entropies on the *previous* call (``next_tau`` in the stats); the first
+call has no previous one and takes the quantile of its own batch, a dependence
+of one sequence on itself diluted over the whole batch, reported as
+``tau_source="batch"``.
+
+Entropies come from the engine's top-``cut_topk`` log-probs
+(:func:`topk_entropy`), a lower bound on the true entropy.  With
+``cut_mode="fixed"`` and ``cut_topk > 0`` the fixed cuts are kept but the
+entropy at each cut is measured (the trunk draws one extra token and drops it),
+so a fixed and an entropy tree can be compared on the same number.
+
 This module is engine-agnostic on purpose: it drives a ``generate`` callable
 with the signature described in :class:`GenerateFn`, so it is exercised on CPU
 against a fake engine in ``scripts/smoke_tree_rollout_cpu.py`` and wired to
@@ -80,7 +111,10 @@ __all__ = [
     "generate_tree",
     "sibling_support_stats",
     "parse_int_list",
+    "topk_entropy",
 ]
+
+CUT_MODES = ("fixed", "entropy")
 
 
 # ----------------------------------------------------------------------
@@ -99,27 +133,56 @@ class TreeSample:
         logprobs: optional per-token sampling log-probabilities, same length as
             ``token_ids``.  Carried through so the caller can reconstruct
             ``rollout_log_probs`` across stages.
+        entropies: optional next-token entropy at each position (the entropy
+            of the distribution ``token_ids[i]`` was drawn from), same length
+            as ``token_ids``.  Filled only when the driver asks for ``topk``.
     """
 
     token_ids: list[int]
     finished: bool
     logprobs: Optional[list[float]] = None
+    entropies: Optional[list[float]] = None
 
     def __post_init__(self):
-        if self.logprobs is not None and len(self.logprobs) != len(self.token_ids):
-            raise ValueError(
-                f"logprobs has length {len(self.logprobs)} but token_ids has "
-                f"{len(self.token_ids)}; they must line up token for token"
-            )
+        for name in ("logprobs", "entropies"):
+            v = getattr(self, name)
+            if v is not None and len(v) != len(self.token_ids):
+                raise ValueError(
+                    f"{name} has length {len(v)} but token_ids has "
+                    f"{len(self.token_ids)}; they must line up token for token"
+                )
 
 
-# ``generate(prompts, n, max_tokens) -> [len(prompts)][n] TreeSample``.
+# ``generate(prompts, n, max_tokens[, topk=K]) -> [len(prompts)][n] TreeSample``.
 #
 # `prompts` are full token-id sequences (task prompt + whatever trunk has been
 # generated so far), because that is the only thing every inference engine
 # accepts.  The driver never assumes the engine caches those prefixes; it is
-# merely much faster when it does.
-GenerateFn = Callable[[list[list[int]], int, int], list[list[TreeSample]]]
+# merely much faster when it does.  `max_tokens` is an int, or -- only under
+# ``cut_mode="entropy"``, whose cuts differ per node -- one int per prompt.
+# `topk` is passed only when entropies are wanted; the engine must then fill
+# ``TreeSample.entropies``.
+GenerateFn = Callable[..., list[list[TreeSample]]]
+
+
+def topk_entropy(logprobs: Sequence[float]) -> float:
+    """Entropy (nats) of a distribution known through its top-k log-probs.
+
+    The mass outside the top k is lumped into one outcome, which can only
+    lower the entropy, so this is a lower bound; at the near-deterministic
+    positions that decide whether a cut is worth making it is close to exact.
+    """
+    ps = [math.exp(lp) for lp in logprobs]
+    h = -sum(p * math.log(p) for p in ps if p > 0.0)
+    rest = 1.0 - sum(ps)
+    if rest > 1e-12:
+        h -= rest * math.log(rest)
+    return max(h, 0.0)
+
+
+def _quantile(values: Sequence[float], q: float) -> float:
+    s = sorted(values)
+    return s[min(len(s) - 1, int(q * len(s)))]
 
 
 # ----------------------------------------------------------------------
@@ -158,6 +221,16 @@ class TreeRolloutConfig:
             call, which is bit-equivalent to the stock sampler.
         factors: branch factor applied at each depth; same length as ``depths``.
         roots: independent trunks per prompt.
+        cut_mode: ``"fixed"`` (cut at ``depths``) or ``"entropy"`` (cut at the
+            first token past each fixed depth whose entropy reaches the level's
+            threshold; see the module docstring).
+        cut_widths: ``"entropy"`` only -- the window each level may move its
+            cut by, one per depth.
+        cut_quantile: ``"entropy"`` only -- the threshold is this quantile of
+            the level's window entropies on the previous call.
+        cut_topk: top-k log-probs the entropy is computed from.  Required by
+            ``"entropy"``; with ``"fixed"``, ``> 0`` measures the entropy at the
+            fixed cuts without moving them.
 
     Invariant: ``roots * prod(factors) == n``.  Violating it either starves or
     overfills the group, and both corrupt GRPO silently, so it is checked here
@@ -169,10 +242,22 @@ class TreeRolloutConfig:
     depths: tuple[int, ...] = ()
     factors: tuple[int, ...] = ()
     roots: int = 1
+    cut_mode: str = "fixed"
+    cut_widths: tuple[int, ...] = ()
+    cut_quantile: float = 0.9
+    cut_topk: int = 0
 
     def __post_init__(self):
         self.depths = parse_int_list(self.depths)
         self.factors = parse_int_list(self.factors)
+        self.cut_widths = parse_int_list(self.cut_widths)
+        self.cut_mode = str(self.cut_mode).strip().lower()
+        self.cut_quantile = float(self.cut_quantile)
+        self.cut_topk = int(self.cut_topk)
+        if self.cut_mode not in CUT_MODES:
+            raise ValueError(f"cut_mode must be one of {CUT_MODES}, got {self.cut_mode!r}")
+        if self.cut_topk < 0:
+            raise ValueError(f"cut_topk must be >= 0, got {self.cut_topk}")
         if self.n < 1:
             raise ValueError(f"n must be >= 1, got {self.n}")
         if self.response_length < 1:
@@ -185,6 +270,8 @@ class TreeRolloutConfig:
         if not self.enabled:
             if self.roots not in (1, self.n):
                 raise ValueError(f"with no depths, roots must be 1 or n={self.n}, got {self.roots}")
+            if self.cut_mode != "fixed" or self.cut_widths or self.cut_topk:
+                raise ValueError("cut_mode / cut_widths / cut_topk need a tree; set depths too")
             self.roots = self.n
             return
         if self.roots < 1:
@@ -207,10 +294,41 @@ class TreeRolloutConfig:
                 f"roots({self.roots}) * prod(factors){self.factors} = {total}, but n={self.n}. "
                 "The tree must yield exactly n rollouts per prompt."
             )
+        if self.cut_mode == "fixed":
+            if self.cut_widths:
+                raise ValueError("cut_widths only applies to cut_mode='entropy'")
+            return
+        if len(self.cut_widths) != len(self.depths):
+            raise ValueError(
+                f"cut_mode='entropy' needs one window width per depth: depths "
+                f"{self.depths}, cut_widths {self.cut_widths}"
+            )
+        if any(w < 1 for w in self.cut_widths):
+            raise ValueError(f"every cut width must be >= 1, got {self.cut_widths}")
+        if self.cut_topk < 1:
+            raise ValueError("cut_mode='entropy' needs cut_topk >= 1 to compute entropies")
+        if not 0.0 < self.cut_quantile < 1.0:
+            raise ValueError(f"cut_quantile must be in (0, 1), got {self.cut_quantile}")
+        reach = sum(self.cut_gaps) + sum(self.cut_widths)
+        if reach >= self.response_length:
+            raise ValueError(
+                f"the deepest possible cut, {reach} (gaps {self.cut_gaps} + widths "
+                f"{self.cut_widths}), must leave room inside response_length={self.response_length}"
+            )
 
     @property
     def enabled(self) -> bool:
         return len(self.depths) > 0
+
+    @property
+    def measuring(self) -> bool:
+        """Whether trunk stages ask the engine for entropies."""
+        return self.enabled and (self.cut_mode == "entropy" or self.cut_topk > 0)
+
+    @property
+    def cut_gaps(self) -> tuple[int, ...]:
+        """Tokens each level generates before its window: the fixed stage budgets."""
+        return tuple(self.stage_budgets()[: len(self.depths)])
 
     @property
     def num_stages(self) -> int:
@@ -254,10 +372,16 @@ class TreeRolloutConfig:
             return f"tree disabled (flat n={self.n})"
         parts = [f"roots={self.roots}"] + [f"@{d}x{f}" for d, f in zip(self.depths, self.factors)]
         cov = self.depths[-1] / self.response_length
+        cut = ""
+        if self.cut_mode == "entropy":
+            cut = (f", cut=entropy windows={list(self.cut_widths)} "
+                   f"q={self.cut_quantile} topk={self.cut_topk}")
+        elif self.cut_topk:
+            cut = f", cut=fixed (measuring cut entropy, topk={self.cut_topk})"
         return (
             f"tree {' '.join(parts)} -> n={self.n}, {self.num_stages} stages, "
             f"budgets={self.stage_budgets()}, designed support <= t={self.depths[-1]} "
-            f"({cov:.1%} of {self.response_length})"
+            f"({cov:.1%} of {self.response_length}){cut}"
         )
 
 
@@ -289,22 +413,52 @@ class TreeRolloutResult:
     stats: dict = field(default_factory=dict)
 
 
-def _flat_generate(generate: GenerateFn, prompts, n, max_tokens):
-    """Call the engine and check the shape it promised, loudly."""
+def _flat_generate(generate: GenerateFn, prompts, n, max_tokens, topk=0):
+    """Call the engine and check the shape it promised, loudly.
+
+    ``topk`` is passed only when non-zero, so an engine written before
+    entropies existed keeps working for every tree that does not ask for them.
+    """
     if not prompts:
         return []
-    out = generate(prompts, n, max_tokens)
+    out = generate(prompts, n, max_tokens, topk=topk) if topk else generate(prompts, n, max_tokens)
     if len(out) != len(prompts):
         raise RuntimeError(f"generate returned {len(out)} groups for {len(prompts)} prompts")
-    for i, group in enumerate(out):
+    limits = max_tokens if isinstance(max_tokens, (list, tuple)) else [max_tokens] * len(prompts)
+    for i, (group, limit) in enumerate(zip(out, limits)):
         if len(group) != n:
             raise RuntimeError(f"generate returned {len(group)} samples for prompt {i}, expected n={n}")
         for s in group:
-            if len(s.token_ids) > max_tokens:
+            if len(s.token_ids) > limit:
                 raise RuntimeError(
-                    f"generate returned {len(s.token_ids)} tokens for a max_tokens={max_tokens} request"
+                    f"generate returned {len(s.token_ids)} tokens for a max_tokens={limit} request"
                 )
+            if topk and (s.entropies is None or len(s.entropies) != len(s.token_ids)):
+                raise RuntimeError(f"generate was asked for topk={topk} but returned no per-token entropies")
     return out
+
+
+def _find_cut(sample: TreeSample, gap: int, width: int, tau: float):
+    """Where a trunk stage's output is cut, and why.
+
+    Returns ``(cut, kind)``: ``kind`` is ``"cross"`` (first position in
+    ``[gap, gap + width]`` with entropy >= ``tau``), ``"fallback"`` (no crossing,
+    cut at ``gap + width``) or ``"done"`` (the policy stopped before either; the
+    rollout is complete and ``cut`` is its length).  The scan stops at the
+    first crossing -- see the module docstring for why that matters.
+    """
+    ids, ent = sample.token_ids, sample.entropies
+    end = gap + width
+    for k in range(gap, min(end, len(ids) - 1) + 1):
+        if ent[k] >= tau:
+            return k, "cross"
+    if len(ids) > end:
+        return end, "fallback"
+    if sample.finished:
+        return len(ids), "done"
+    # Neither stopped nor long enough: only an engine that under-delivers
+    # gets here.  Keep what there is, as the fixed path would.
+    return len(ids), "fallback"
 
 
 def generate_tree(
@@ -313,6 +467,7 @@ def generate_tree(
     config: TreeRolloutConfig,
     collect_logprobs: bool = False,
     max_token_id: Optional[int] = None,
+    tau: Optional[Sequence[Optional[float]]] = None,
 ) -> TreeRolloutResult:
     """Sample ``config.n`` tree-structured rollouts for every prompt.
 
@@ -337,6 +492,9 @@ def generate_tree(
             engine.  Given this bound, such a trunk is dropped and its slots go
             through the ordinary refill path, since the rollout was garbage
             either way; left ``None`` no check is made.
+        tau: ``cut_mode="entropy"`` only -- one threshold per level, normally
+            the previous call's ``stats["next_tau"]``.  ``None`` (or a ``None``
+            entry) takes the quantile of this call's own window entropies.
 
     Returns:
         :class:`TreeRolloutResult` with exactly ``config.n`` responses per
@@ -362,6 +520,21 @@ def generate_tree(
 
     last_stage = len(factors) - 1
 
+    entropy_cut = config.enabled and config.cut_mode == "entropy"
+    measuring = config.measuring
+    n_levels = len(config.depths)
+    tau_in = list(tau) if tau is not None else [None] * n_levels
+    if len(tau_in) != n_levels:
+        raise ValueError(f"tau has {len(tau_in)} entries for {n_levels} cut levels")
+    tau_used: list[Optional[float]] = [None] * n_levels
+    next_tau: list[Optional[float]] = list(tau_in)
+    tau_source = "prev" if all(t is not None for t in tau_in) else "batch"
+    cut_depths: list[list[int]] = [[] for _ in range(n_levels)]
+    cut_entropies: list[float] = []
+    window_entropies_all: list[float] = []
+    n_cuts = n_fallback = 0
+    generated = discarded = 0
+
     for stage, (fan, budget) in enumerate(zip(factors, budgets)):
         if stage == 0:
             conds = prompts
@@ -378,11 +551,48 @@ def generate_tree(
 
         if not conds:
             break
-        out = _flat_generate(generate, conds, fan, budget)
+        trunk = stage < last_stage
+        if trunk and measuring:
+            # One token past the window so the entropy at its last position is
+            # known; whatever lies at or after the cut is redrawn by the children.
+            gap = budget
+            width = config.cut_widths[stage] if entropy_cut else 0
+            out = _flat_generate(generate, conds, fan, gap + width + 1, topk=config.cut_topk)
+            level_tau = math.inf  # fixed cuts: measure, never move
+            if entropy_cut:
+                window = [e for group in out for s in group for e in s.entropies[gap:gap + width + 1]]
+                window_entropies_all.extend(window)
+                if window:
+                    next_tau[stage] = _quantile(window, config.cut_quantile)
+                level_tau = tau_in[stage] if tau_in[stage] is not None else next_tau[stage]
+                if level_tau is None:  # nothing reached the window: nothing to cut
+                    level_tau = math.inf
+            tau_used[stage] = level_tau
+        elif not trunk and entropy_cut:
+            # Cuts differ per node, so the last stage's budgets do too.
+            out = _flat_generate(generate, conds, fan,
+                                 [config.response_length - len(parent.tokens) for parent in parents])
+        else:
+            out = _flat_generate(generate, conds, fan, budget)
         calls += 1
+        generated += sum(len(s.token_ids) for group in out for s in group)
 
         for group, p, parent in zip(out, owners, parents):
             for j, s in enumerate(group):
+                cut_kind = None
+                if trunk and measuring:
+                    cut, cut_kind = _find_cut(s, gap, width, level_tau)
+                    if cut_kind != "done":
+                        n_cuts += 1
+                        n_fallback += cut_kind == "fallback"
+                        if cut < len(s.token_ids):
+                            cut_entropies.append(s.entropies[cut])
+                    discarded += len(s.token_ids) - cut
+                    s = TreeSample(
+                        token_ids=list(s.token_ids[:cut]),
+                        finished=cut_kind == "done",
+                        logprobs=None if s.logprobs is None else list(s.logprobs[:cut]),
+                    )
                 # Only what will be fed back in as a prompt is checked:
                 # sequences from the last stage go straight to the output, and
                 # an unusable id there is exactly as harmless as it is under
@@ -406,6 +616,8 @@ def generate_tree(
                     finished=s.finished,
                     path=(parent.path if parent else ()) + (j,),
                 )
+                if cut_kind in ("cross", "fallback"):
+                    cut_depths[stage].append(len(child.tokens))
                 # A node that stopped on its own, or that has already used its
                 # whole budget, cannot be branched further.
                 if child.finished or len(child.tokens) >= config.response_length:
@@ -433,6 +645,7 @@ def generate_tree(
     if n_refill:
         out = _flat_generate(generate, refill_conds, 1, config.response_length)
         calls += 1
+        generated += sum(len(group[0].token_ids) for group in out)
         for group, p in zip(out, refill_owner):
             s = group[0]
             done[p].append(
@@ -460,6 +673,24 @@ def generate_tree(
         "num_oov_dropped": n_oov,
         "config": config.describe(),
     }
+    if measuring:
+        def _mean(xs):
+            return sum(xs) / len(xs) if xs else float("nan")
+
+        stats.update({
+            "cut_mode": config.cut_mode,
+            "cut_entropy_mean": _mean(cut_entropies),
+            "cut_depth_mean": [_mean(d) for d in cut_depths],
+            "wasted_tok_frac": discarded / generated if generated else 0.0,
+        })
+        if entropy_cut:
+            stats.update({
+                "tau": tau_used,
+                "tau_source": tau_source,
+                "next_tau": next_tau,
+                "window_entropy_mean": _mean(window_entropies_all),
+                "fallback_frac": n_fallback / n_cuts if n_cuts else float("nan"),
+            })
     stats.update(sibling_support_stats(responses))
     return TreeRolloutResult(responses, logprobs, paths, stats)
 

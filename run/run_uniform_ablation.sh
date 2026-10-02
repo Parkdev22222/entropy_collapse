@@ -103,6 +103,29 @@ export STEERF_PERMUTE_AH=${PERM}
 TREE_DEPTHS=${TREE_DEPTHS:-64,192,384}
 TREE_FACTORS=${TREE_FACTORS:-2,2,2}
 TREE_ROOTS=${TREE_ROOTS:-1}
+# Where each level is cut (steer_f/tree_rollout.py, "Where to cut"):
+#   TREE_CUT=fixed    at TREE_DEPTHS, the runs so far
+#   TREE_CUT=entropy  at the first token in [fixed depth, + TREE_CUT_WIDTHS]
+#                     whose entropy reaches the TREE_CUT_Q quantile of the
+#                     previous step's window entropies, else the window's end
+# TREE_CUT_TOPK: top-k logprobs the entropy is read from (vLLM's ceiling is
+# 20). Under fixed, a non-zero value measures the entropy at the fixed cuts
+# without moving them, so the two trees compare on the same number.
+TREE_CUT=${TREE_CUT:-fixed}
+TREE_CUT_WIDTHS=${TREE_CUT_WIDTHS:-64,128,192}
+TREE_CUT_Q=${TREE_CUT_Q:-0.9}
+case "${TREE_CUT}" in
+    fixed)   TREE_CUT_TOPK=${TREE_CUT_TOPK:-0} ;;
+    entropy) TREE_CUT_TOPK=${TREE_CUT_TOPK:-20} ;;
+    *) echo "TREE_CUT must be 'fixed' or 'entropy', got '${TREE_CUT}'" >&2; exit 2 ;;
+esac
+case "${TREE_CUT_TOPK}" in ''|*[!0-9]*) echo "TREE_CUT_TOPK must be an integer, got '${TREE_CUT_TOPK}'" >&2; exit 2 ;; esac
+if [ "${TREE_CUT_TOPK}" -gt 20 ]; then
+    echo "TREE_CUT_TOPK=${TREE_CUT_TOPK}: vLLM returns at most 20 logprobs (max_logprobs)" >&2; exit 2
+fi
+if [ "${TREE_CUT}" = entropy ] && [ "${TREE_CUT_TOPK}" -lt 1 ]; then
+    echo "TREE_CUT=entropy needs TREE_CUT_TOPK >= 1" >&2; exit 2
+fi
 STEPS=${STEPS:-200}
 
 RUN_NAME=${RUN_NAME:-"steer-f-Qwen2.5-Math-1.5B-s${SEED}-tree-rollout-${ARM}"}
@@ -159,6 +182,11 @@ echo " run name       ${RUN_NAME}"
 echo " control        steer-f-Qwen2.5-Math-1.5B-s${SEED}-tree-rollout"
 echo " lam/kappa/g_H  ${STEERF_LAM} / ${STEERF_KAPPA} / ${STEERF_GAMMA_H}"
 echo " tree           roots=${TREE_ROOTS} depths=[${TREE_DEPTHS}] factors=[${TREE_FACTORS}]"
+if [ "${TREE_CUT}" = entropy ]; then
+    echo " tree cut       entropy  windows=[${TREE_CUT_WIDTHS}] q=${TREE_CUT_Q} topk=${TREE_CUT_TOPK}"
+else
+    echo " tree cut       fixed  (cut-entropy topk=${TREE_CUT_TOPK})"
+fi
 echo " seed / gpus    ${SEED} / ${N_GPUS} (tp=${TP_SIZE})"
 echo " steps          ${STEPS}"
 echo " log            ${LOG}"
@@ -174,6 +202,17 @@ ARGS=(
     "++actor_rollout_ref.rollout.steerf_tree_factors=[${TREE_FACTORS}]"
     "++actor_rollout_ref.rollout.steerf_tree_roots=${TREE_ROOTS}"
 )
+# Only when asked for, so a fixed run's command line is the one it always was.
+if [ "${TREE_CUT}" = entropy ]; then
+    ARGS+=(
+        "++actor_rollout_ref.rollout.steerf_tree_cut_mode=entropy"
+        "++actor_rollout_ref.rollout.steerf_tree_cut_widths=[${TREE_CUT_WIDTHS}]"
+        "++actor_rollout_ref.rollout.steerf_tree_cut_quantile=${TREE_CUT_Q}"
+        "++actor_rollout_ref.rollout.steerf_tree_cut_topk=${TREE_CUT_TOPK}"
+    )
+elif [ "${TREE_CUT_TOPK}" -gt 0 ]; then
+    ARGS+=("++actor_rollout_ref.rollout.steerf_tree_cut_topk=${TREE_CUT_TOPK}")
+fi
 
 if [ "${DRY_RUN:-0}" = "1" ]; then
     echo "DRY RUN — would execute:"
@@ -198,6 +237,7 @@ bash "${STEER_ROOT}/run/run_steerf.sh" "${ARGS[@]}" "$@" > "${LOG}" 2>&1 || stat
 
 echo "[${ARM}] exit ${status} -> ${LOG}"
 grep -m2 "steerf-tree" "${LOG}" || true
+grep "steerf-tree\] cut_mode" "${LOG}" | tail -1 || true
 for k in permute_ah branch_corr_frac branch_corr_frac_strict branch_corr_mean_abs \
          branch_corr_rms branch_corr_max_abs tw_std twg_std; do
     printf '  %-24s %s\n' "${k}" "$(grep -o "steerf/${k}:[0-9.]*" "${LOG}" | tail -1)"

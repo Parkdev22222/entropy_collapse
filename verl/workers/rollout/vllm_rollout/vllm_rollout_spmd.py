@@ -102,14 +102,18 @@ def _tokenizer_max_token_id(tokenizer):
         return None
 
 
-def _tree_samples_from_vllm(outputs, want_logprobs):
+def _tree_samples_from_vllm(outputs, want_logprobs, topk=0):
     """vLLM ``RequestOutput``s -> ``TreeSample``s, one group per prompt.
 
     ``finish_reason == "length"`` is the only reason a sequence may be branched
     further: anything else means the policy chose to stop, and continuing past
     its own EOS would be generating text the policy never would have.
+
+    With ``topk`` each position's dict holds the top-k tokens *and* the sampled
+    one, which may rank below k; filtering on ``rank <= topk`` keeps the
+    entropy a function of the distribution alone, not of which token was drawn.
     """
-    from steer_f.tree_rollout import TreeSample
+    from steer_f.tree_rollout import TreeSample, topk_entropy
 
     groups = []
     for output in outputs:
@@ -119,7 +123,15 @@ def _tree_samples_from_vllm(outputs, want_logprobs):
             lps = None
             if want_logprobs:
                 lps = [comp.logprobs[i][tid].logprob for i, tid in enumerate(ids)]
-            group.append(TreeSample(token_ids=ids, finished=comp.finish_reason != "length", logprobs=lps))
+            ents = None
+            if topk:
+                ents = [
+                    topk_entropy([lp.logprob for lp in comp.logprobs[i].values()
+                                  if lp.rank is not None and lp.rank <= topk])
+                    for i in range(len(ids))
+                ]
+            group.append(TreeSample(token_ids=ids, finished=comp.finish_reason != "length",
+                                    logprobs=lps, entropies=ents))
         groups.append(group)
     return groups
 
@@ -142,6 +154,10 @@ def _build_tree_config(config):
         depths=depths,
         factors=config.get("steerf_tree_factors", ()),
         roots=int(config.get("steerf_tree_roots", 1)),
+        cut_mode=config.get("steerf_tree_cut_mode", "fixed"),
+        cut_widths=config.get("steerf_tree_cut_widths", ()),
+        cut_quantile=float(config.get("steerf_tree_cut_quantile", 0.9)),
+        cut_topk=int(config.get("steerf_tree_cut_topk", 0)),
     )
 
 
@@ -172,20 +188,37 @@ class vLLMRollout_TreeMixin:
 
         want_logprobs = bool(self.config.calculate_log_probs)
 
-        def engine(prompt_token_ids, n, max_tokens):
+        def engine(prompt_token_ids, n, max_tokens, topk=0):
             # Nested inside generate_sequences' own update_sampling_params;
             # that contextmanager saves and restores per key, so the outer
             # settings survive.
-            with self.update_sampling_params(n=n, max_tokens=max_tokens):
+            per_prompt = isinstance(max_tokens, (list, tuple))
+            overrides = {"n": n}
+            if not per_prompt:
+                overrides["max_tokens"] = max_tokens
+            if topk:
+                # vLLM's sample logprobs are the raw model distribution; the
+                # training rollout samples at temperature 1.0 / top-p 1.0, so
+                # that is the distribution the token was drawn from.
+                overrides["logprobs"] = topk
+            with self.update_sampling_params(**overrides):
+                params = self.sampling_params
+                if per_prompt:
+                    # an entropy-cut tree's last stage: each node has its own budget
+                    params = []
+                    for m in max_tokens:
+                        sp = self.sampling_params.clone()
+                        sp.max_tokens = int(m)
+                        params.append(sp)
                 outputs = self.inference_engine.generate(
                     prompts=[{"prompt_token_ids": list(ids)} for ids in prompt_token_ids],
-                    sampling_params=self.sampling_params,
+                    sampling_params=params,
                     lora_request=None if lora_id is None else [
                         LoRARequest(lora_name=f"{lora_id}", lora_int_id=lora_id, lora_path="/simon-stub-path")
                     ] * len(prompt_token_ids),
                     use_tqdm=False,
                 )
-            return _tree_samples_from_vllm(outputs, want_logprobs)
+            return _tree_samples_from_vllm(outputs, want_logprobs, topk)
 
         result = generate_tree(
             engine,
@@ -193,8 +226,12 @@ class vLLMRollout_TreeMixin:
             self.tree_config,
             collect_logprobs=want_logprobs,
             max_token_id=self.tokenizer_max_token_id,
+            tau=self._steerf_tree_tau,
         )
         st = result.stats
+        if "next_tau" in st:
+            # carried to the next step: a threshold from past tokens only
+            self._steerf_tree_tau = st["next_tau"]
         # print for the same reason as in __init__: WARN is this logger's
         # default level, and this line is the only place the support fraction
         # -- the number the whole tree exists to move -- is observable.
@@ -207,6 +244,20 @@ class vLLMRollout_TreeMixin:
             f"by_decile={[round(x, 3) for x in st['support_frac_by_decile']]}",
             flush=True,
         )
+        if "cut_mode" in st:
+            def _r(x):
+                return [None if v is None else round(v, 4) for v in x] if isinstance(x, list) else round(x, 4)
+
+            line = (f"[steerf-tree] cut_mode={st['cut_mode']} "
+                    f"cut_entropy_mean={_r(st['cut_entropy_mean'])} "
+                    f"cut_depth_mean={_r(st['cut_depth_mean'])} "
+                    f"wasted_tok_frac={_r(st['wasted_tok_frac'])}")
+            if "tau" in st:
+                line += (f" tau={_r(st['tau'])} tau_source={st['tau_source']} "
+                         f"next_tau={_r(st['next_tau'])} "
+                         f"window_entropy_mean={_r(st['window_entropy_mean'])} "
+                         f"fallback_frac={_r(st['fallback_frac'])}")
+            print(line, flush=True)
         # Flattened prompt-major, which is exactly the order _repeat_interleave
         # gives the prompts/attention_mask/position_ids it duplicates below.
         response = [r for group in result.responses for r in group]
@@ -321,6 +372,7 @@ class vLLMRollout(vLLMRollout_TreeMixin, BaseRollout):
 
         self.pad_token_id = tokenizer.pad_token_id
         self.tree_config = _build_tree_config(config)
+        self._steerf_tree_tau = None  # entropy-cut thresholds, carried step to step
         self.tokenizer_max_token_id = _tokenizer_max_token_id(tokenizer)
         if self.tree_config is not None and self.tree_config.enabled:
             # print, not logger.info: this module's logger is created at
