@@ -72,12 +72,67 @@ def _find_any(text, ds, suffix):
     return _find(text, f"val-core/{ds}/acc/mean@{ns[0]}"), ns[0]
 
 
+# Figure 6: Pass@k on AIME24/25 from the PASSK=1 pass (n=1024 per problem).
+# verl files best@<n_max> under val-core and the smaller k under val-aux
+# (ray_trainer._validate), so both sections are read. These are verl's
+# bootstrap best@N/mean; scripts/passk_from_dump.py gives the unbiased pass@k
+# from the same samples.
+PASSK_SETS = [("aime_2024_dapo_boxed", "AIME24"), ("aime_2025_dapo_boxed", "AIME25")]
+PASSK_KS = (256, 512, 1024)
+
+
+def collect_passk(logs, out):
+    cols = [f"{name} best@{k}" for _, name in PASSK_SETS for k in PASSK_KS]
+    rows = {}
+    for f in sorted(Path(logs).glob("eval-*.log")):
+        m = re.match(r"eval-(.+)-s(\d+)\.log$", f.name)
+        if not m:
+            continue
+        text = f.read_text(errors="replace")
+        row = {}
+        for ds, name in PASSK_SETS:
+            for k in PASSK_KS:
+                v = None
+                for sec in ("val-core", "val-aux"):
+                    v = _find(text, f"{sec}/{ds}/acc/best@{k}/mean")
+                    if v is not None:
+                        break
+                if v is not None:
+                    row[f"{name} best@{k}"] = 100.0 * v
+        if row:
+            rows[(m.group(1), m.group(2))] = row
+    if not rows:
+        sys.exit(f"[collect] no best@k lines in eval logs under {logs} (was it a PASSK=1 pass?)")
+    out = Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with out.open("w") as fh:
+        fh.write("arm\tseed\t" + "\t".join(cols) + "\n")
+        by_arm = defaultdict(list)
+        for (arm, seed), row in rows.items():
+            by_arm[arm].append((seed, row))
+        for arm in sorted(by_arm):
+            seed_rows = sorted(by_arm[arm])
+            for seed, row in seed_rows:
+                fh.write(arm + "\t" + seed + "\t" + "\t".join(
+                    f"{row[c]:.1f}" if c in row else "-" for c in cols) + "\n")
+            if len(seed_rows) > 1:
+                fh.write(arm + "\tavg\t" + "\t".join(
+                    f"{sum(r[c] for _, r in seed_rows) / len(seed_rows):.1f}"
+                    if all(c in r for _, r in seed_rows) else "-" for c in cols) + "\n")
+    print(f"[collect] wrote {out} ({len(rows)} Pass@k logs)")
+    print(out.read_text())
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--logs", default="logs/experiments")
     ap.add_argument("--out", default="results/summary.tsv")
+    ap.add_argument("--passk", action="store_true",
+                    help="read the PASSK=1 logs' best@{256,512,1024}/mean instead of the six-benchmark table")
     args = ap.parse_args(argv)
+    if args.passk:
+        return collect_passk(args.logs, args.out)
 
     # eval logs are named eval-<arm>-s<seed>.log by the master script
     rows = {}

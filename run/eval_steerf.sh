@@ -87,9 +87,17 @@ if [ "${CODE:-0}" = "1" ]; then
     run_eval "['$d/livecodebench_v5.parquet']" 4 "code-avg4"
 elif [ "${PASSK:-0}" = "1" ]; then
     # Figure 6: Pass@256/512/1024 on AIME24/25. verl reports these as
-    # val-core/<dataset>/acc/best@{256,512,1024}/mean when n=1024.
-    # EXPENSIVE: 2 x 30 problems x 1024 samples.
-    run_eval "['$d/aime24.parquet', '$d/aime25.parquet']" 1024 "passk"
+    # val-*/<dataset>/acc/best@{256,512,1024}/mean when n=1024 (best@1024 under
+    # val-core, the smaller k under val-aux). EXPENSIVE: 2 x 30 problems x 1024.
+    # The avg@32 parquets carry each problem 32 times, so they would make this
+    # 32 x 1024 samples per problem; the pass reads one-copy files instead.
+    for s in aime24 aime25; do
+        if [ ! -f "$d/passk/$s.parquet" ]; then
+            python3 "${STEER_ROOT}/scripts/dedupe_replicas.py" --expect 30 \
+                "$d/$s.parquet" "$d/passk/$s.parquet" || exit 2
+        fi
+    done
+    run_eval "['$d/passk/aime24.parquet', '$d/passk/aime25.parquet']" 1024 "passk"
 else
     # n=1: the parquets already carry the 32 replicas (see upstream run/eval.sh)
     run_eval "$files_at32" 1 "avg32"

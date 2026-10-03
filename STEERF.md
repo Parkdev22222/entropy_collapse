@@ -216,9 +216,10 @@ MODEL_PATH=<선택된 체크포인트>/hf_model bash run/eval_steerf.sh
 | **Table 4** — Qwen2.5-14B, 6행 (Base/GRPO/OPO/Entro.Adv./Clip-Cov/STEER) | 동일 | `MODEL_PATH=Qwen/Qwen2.5-14B ...` | 동일 |
 | **Table 5** — 코드, LCB-v5 행 (GRPO vs STEER × Coder-3B/7B/14B) | ArcherCodeR 학습 | `scripts/prepare_code_data.py --archer --lcb` → `MODEL_PATH=Qwen/Qwen2.5-Coder-{3B,7B,14B} run/run_steerf_code.sh` → `CODE=1 eval_steerf.sh` | `val-core/codecontests/acc/mean@4` |
 | **Table 6** — 극한 시나리오 (ε_low=0.99, ε_high=5), 5행 (GRPO/Entro.Adv./Entro.Loss/Clip-Cov/STEER) | 7B | `run/run_steerf_extreme.sh` → `eval_steerf.sh` | 동일 6개 벤치 |
-| **Figure 6** — Pass@256/512/1024, AIME24/25 | 7B 선택 체크포인트 | `PASSK=1 MODEL_PATH=... eval_steerf.sh` | `val-core/<aime>/acc/best@{256,512,1024}/mean` |
+| **Figure 6** — Pass@256/512/1024, AIME24/25 | 7B 선택 체크포인트 | `PASSK=1 MODEL_PATH=... eval_steerf.sh` (복제 없는 `datasets/passk/` 사본 사용) | `val-aux/<aime>/acc/best@{256,512}/mean`, `val-core/<aime>/acc/best@1024/mean` (verl 부트스트랩) + `scripts/passk_from_dump.py` 비편향 pass@k |
 | **Figure 7** — 학습 중 test acc 곡선 | 7B | 학습 로그의 `val-core/aime_2024_dapo_boxed/acc/mean@32` per step | 곡선 |
 | **Figure 8** — 극한 시나리오 엔트로피 곡선 | 7B | `run_steerf_extreme.sh` 로그의 `actor/entropy` | 곡선 |
+| **한 번에 전부** | 체크포인트 하나 | `POINT=best\|final\|base ARM=... SEED=... bash run/eval_all_metrics.sh` | `results/steer_metrics/<point>/{bench,passk_verl,passk_unbiased}.tsv`, `results/steer_metrics/curves/<arm>-s<seed>.tsv`(Fig 7·8) |
 | **App. F.3 Fig 20a** — Llama-3.2-3B 수학 (GRPO vs STEER) | 동일 레시피 | `MODEL_PATH=meta-llama/Llama-3.2-3B-Instruct run/run_steerf.sh` | 6개 벤치 + Avg |
 | **App. F.3** — RL 알고리즘 일반화 (RLOO 45.8→46.8, OPO 46.4→47.5) | 7B | `run/run_steerf.sh algorithm.adv_estimator=rloo` (또는 `opo`) — 후행 hydra 인자가 앞의 값을 이긴다 | 6개 벤치 평균 |
 
