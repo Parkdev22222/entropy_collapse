@@ -91,6 +91,41 @@ def test_the_build_resolves_every_reference():
     assert not re.search(r"(Citation|Reference) `[^']*' on page .* undefined", log)
 
 
+# ------------------------------------------------------- the submission format
+PDF = ROOT / "paper" / "steerf.pdf"
+MAIN_PAGES = 8      # ARR long paper: Limitations may start on page 9 at the latest
+
+
+def _pdftotext(page):
+    import shutil
+    import subprocess
+    if not shutil.which("pdftotext"):
+        pytest.skip("pdftotext is not installed")
+    return subprocess.run(["pdftotext", "-f", str(page), "-l", str(page),
+                           str(PDF), "-"], capture_output=True, text=True).stdout
+
+
+def test_the_main_body_fits_the_page_limit():
+    """ARR counts the pages before Limitations; the section must start by page 9."""
+    if not PDF.is_file():
+        pytest.skip("no PDF; build paper/ first")
+    for page in range(1, MAIN_PAGES + 2):
+        if re.search(r"^Limitations$", _pdftotext(page), re.M):
+            return
+    pytest.fail(f"Limitations does not start on pages 1-{MAIN_PAGES + 1}: "
+                f"the main body is longer than {MAIN_PAGES} pages")
+
+
+def test_no_unmeasured_number_reaches_the_submission(tex):
+    """Every slot in the submitted manuscript is filled by an emitted value."""
+    defined = set()
+    for f in (ROOT / "results").glob("numbers*.tex"):
+        defined |= set(re.findall(r"\\providecommand\{\\([A-Za-z]+)\}", f.read_text()))
+    slots = set(re.findall(r"\\num\{([A-Za-z]+)\}", tex))
+    missing = sorted(slots - defined)
+    assert not missing, f"slots that would print the red placeholder: {missing}"
+
+
 # --------------------------------------- can a finished experiment reach the page?
 def emittable_names():
     """Every macro name scripts/analyze_seeds.py is able to write.
