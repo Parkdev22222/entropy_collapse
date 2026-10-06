@@ -236,7 +236,8 @@ of reasoning models is well documented and tied to the stall of improvement
 \paragraph{Entropy regularization.} Maximum-entropy reinforcement learning adds the
 policy entropy to the objective \citep{ziebart2008maximum,haarnoja2018soft}. In RLVR a
 naive entropy bonus has been reported not to prevent collapse and to degrade accuracy
-\citep{rethinkingentropyreg}, and maximum entropy can mislead policy optimization
+\citep{rethinkingentropyreg}; in continuous control, entropy maximization can mislead
+policy optimization on tasks that require precise, low-entropy policies
 \citep{zhang2025cwhen}. Both bonus and KL act on conditional distributions at visited
 states, that is, on the local channel.
 
