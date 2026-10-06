@@ -67,3 +67,29 @@ and the zero-advantage fraction differs by arm.
    weights at every supported position by a larger magnitude (`omega_tilde.py`
    notes ~15x mean |delta|), so the two controls are not equivalent and both are
    reported.
+
+## Amendment 1 (2026-10-06, before any contrast was computed)
+
+While writing the parser, one log line was inspected to check the key names
+(STEER-F, seed 3, step 50). It showed that the trainer prints every `steerf/*`
+metric to three decimals, so `steerf/a_h_abs_mean` reads `0.000` at every step
+and the quantity above cannot be computed. No contrast, and no value of any
+other arm, had been computed or looked at.
+
+Substitute, with everything else unchanged (window, seeds, contrasts, rule):
+
+    S_t = steerf/a_h_std_t * sqrt( G * L_t / steerf/n_branch_points_t )
+
+`a_h_std` is the standard deviation of `A_H` over all valid tokens. `A_H` sums to
+zero within each sibling set, so its mean over all tokens is zero, and
+`a_h_std^2 * (G L_t)` is the sum of `A_H^2`; dividing by the number of branch
+points and taking the root gives the RMS of `A_H` per branch point, the RMS
+counterpart of the original mean-absolute quantity.
+
+`a_h_std` is itself printed to three decimals (values near `0.010`), so a single
+step is quantized to about ±5%. The window mean averages ~71 steps, which shrinks
+random rounding error well below that, but a rounding bias common to every step of
+a run cannot be excluded. The rule is therefore tightened, again before any
+contrast is computed: **a contrast whose mean relative difference is smaller than
+5% in absolute value counts as not distinguishable**, and if either contrast is
+not distinguishable the verdict is "inconclusive".
