@@ -226,10 +226,12 @@ curve can and cannot tell us about it, not a paper claiming an accuracy gain.
 Entropy decay under policy-gradient fine-tuning is well documented
 \citep{cui2025bentropy}, and a range of interventions add an explicit entropy term
 to the objective, in the tradition of maximum-entropy reinforcement learning
-\citep{ziebart2008maximum,haarnoja2018soft}, or constrain the update so that
-high-entropy positions are preserved. Recent analyses report that naive
-entropy regularization does not prevent the collapse and that continuing to train
-under it degrades accuracy \citep{rethinkingentropyreg}, which is consistent with
+\citep{haarnoja2018soft}, itself rooted in the maximum-entropy principle of inverse
+RL \citep{ziebart2008maximum}, or constrain the update so that high-entropy positions
+are preserved. Recent analyses report that naive entropy regularization fails to cure
+the collapse in large reasoning models, because the vast action space and long
+trajectories easily trigger a global entropy explosion, and they regularize
+selectively instead \citep{rethinkingentropyreg}, which is consistent with
 our reading: the regularizer acts on the local channel, and the local channel is
 not where trajectory diversity is being lost.
 
@@ -1651,7 +1653,7 @@ the spread.
 A single $30$-question benchmark cannot separate a method from a lucky draw, so each
 run's selected checkpoint is re-evaluated on six mathematics benchmarks
 (Table~\ref{tab:bench}) under the protocol of Section~\ref{sec:setup}: AIME24, AIME25
-and AMC23 at $\mathrm{avg@}32$, MATH500 \citep{hendrycks2021measuring}, Minerva
+and AMC23 at $\mathrm{avg@}32$, MATH500 \citep{hendrycks2021measuring,lightman2024lets}, Minerva
 \citep{lewkowycz2022solving} and OlympiadBench \citep{he2024olympiadbench} at
 $\mathrm{avg@}1$.
 
