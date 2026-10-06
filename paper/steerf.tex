@@ -16,6 +16,7 @@
 \usepackage{multirow}
 \usepackage{array}
 \usepackage{xcolor}
+\usepackage{tikz}
 
 % ---- macros -----------------------------------------------------------
 \newcommand{\Htraj}{\mathcal{H}}
@@ -28,7 +29,7 @@
 \newcommand{\pit}{\pi_{\theta}}
 
 \title{Entropy Collapse Has a Direction:\\
-Correcting the Visitation Channel in Token-Level Entropy Control for RLVR}
+The Missing Visitation Channel in Token-Level Entropy Control for RLVR}
 
 \author{Anonymous ACL submission}
 
@@ -73,87 +74,130 @@ Correcting the Visitation Channel in Token-Level Entropy Control for RLVR}
 
 \begin{abstract}
 Reinforcement learning with verifiable rewards (RLVR) drives a policy's entropy
-toward zero, and a recent family of methods counters this by re-weighting the
-policy loss with a per-token estimate of each update's entropy cost. We show that
-these methods estimate only half of the relevant quantity. The gradient of the
-\emph{trajectory} entropy splits exactly into a \emph{local} channel --- how the
-conditional distribution at a visited state sharpens --- and a \emph{visitation}
-channel --- how the probability of reaching that state changes. Token-level
-estimators capture only the first, and the two are anti-correlated: the local
-estimate is exactly, and correctly, zero at a uniform branch point, where the
-visitation term's prefactor is largest. We derive the missing channel as a per-token
-advantage $\AH$ whose reward-to-go is the remaining conditional entropy, with a
-sibling-prefix baseline that a fixed tree-structured rollout schedule supplies.
-$\AH$ sums to zero over each sibling set, so it predicts that the aggregate entropy
-curve --- the usual evidence for such methods --- cannot register it. A five-arm
-design that keeps the apparatus and destroys $\AH$'s value in two ways confirms this
-over three seeds: switching the damping apparatus moves the aggregate entropy
-($t = \num{Tsteergrpoentropy}$ and $\num{Tuniformsteerentropy}$), changing only what
-$\AH$ carries does not ($t = \num{Tsigneduniformentropy}$). On accuracy we claim
-little: the pre-registered test of $\AH$'s value against a value-free control is met
-as a refutation, and under the base method's own protocol two runs average
-$\num{ProtobestMeanAvg}$ on six benchmarks against its reported
-$\num{ProtorefSteerAvg}$.
+toward zero, and a recent family of methods counters this by re-weighting the policy
+loss with a per-token estimate of each update's entropy cost. These methods account
+for how visited states sharpen, but not for how an update changes \emph{which states
+are visited}. We show that the gradient of the trajectory entropy splits exactly into
+a \emph{local} channel --- the change of the conditional distribution at visited
+states --- and a \emph{visitation} channel --- the change in the probability of
+reaching them --- and that token-level estimators capture only the first. The local
+estimate vanishes, correctly to first order, at a flat branch point, which is exactly
+where the visitation prefactor is largest, so no refinement of the local estimator
+recovers the missing term. We derive the visitation term as a per-token REINFORCE
+advantage $\AH$ whose reward-to-go is the remaining conditional entropy, made
+estimable by a sibling-prefix baseline that a fixed tree-structured rollout supplies.
+$\AH$ sums to zero within each sibling set, so it can change trajectory diversity
+without changing aggregate token entropy. A five-arm experiment over three paired
+seeds observes this dissociation: changing the damping mechanism shifts the aggregate
+entropy by $\num{Csteergrpoentropy}$ and $\num{Cuniformsteerentropy}$, whereas changing
+only the branch-specific $\AH$ signal shifts it by $\num{Csigneduniformentropy}$ and
+$\num{Csignedpermutedentropy}$. We do not establish an accuracy gain from the
+correction --- a pre-registered accuracy test is not supported --- and the experiments
+instead support the structural claim that aggregate entropy cannot diagnose the
+visitation channel.
 \end{abstract}
 
 \section{Introduction}
 \label{sec:intro}
 
 Policy-gradient fine-tuning with verifiable rewards sharpens a language model's
-output distribution. Measured as the mean per-token entropy, this sharpening is fast,
+output distribution. Measured as the mean per-token entropy, the sharpening is fast,
 monotone and, past a point, coincident with the end of useful learning. The standard
-remedy spends part of the update budget slowing it down: an entropy bonus, a KL
-anchor, a clip on the tokens that lose most entropy or, most recently, a per-token
-re-weighting of the policy loss by a first-order estimate of the entropy each
-token's update destroys \citep{steer}. We argue that the accounting behind that
-remedy is incomplete, and that the incompleteness is structural.
+remedies spend part of the update budget slowing it down: an entropy bonus, a KL
+anchor, a clip on the tokens that lose most entropy, or, most recently, a per-token
+re-weighting of the policy loss by a first-order estimate of the entropy each token's
+update destroys \citep{steer}.
 
-Write $\Htraj(\pit \mid x)$ for the entropy of the distribution the policy induces
-over whole responses. Its gradient splits, by the product rule, into exactly two
-terms. The first holds the visited states fixed and asks how the conditional
-distribution at each one changes; this is what a per-token estimate measures. The
-second holds the per-state entropies fixed and asks how the probability of
-\emph{visiting} each state changes: an update that concentrates mass on one
-continuation removes the diversity carried by its abandoned siblings even though no
-conditional distribution became more peaked.
+These remedies account for how the conditional distribution at a visited state
+sharpens. They do not account for how an update changes which states are visited, and
+this omission is structural rather than a matter of estimator quality.
+Figure~\ref{fig:branch} shows the case that makes it concrete. At a state with two
+equiprobable continuations the conditional distribution is as entropic as it can be,
+and its first-order entropy change under a small push is zero. Yet a small shift of
+mass from a continuation that leads into a rich sub-tree to one that leads into a
+dead end removes all the downstream diversity the first carried. The branch itself
+is locally safe; which branch is visited is not.
 
-The local channel is not merely blind to the second term but \emph{anti-correlated}
-with it. The local estimate is proportional to the deviation of the sampled token's
-surprisal from its mean, which vanishes at a branch point where continuations are
-equiprobable --- correctly, since the entropy loss there is second order --- while the
-visitation term's prefactor $1 - \pit(y_t \mid s_t)$ is largest at exactly those
-states. No refinement of the local estimator can recover the missing term.
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[
+  every node/.style={font=\footnotesize},
+  st/.style={circle, draw, inner sep=1.4pt, minimum size=11pt},
+  sm/.style={circle, draw, minimum size=7pt, inner sep=0pt},
+  lf/.style={circle, fill=black!55, inner sep=0pt, minimum size=4pt}]
+\node[st] (s) at (0,0) {$s$};
+\node[st] (a) at (-1.6,-0.9) {$A$};
+\node[st] (b) at (1.6,-0.9) {$B$};
+\draw[->] (s) -- node[above left=-1pt] {$\pi{=}.5$} (a);
+\draw[->] (s) -- node[above right=-1pt] {$\pi{=}.5$} (b);
+\foreach \i/\x in {1/-2.5, 2/-1.6, 3/-0.7} {
+  \node[sm] (m\i) at (\x,-1.8) {};
+  \draw[->] (a) -- (m\i);
+  \foreach \d in {-0.25, 0, 0.25} {
+    \node[lf] at (\x+\d,-2.5) {};
+    \draw (m\i) -- (\x+\d,-2.45);
+  }
+}
+\node[sm] (bb) at (1.6,-1.8) {};
+\draw[->] (b) -- (bb);
+\node[lf] at (1.6,-2.5) {};
+\draw (bb) -- (1.6,-2.45);
+\node at (-1.6,-2.85) {rich sub-tree};
+\node at (1.6,-2.85) {dead end};
+\node[align=left, text width=7.2cm] at (0,-3.65)
+  {\emph{Local:} at $s$, $H(\pi(\cdot\mid s))$ is maximal and its first-order change is
+   $0$.\\ \emph{Visitation:} moving mass from $A$ to $B$ removes $A$'s downstream
+   diversity.};
+\end{tikzpicture}
+\caption{A branch can be locally maximally entropic while a small change in which
+branch is visited destroys most of the downstream trajectory diversity. Token-level
+entropy control sees only the first fact.}
+\label{fig:branch}
+\end{figure}
 
-We derive that term into an estimable form. Causality turns it into a REINFORCE
-estimator whose reward-to-go is the remaining conditional entropy $\Htogo$, and a
-baseline from rollouts sharing a prefix makes it a per-token advantage $\AH$. Plain
-group rollouts almost never share prefixes, so we schedule the sharing with a fixed
-tree, which we use only as a device for the estimator. Because $\AH$ is a deviation
-from a sibling mean it sums to zero over each sibling set: it cannot raise the
-average weight at branch points, only spread siblings apart. That gives the
-experiment its target. If the correction cannot move the average, the aggregate
-entropy curve should move when the damping apparatus is switched and should not move
-when only $\AH$'s contents change --- a prediction that can fail.
+We make this precise. Write $\Htraj(\pit \mid x)$ for the entropy of the distribution
+over whole responses. Its gradient splits, by the product rule and with no
+approximation, into a \emph{local} term that holds visited states fixed --- what a
+per-token estimate measures --- and a \emph{visitation} term that holds per-state
+entropies fixed and differentiates the probability of reaching each state. The local
+estimate is proportional to the deviation of the sampled token's surprisal from its
+mean; it vanishes at a flat branch point, correctly, since the entropy loss there is
+second order. The visitation term's prefactor $1 - \pit(y_t \mid s_t)$ is largest at
+those same points.
+
+The missing term is estimable. Causality turns it into a REINFORCE estimator whose
+reward-to-go is the remaining conditional entropy $\Htogo$, and a baseline from
+rollouts that share a prefix turns that into a per-token advantage $\AH$. Plain group
+rollouts almost never share prefixes, so we schedule the sharing with a fixed tree,
+which we use only as a device for the estimator. Because $\AH$ is a deviation from a
+sibling mean it sums to zero over each sibling set: it changes which sibling is damped,
+not how much damping there is on average. This gives the experiment its target. The
+aggregate entropy curve --- the evidence usually offered for entropy control --- should
+move when the damping mechanism changes and should not move when only the
+branch-specific $\AH$ signal changes, a prediction that can fail.
 
 Our contributions are:
 \begin{itemize}\setlength\itemsep{1pt}
-\item an exact two-channel decomposition of the trajectory-entropy gradient, and a
-      proof that the channel current token-level methods capture is anti-correlated
-      with the one they miss (Section~\ref{sec:channels});
-\item the missing channel as a per-token advantage $\AH$, exact up to estimating
-      $\Htogo$, with a ledger of every approximation and the sign of its error, and a
-      bound on how many positions can carry it under \emph{any} sampler
-      (Section~\ref{sec:ahdef}, Appendices~\ref{sec:approx}--\ref{sec:ledger});
-\item a five-arm design that separates $\AH$'s \emph{value} from the apparatus that
-      delivers it, and the dissociation it predicts, measured over seeds:
-      the aggregate entropy tracks the apparatus, not $\AH$
-      (Sections~\ref{sec:setup}--\ref{sec:res:entropy}).
+\item \textbf{An exact decomposition} of the trajectory-entropy gradient into a local
+      term, which changes conditional entropy at visited states, and a visitation term,
+      which changes which states the policy reaches (Section~\ref{sec:channels}).
+\item \textbf{A structural mismatch:} the local estimator used by current token-level
+      methods vanishes at flat branch points, precisely where the visitation prefactor
+      is largest, so the omission cannot be repaired within the local channel
+      (Section~\ref{sec:blind}).
+\item \textbf{An estimable visitation term:} a per-token REINFORCE advantage $\AH$ whose
+      reward-to-go is the remaining conditional entropy, with a sibling-prefix baseline,
+      a ledger of every approximation and the sign of its error, and a bound on how many
+      positions can carry it under any sampler (Section~\ref{sec:ahdef}).
+\item \textbf{A diagnostic consequence:} because the correction is mean-preserving within
+      sibling sets, aggregate token entropy is not an appropriate diagnostic for whether
+      it acts (Section~\ref{sec:zerosum}).
+\item \textbf{An experiment} with five arms that separates changes to the damping
+      mechanism from changes to the branch-specific signal and observes the predicted
+      dissociation in aggregate entropy (Sections~\ref{sec:setup}--\ref{sec:res:entropy}).
 \end{itemize}
-
-We are equally explicit about what the campaign does not establish: an accuracy gain
-attributable to $\AH$. STEER-F is above the base method by $\num{Csignedsteeracc}$ in
-converged AIME24 accuracy over three paired seeds, but the registered test that
-isolates $\AH$'s value straddles zero, and we report it as a refutation
+We do not establish an accuracy gain from the correction: the pre-registered test of
+the $\AH$ signal against a signal-free control is not supported
 (Section~\ref{sec:res:contrasts}).
 
 \section{Background and Related Work}
@@ -182,15 +226,38 @@ evaluated at the sampled token and mapped into the band by $\alpha_u =
 \exp(-\alpha\,|\Om_u| / \max_v |\Om_v|)$, $\lambda_{\min} = e^{-\alpha}$, so the
 weight can only attenuate.
 
-\paragraph{Related work.} Entropy decay under policy-gradient fine-tuning is well
-documented \citep{cui2025bentropy}, and maximum-entropy regularization
-\citep{ziebart2008maximum,haarnoja2018soft} has been reported not to prevent it in
-RLVR \citep{rethinkingentropyreg}. \citet{wang2025dbeyond} show that training on a
-minority of high-entropy ``forking'' tokens suffices, which motivates a per-token
-treatment but selects tokens by local entropy. \citet{wu2025ainvisible} report
-token-level entropy staying high while answer diversity falls --- the signature of an
-unmanaged visitation channel. We use Medusa-style heads \citep{medusa} not for
-decoding but as an entropy forecaster. Appendix~\ref{sec:related} expands this.
+\paragraph{Entropy collapse in RLVR.} Entropy decay under policy-gradient fine-tuning
+of reasoning models is well documented and tied to the stall of improvement
+\citep{cui2025bentropy}; it is countered by an asymmetric clip
+\citep{yu2025dapo}, by restricting updates on high-covariance tokens
+\citep{cui2025bentropy}, or by KL control with reference resets over long training
+\citep{liu2025bprorl}.
+
+\paragraph{Entropy regularization.} Maximum-entropy reinforcement learning adds the
+policy entropy to the objective \citep{ziebart2008maximum,haarnoja2018soft}. In RLVR a
+naive entropy bonus has been reported not to prevent collapse and to degrade accuracy
+\citep{rethinkingentropyreg}, and maximum entropy can mislead policy optimization
+\citep{zhang2025cwhen}. Both bonus and KL act on conditional distributions at visited
+states, that is, on the local channel.
+
+\paragraph{Token-level intervention.} \citet{wang2025dbeyond} show that training on a
+minority of high-entropy ``forking'' tokens suffices, which motivates per-token
+treatment but selects tokens by local entropy. Other schemes shape advantages or
+rewards with token entropy \citep{cheng2025reasoning,tan2025gtpo,zhang2025dedge}.
+\citet{steer} estimate each token's first-order effect on conditional entropy, the
+estimator our analysis extends.
+
+\paragraph{Trajectory-level diversity.} Token-level entropy can stay high while the
+diversity of final answers falls \citep{wu2025ainvisible}, and explicit outcome-level
+exploration targets that diversity directly \citep{song2025outcome}. The visitation
+channel is a mechanism for the first observation: per-state entropies can be
+preserved while the trajectory distribution concentrates.
+
+Prior work either controls conditional entropy at visited states or selects tokens by
+local uncertainty. We instead differentiate the entropy of the trajectory distribution
+itself, which reveals a term caused by changes in which states the updated policy
+reaches. We use Medusa-style heads \citep{medusa} not for decoding but as an entropy
+forecaster. Appendix~\ref{sec:related} expands this section.
 
 \section{Two Channels}
 \label{sec:channels}
@@ -237,13 +304,14 @@ $H''(0) = -(k-1)/k^2$, so the local loss is entirely second order. Uniform branc
 points are locally safe, and an estimator that allocates them no protection is
 correct for its own objective.
 
-Meanwhile the visitation term's prefactor, derived in Appendix~\ref{sec:weights}, is
+The visitation term's prefactor, derived in Appendix~\ref{sec:weights}, is
 $1 - \pi_a$, which tends to $1$ as the distribution flattens --- where a group of
 samples is also certain to diverge. Table~\ref{tab:anticorr} evaluates both on a
-family interpolating between confident and flat distributions: $|\Om|$ peaks where
-the model is confident but a tail token was sampled, and is zero where divergence is
-certain and the visitation prefactor is maximal. The local term is anti-correlated
-with the term it omits.
+family of distributions from confident to flat: $|\Om|$ is largest where the model is
+confident but a tail token was sampled, and is zero where divergence is certain and
+the visitation prefactor is maximal. The local signal vanishes precisely in the
+regime where the visitation prefactor is largest, so no refinement of the local term
+recovers what it omits.
 
 \begin{table}[t]
 \centering
@@ -260,9 +328,9 @@ unif.\ $k{=}10$    & 2.30 & \textbf{1.00} & \textbf{0.000} & \textbf{0.900} \\
 unif.\ $k{=}100$   & 4.61 & \textbf{1.00} & \textbf{0.000} & \textbf{0.990} \\
 \bottomrule
 \end{tabular}
-\caption{The two channels are ordered oppositely. Top token has mass $q$, the rest
-spread uniformly over $m$ tokens; $P(\text{split})$ is the probability that $n{=}8$
-samples do not all agree.}
+\caption{The two channels are oppositely ordered around flat branch points. Top token
+has mass $q$, the rest spread uniformly over $m$ tokens; $P(\text{split})$ is the
+probability that $n{=}8$ samples do not all agree.}
 \label{tab:anticorr}
 \end{table}
 
@@ -311,8 +379,10 @@ $2(n-1)/T$ under \emph{any} sampler --- about one percent at $T \approx 10^3$.
 On each sibling set $\sum_j \AH(s_u, y^{(j)}_u) = 0$. A correction built on $\AH$
 therefore cannot change the average weight at branch tokens, only spread siblings
 apart; this is forced by unbiasedness, not a defect. ``Mean entropy at branch points
-rose'' is \emph{not} a prediction of this method, and the aggregate entropy over all
-tokens should barely register it. A hypothesis that raises the mean is different and
+rose'' is \emph{not} a prediction of this method, and an average over all response
+tokens should barely register it: aggregate token entropy is not a diagnostic for
+whether the correction acts. The prediction it does make is that the spread
+\emph{across siblings} widens. A hypothesis that raises the mean is different and
 weaker, and we run it as a control.
 
 \paragraph{From $\AH$ to a token weight.} $\Htogo$ involves states the update has not
@@ -329,30 +399,22 @@ absorbs it (fitted $a_1 = 1.03$, $a_{k\ge2} \le 0.19$). Under the base method's
 Assumption~\ref{ass:indep}, one step moves the sampled token's log-probability by
 $\eta w_u (1 - \pi_u)$, where $w_u$ is the clipped advantage coefficient, giving the
 visitation prediction $\mathrm{visit}_u = \eta w_u (1-\pi_u)\,\mathrm{clip}(\AH,
-\pm c)$. Because $\Om$ is heavy-tailed, we add it \emph{after} the base map, as a
-bounded adjustment on the support $\mathcal{S} = \{u : \mathrm{visit}_u \ne 0\}$:
+\pm c)$. When mass moves toward a branch with $\AH > 0$ trajectory entropy rises; when
+it moves toward one with $\AH < 0$, into a dead end, the abandoned siblings' diversity
+is destroyed --- the collapse path (L) cannot see. Because $\Om$ is heavy-tailed, we
+add the visitation term \emph{after} the base map, as a bounded adjustment on the
+support $\mathcal{S} = \{u : \mathrm{visit}_u \ne 0\}$:
 \begin{equation}
 \alpha^{\mathrm{f}}_u = \mathrm{clamp}\bigl(\alpha_u
   + \lambda\, b\, \tanh(\mathrm{visit}_u / \rho),\ \lambda_{\min}, 1\bigr),
 \label{eq:combine}
 \end{equation}
-with $b$ the band width and $\rho$ the RMS of $\mathrm{visit}$ over $\mathcal{S}$. At
-$\lambda = 0$ the pipeline is bitwise the base method. The $\tanh$ preserves the sign
-of the visitation term and caps one token's movement at $\lambda b$; the RMS is taken
-over $\mathcal{S}$ alone, so the correction's size does not depend on how sparse
-branch points are.
-
-\paragraph{Sign quadrants.} When mass moves toward a branch ($\Delta\log\pi_u > 0$)
-whose $\AH > 0$, it moves toward a richer sub-tree than its siblings' and trajectory
-entropy rises. When it moves toward a branch with $\AH < 0$, it moves into a dead end
-and the diversity carried by the abandoned siblings is destroyed --- the collapse path
-that (L) is structurally unable to see.
-
-\paragraph{The approximation ledger.} Table~\ref{tab:ledger} lists every departure from
-Eq.~\eqref{eq:twochannel}; Appendix~\ref{sec:approx} derives each. The strongest are A2,
+with $b$ the band width and $\rho$ the RMS of $\mathrm{visit}$ over $\mathcal{S}$. The
+$\tanh$ preserves the sign and caps one token's movement at $\lambda b$; at
+$\lambda = 0$ the pipeline is bitwise the base method. Table~\ref{tab:ledger} lists
+every approximation and Appendix~\ref{sec:approx} derives each. The strongest are A2,
 whose error has a known sign and monotonicity, and B2, which is false for a network
-with shared parameters, has no corrective mechanism, and is inherited from the base
-method rather than introduced here.
+with shared parameters and is inherited from the base method.
 
 \begin{table*}[t]
 \centering
@@ -392,13 +454,15 @@ $\varepsilon_{\mathrm{high}} = 0.28$). The base method's map uses $\lambda_{\min
 shares the data seed per run and the initial checkpoint. Appendix~\ref{sec:setup-app}
 lists the rest.
 
-\paragraph{Five arms.} A comparison of the base method with the full method changes
-the sampler and $\lambda$ at once. We therefore add two arms that keep the whole
-apparatus and destroy only the information in $\AH$ (Table~\ref{tab:arms}).
-\textsc{uniform} applies the same attenuation to every position in the support --- the
-``raise the mean'' hypothesis. \textsc{permuted} shuffles $\AH$ within each sibling
-set, so support, magnitudes and the zero sum survive while the pairing between a
-branch and its score is destroyed.
+\paragraph{Five arms.} We call everything except the content of $\AH$ --- the tree
+sampler, the support $\mathcal{S}$ and the token-weight damping --- the \emph{damping
+mechanism}. Comparing the base method with the full method changes the mechanism and
+the signal at once, so we add two arms that keep the whole mechanism and remove only
+the branch-specific $\AH$ signal (Table~\ref{tab:arms}). \textsc{uniform} applies the
+same attenuation to every position in the support: it removes the $\AH$ signal while
+preserving its support, which implements the ``raise the mean'' hypothesis.
+\textsc{permuted} shuffles $\AH$ within each sibling set: it preserves the distribution
+of $\AH$ magnitudes and the zero sum but destroys the branch--score assignment.
 
 \begin{table}[t]
 \centering
@@ -415,8 +479,8 @@ permuted  & $.25$ & tree  & $\AH$ shuffled \\
 \textbf{STEER-F} & $.25$ & tree & $\AH$ as derived \\
 \bottomrule
 \end{tabular}
-\caption{The five arms. \textsc{uniform} and \textsc{permuted} run the full pipeline
-with $\AH$'s value destroyed in two different ways.}
+\caption{The five arms. \textsc{uniform} and \textsc{permuted} keep the damping
+mechanism and remove the branch-specific $\AH$ signal in two different ways.}
 \label{tab:arms}
 \end{table}
 
@@ -428,18 +492,11 @@ mean, arms are paired within a seed, and the test is a paired $t$ with
 $\mathrm{df} = n - 1$, over the $\num{Nseedsused}$ seeds on which all five arms
 finished ($\num{Seedset}$). We report acc@32, maj@32 and their difference (uplift).
 The logged entropy is a token mean, i.e.\ $\Htraj$ divided by mean length. The
-analysis plan was registered before the runs (Appendix~\ref{sec:appendix-prereg}).
+analysis plan was registered before the runs (Appendix~\ref{sec:appendix-prereg}), and
+every figure is recomputed from the training logs by one script.
 
 \section{Results}
 \label{sec:results}
-
-The results carry unequal weight, and we order them by it. The dissociation of
-Section~\ref{sec:res:entropy} tests a prediction the construction makes before any
-run, as a contrast between groups of contrasts whose $|t|$ do not overlap; that is the
-structural claim. The accuracy contrasts after it rest on $\num{Nsignedgrpo}$ paired
-seeds each and do not all survive, and one registered falsification condition is met.
-Every figure is recomputed from the training logs by one script; the logs are in the
-supplementary material.
 
 \subsection{Converged window}
 \label{sec:res:main}
@@ -465,12 +522,12 @@ paired contrast of Table~\ref{tab:entropy}. Entropy is the token-mean quantity.}
 \label{tab:plateau}
 \end{table}
 
-Table~\ref{tab:plateau} averages each arm over the converged window. On accuracy the
-three arms that do not carry $\AH$'s value --- \textsc{steer}, \textsc{uniform},
-\textsc{permuted} --- sit below plain GRPO and STEER-F is the only arm above it, by
-less than GRPO's standard error across seeds. On entropy GRPO holds the most and the
-four damped arms sit close together. The two columns are neither aligned nor
-reversed; read as contrasts, they separate. Table~\ref{tab:curve} gives one seed's full trajectory.
+Table~\ref{tab:plateau} averages each arm over the converged window, and
+Table~\ref{tab:curve} gives one seed's full trajectory. The three arms without the
+$\AH$ signal --- \textsc{steer}, \textsc{uniform}, \textsc{permuted} --- sit below
+GRPO on accuracy and STEER-F above it, by less than GRPO's standard error across
+seeds. On entropy GRPO holds the most and the four damped arms sit close together. The
+two columns are neither aligned nor reversed; read as contrasts, they separate.
 
 \begin{table}[t]
 \centering
@@ -502,15 +559,7 @@ Tables~\ref{tab:plateau} and~\ref{tab:contrast}.}
 \label{tab:curve}
 \end{table}
 
-\paragraph{Where the majority-vote gain comes from.} Against GRPO the
-majority-vote gain splits into a per-sample part and a structural part,
-$\num{Csignedgrpomaj} = \num{Csignedgrpoacc} + \num{Csignedgrpouplift}$ (accuracy plus
-uplift): most of it is that correct samples agree more and wrong ones less. The
-$\lambda = 0$ tree arm of Section~\ref{sec:res:apparatus} reaches an uplift of
-$\num{Rlamzerouplift}$ against STEER-F's $\num{Rsigneduplift}$, so on this evidence the
-structural part belongs mostly to the sampler, not to $\AH$.
-
-\subsection{The aggregate entropy moves with the apparatus, not with $\AH$}
+\subsection{Aggregate entropy tracks the damping mechanism, not the $\AH$ signal}
 \label{sec:res:entropy}
 
 \begin{table}[t]
@@ -521,11 +570,11 @@ structural part belongs mostly to the sampler, not to $\AH$.
 \toprule
 contrast & $n$ & $\Delta$ent. & $t$ & $\Delta$acc & $t$ \\
 \midrule
-\multicolumn{6}{@{}l}{\emph{the apparatus changes, $\AH$ does not}} \\
+\multicolumn{6}{@{}l}{\emph{the damping mechanism changes, the $\AH$ signal does not}} \\
 \textsc{steer} $-$ GRPO & \num{Nsteergrpo} & $\num{Csteergrpoentropy}$ & $\num{Tsteergrpoentropy}$ & $\num{Csteergrpoacc}$ & $\num{Tsteergrpoacc}$ \\
 \textsc{unif} $-$ \textsc{steer} & \num{Nuniformsteer} & $\num{Cuniformsteerentropy}$ & $\num{Tuniformsteerentropy}$ & $\num{Cuniformsteeracc}$ & $\num{Tuniformsteeracc}$ \\
 \midrule
-\multicolumn{6}{@{}l}{\emph{$\AH$ changes, the apparatus does not}} \\
+\multicolumn{6}{@{}l}{\emph{the $\AH$ signal changes, the damping mechanism does not}} \\
 STEER-F $-$ \textsc{unif} & \num{Nsigneduniform} & $\num{Csigneduniformentropy}$ & $\num{Tsigneduniformentropy}$ & $\num{Csigneduniformacc}$ & $\num{Tsigneduniformacc}$ \\
 STEER-F $-$ \textsc{perm} & \num{Nsignedpermuted} & $\num{Csignedpermutedentropy}$ & \num{Tsignedpermutedentropy} & $\num{Csignedpermutedacc}$ & \num{Tsignedpermutedacc} \\
 \midrule
@@ -540,93 +589,61 @@ Appendix Table~\ref{tab:contrast}.}
 \label{tab:entropy}
 \end{table}
 
-\paragraph{The prediction, fixed in advance.} The method cannot hold the aggregate
-entropy up: $\AH$ is non-zero on at most $2(n-1)/T$ of positions and redistributes
-weight among siblings without adding any (Section~\ref{sec:zerosum}). An intervention
-this sparse and mean-preserving should leave an average over every response token
-close to where it found it. Both statements were in the manuscript before the
+\paragraph{Question.} Does aggregate entropy respond to the $\AH$ signal itself? The
+construction says it should not: $\AH$ is non-zero on at most $2(n-1)/T$ of positions
+and redistributes weight among siblings without adding any
+(Section~\ref{sec:zerosum}). Both statements were in the manuscript before the
 campaign was launched.
 
-\paragraph{What the seeds show.} Table~\ref{tab:entropy} groups the contrasts by what
-each changes, and the grouping separates them. The two contrasts that change the
-apparatus move the aggregate: turning the damping on costs $\num{Csteergrpoentropy}$
-($t = \num{Tsteergrpoentropy}$), and adding the tree with uniform damping returns
-$\num{Cuniformsteerentropy}$ ($t = \num{Tuniformsteerentropy}$). The contrasts that
-hold the apparatus fixed and change only what $\AH$ contains move it by
-$\num{Csigneduniformentropy}$ ($t = \num{Tsigneduniformentropy}$) and
-$\num{Csignedpermutedentropy}$ ($t = \num{Tsignedpermutedentropy}$). The smaller
-apparatus effect is more than twice the larger $\AH$ effect, and the two groups' $|t|$
-do not overlap. Accuracy runs the other way: the $\AH$ contrasts give
-$\num{Csigneduniformacc}$ and $\num{Csignedpermutedacc}$, the apparatus contrasts
-$\num{Csteergrpoacc}$ and $\num{Cuniformsteeracc}$. The quantity that moves the
-aggregate entropy is the damping apparatus; the claim is the contrast \emph{between
-groups}, not any single row. Two cautions travel with it: a small difference that
-reproduces across seeds can reach a large $t$, as the \textsc{permuted} row does, and
-$\num{Nsigneduniform}$ seeds let us say the aggregate does not move \emph{much} when
-$\AH$ changes, not that it is unchanged.
+\paragraph{Result.} Across all three paired seeds, changing the damping mechanism
+produces substantially larger shifts in aggregate entropy than changing the $\AH$
+signal while holding the mechanism fixed (Table~\ref{tab:entropy}). Turning the
+damping on shifts it by $\num{Csteergrpoentropy}$, and adding the tree with uniform
+damping by $\num{Cuniformsteerentropy}$; removing the $\AH$ signal shifts it by
+$\num{Csigneduniformentropy}$, and destroying the branch--score assignment by
+$\num{Csignedpermutedentropy}$. The smaller mechanism effect is more than twice the
+larger signal effect. Accuracy runs the other way: the signal contrasts give
+$\num{Csigneduniformacc}$ and $\num{Csignedpermutedacc}$, the mechanism contrasts
+$\num{Csteergrpoacc}$ and $\num{Cuniformsteeracc}$.
 
-\paragraph{What the method does predict, and what is unmeasured.} The zero sum
-predicts that the \emph{spread across siblings} widens. No quantity logged in these
-runs tests it: the trainer's branch-entropy monitor selects a top decile of $\AH$, a
-tenth of all tokens, against a support an eighth that size, so its reading is not an
-entropy at branch points (Appendix~\ref{sec:res:diag}). The pre-registration also
-fixed a condition on the ordering of arm means by entropy and accuracy; we retire it
-rather than score it, because it treats the aggregate as a signal about $\AH$, which
-the construction says it is not, and because the ordering flips with the seed set
-(Appendix~\ref{sec:res:entropy-app}). We claim nothing from it in either direction,
-and the test the zero sum does call for --- the entropy split restricted to
-$\AH \ne 0$, the predicate the correction itself uses --- is instrumented and
-registered for future runs, after this retirement rather than before it.
+\paragraph{Interpretation.} Aggregate entropy primarily reflects the damping mechanism
+rather than the branch-specific $\AH$ signal, which is the dissociation the zero sum
+predicts and the sense in which this is not a method for suppressing entropy.
 
-\subsection{Does $\AH$'s value matter for accuracy?}
+\paragraph{Caveat.} Three paired seeds establish the qualitative pattern more strongly
+than its effect sizes; a small difference that reproduces across seeds can still reach
+a large $t$, as the \textsc{permuted} row does. The positive prediction --- that the
+spread across siblings widens --- is not measured by any quantity these runs log
+(Appendix~\ref{sec:res:diag}); a registered condition on the ordering of arm means was
+retired rather than scored, for reasons given in Appendix~\ref{sec:res:entropy-app}.
+
+\subsection{Does the branch-specific $\AH$ signal matter for accuracy?}
 \label{sec:res:contrasts}
 
-\paragraph{A pre-registered falsification condition is met.} The registration named
-the \textsc{uniform} contrast the claim of the paper: \emph{if STEER-F $-$
-\textsc{uniform} straddles zero across seeds, the forecast's value does not matter}.
-On accuracy it straddles: over $\num{Nsigneduniform}$ paired seeds it runs from
-$\num{CLosigneduniformacc}$ to $\num{CHisigneduniformacc}$, with
-$\num{CNegsigneduniformacc}$ negative. We report this as a refutation, and we do not
-rescue it with the mean or with majority vote, where the same contrast happens not to
-straddle. The other three registered conditions did not trigger. STEER-F $-$
-\textsc{permuted}, which keeps $\AH$'s magnitudes and destroys only its pairing, does
-not straddle ($\num{CLosignedpermutedacc}$ to $\num{CHisignedpermutedacc}$,
-$p = \num{Psignedpermutedacc}$); the arms are not ordered alike by entropy and
-accuracy; and the mean token weight stays at $\num{Rsignedtwmean}$. The
-\emph{pairing} of $\AH$ to a branch survives its test and its \emph{value} does not.
-A reader who weights the registration above our reframing should read the accuracy
-claim as refuted at this seed count.
+\paragraph{The pre-registered test.} The registration made STEER-F $-$
+\textsc{uniform} the accuracy test: \emph{if it straddles zero across seeds, the $\AH$
+signal does not matter}. It straddles: over $\num{Nsigneduniform}$ paired seeds it runs
+from $\num{CLosigneduniformacc}$ to $\num{CHisigneduniformacc}$, with
+$\num{CNegsigneduniformacc}$ negative, and we do not rescue it with the mean or with
+majority vote. The pre-registered accuracy hypothesis is therefore not supported, and
+we make no claim that $\AH$ improves accuracy. The other three registered conditions
+did not trigger: STEER-F $-$ \textsc{permuted}, which keeps the magnitudes and destroys
+only the branch--score assignment, does not straddle ($\num{CLosignedpermutedacc}$ to
+$\num{CHisignedpermutedacc}$); the arms are not ordered alike by entropy and accuracy;
+and the mean token weight stays at $\num{Rsignedtwmean}$.
 
-\paragraph{The headline gaps.} Against \textsc{steer} the gap is
+\paragraph{The remaining gaps.} Against \textsc{steer} the gap is
 $\num{Csignedsteeracc}$ ($p = \num{Psignedsteeracc}$), but \textsc{steer} lands below
 GRPO here although its paper places it above, a discrepancy we could not attribute
 (Appendix~\ref{sec:res:ablate}). Against GRPO the gap of $\num{Csignedgrpoacc}$ is a
-fraction of GRPO's own spread across seeds, $\num{Sgrpoacc}$, and it is carried by
-the seed on which STEER-F also had more wall clock: $\num{Cmlosignedgrpoacc}$ there
-against $\num{Cmhisignedgrpoacc}$ where equal steps are equal compute
-(Appendix~\ref{sec:res:compute}). On six benchmarks the registered secondary check
-counts STEER-F above \textsc{uniform} on $\num{Dirconsistency}$ of six, which the
-registered thresholds call \emph{\num{Dirverdict}}
-(Appendix~\ref{sec:res:bench}). This paper does not show an accuracy gain
-attributable to $\AH$.
+fraction of GRPO's spread across seeds, $\num{Sgrpoacc}$, and is $\num{Cmhisignedgrpoacc}$
+on the seeds where equal steps are equal compute (Appendix~\ref{sec:res:compute}). On
+six benchmarks the registered secondary check counts STEER-F above \textsc{uniform} on
+$\num{Dirconsistency}$ of six, which its thresholds call
+\emph{\num{Dirverdict}} (Appendix~\ref{sec:res:bench}).
 
-\subsection{What the apparatus contributes}
+\subsection{What the sampler and the forecaster contribute}
 \label{sec:res:apparatus}
-
-Three single-seed measurements (Appendix~\ref{sec:res:ablate}) say where the rest
-of the effect sits. \emph{The sampler:} the tree with the forecast switched off
-($\lambda = 0$) reaches $\num{Rlamzeroacc}$ against \textsc{steer}'s
-$\num{Rsteeracc}$ and STEER-F's $\num{Rsignedacc}$, and all of STEER-F's
-majority-vote margin; we report that gain and leave it to work on structured
-sampling, since the tree is here only to give $\AH$ siblings. \emph{The forecaster:}
-on a frozen policy, applying the same sibling operator to the policy's own
-next-token entropy reproduces $\AH$ at $R^2 = \num{Locrsq}$, with a magnitude ratio
-of $\num{Locratio}$ (Appendix~\ref{sec:res:locality}); an \textsc{oracle} arm that
-reads $\Htogo$ from realized entropy is $\num{Fsignedoraclesaving}\%$ cheaper per step
-and $\num{Fsignedoracleacc}$ behind on accuracy at one seed, so we keep the heads
-without claiming they are necessary. \emph{The support:} the tree arms carry a
-non-zero $\AH$ on $\num{Rsignedbranchfrac}$ of positions against a ceiling of
-$\num{Supportbound}$, so the sampler nearly saturates what the combinatorics allow.
 
 \begin{table}[t]
 \centering
@@ -671,28 +688,32 @@ listed in Appendix~\ref{sec:appendix-prereg}.}
 \label{tab:followups}
 \end{table}
 
-\paragraph{Seeds, machines, and cost.} The spread across seeds is the number that
-governs every accuracy contrast here. GRPO's converged accuracy moves by
-$\num{Sgrpoacc}$ across its seeds and STEER-F's by $\num{Ssignedacc}$, against a
-re-sampling noise of about $.004$ between two validations of identical weights. A
-seed index also names a machine: each arm's seeds ran on one two-GPU and two
-four-GPU boxes, a mix that is identical across arms and cancels in every pair
-(Appendix~\ref{sec:res:seeds}). On the four-GPU box a STEER-F step costs
-$\num{Costoverheadhi}\%$ more than \textsc{steer}'s; the cost is the tree rollout and
-the head forward pass, not the $\AH$ computation, which is a subtraction over a mask
-(Appendix~\ref{sec:res:cost}).
+Single-seed follow-ups (Table~\ref{tab:followups}) locate the rest of the effect.
+\emph{The sampler:} the tree with the forecast switched off ($\lambda = 0$) reaches
+$\num{Rlamzeroacc}$ against \textsc{steer}'s $\num{Rsteeracc}$ and STEER-F's
+$\num{Rsignedacc}$, and an uplift of $\num{Rlamzerouplift}$ against STEER-F's
+$\num{Rsigneduplift}$, so most of the majority-vote structure belongs to the sampler;
+we report this and leave it to work on structured sampling, since the tree is here
+only to give $\AH$ siblings. \emph{The forecaster:} on a frozen policy, the same
+sibling operator applied to the policy's own next-token entropy reproduces $\AH$ at
+$R^2 = \num{Locrsq}$ (Appendix~\ref{sec:res:locality}); an \textsc{oracle} arm reading
+$\Htogo$ from realized entropy is $\num{Fsignedoraclesaving}\%$ cheaper per step and
+$\num{Fsignedoracleacc}$ behind at one seed, so we keep the heads without claiming they
+are necessary. \emph{The support:} the tree arms carry a non-zero $\AH$ on
+$\num{Rsignedbranchfrac}$ of positions against a ceiling of $\num{Supportbound}$. On
+the four-GPU box a STEER-F step costs $\num{Costoverheadhi}\%$ more than
+\textsc{steer}'s (Appendix~\ref{sec:res:cost}).
 
 \subsection{Against the published numbers}
 \label{sec:res:published}
 
 We also ran STEER-F under the base method's own protocol \citep[App.~E]{steer}: two
-independent $200$-step runs (data seeds $1$, $2$), AIME24 validation every $10$
-steps, the AIME24-best checkpoint of each run evaluated on six benchmarks, averaged
-over the two runs. Everything else is Section~\ref{sec:setup}'s configuration, except
-that the tree uses two roots cut at $\{64, 192\}$, chosen after the five-arm campaign
-on training prompts to keep the siblings while making fewer rewards in a group tie;
-the choice is exploratory. Table~\ref{tab:reported} sets the result beside the
-base method's published 1.5B table, which also reports GRPO and the untrained model.
+independent $200$-step runs (data seeds $1$, $2$), AIME24 validation every $10$ steps,
+and the AIME24-best checkpoint of each run evaluated on six benchmarks and averaged.
+The tree uses two roots cut at $\{64, 192\}$, chosen after the five-arm campaign on
+training prompts to keep the siblings while making fewer rewards in a group tie; the
+choice is exploratory. Table~\ref{tab:reported} sets the result beside the base
+method's published 1.5B table.
 
 \begin{table}[t]
 \centering
@@ -732,187 +753,76 @@ attempt stopped before producing a metric; the sampling settings are the same.}
 \label{tab:reported}
 \end{table}
 
-STEER-F's two-run six-benchmark mean is $\num{ProtobestMeanAvg}$, against
-$\num{ProtorefSteerAvg}$ for the base method and $\num{ProtorefGrpoAvg}$ for GRPO as
-reported: lower than the former on $\num{ProtocmpSteerBelow}$ of six benchmarks (not
-on \num{ProtocmpSteerNotbelow}, the column the selection used) and higher than the
-latter on $\num{ProtocmpGrpoAbove}$. The comparison is uncontrolled --- the quoted rows
-were not re-run, used different hardware and code, and state no run-to-run spread ---
-so it places the method between the two reported rows and below the base method as
-reported, without saying how much of either gap is the method. Appendix~\ref{sec:reported}
-gives the full protocol and checks.
+STEER-F's two-run mean is $\num{ProtobestMeanAvg}$,
+against $\num{ProtorefSteerAvg}$ for the base method and $\num{ProtorefGrpoAvg}$ for
+GRPO as reported: lower than the former on $\num{ProtocmpSteerBelow}$ of six benchmarks
+(not on \num{ProtocmpSteerNotbelow}, the selection column) and higher than the latter
+on $\num{ProtocmpGrpoAbove}$. The quoted rows were not re-run and used different
+hardware and code, so the comparison places the method between the two reported rows
+without ranking it (Appendix~\ref{sec:reported}).
 
 \section{Conclusion}
 \label{sec:conclusion}
 
-The gradient of trajectory entropy has two terms, and token-level entropy controls
-estimate one. The estimated term vanishes exactly where the omitted term is largest,
-for a correct reason, so the gap cannot be closed by improving the estimator. The
-omitted term is a REINFORCE estimator whose reward-to-go is the remaining conditional
-entropy, and a fixed tree supplies the sibling baseline that makes it estimable. The
-resulting correction is mean-preserving by construction, and the campaign measures
-that consequence: the aggregate entropy moves with the damping apparatus and not with
-what $\AH$ carries. The accuracy evidence is weaker and we leave it so --- the
-registered test of $\AH$'s value is met as a refutation. A practitioner should read
-this paper as an account of where token-level entropy control acts, and of why an
-aggregate entropy curve cannot certify a correction of this kind, not as a
-recommendation to adopt the method for accuracy. Whether a cheaper estimator of
-$\Htogo$ suffices, and whether structured sampling helps RLVR in its own right, are
-questions it raises and does not answer.
+Current token-level entropy control in RLVR accounts for how visited states sharpen,
+but not for how policy updates change which states are visited. The gradient of
+trajectory entropy has both terms; the local estimator vanishes, for a correct reason,
+exactly where the visitation term is largest, so the omission cannot be repaired by a
+better local estimator. The missing term is a REINFORCE estimator whose reward-to-go
+is the remaining conditional entropy, and a fixed tree supplies the sibling baseline
+that makes it estimable. The resulting correction is mean-preserving, so it can change
+trajectory diversity without a corresponding change in aggregate token entropy, and the
+experiment observes that dissociation: aggregate entropy tracks the damping mechanism,
+not the $\AH$ signal. We do not establish an accuracy benefit, and this paper should be
+read as an account of where token-level entropy control acts and of what an aggregate
+entropy curve cannot see, not as a recommendation to adopt the method for accuracy.
+Whether a cheaper estimator of $\Htogo$ suffices, and whether structured sampling helps
+RLVR in its own right, remain open.
 
 
 \section*{Limitations}
 
-\paragraph{A pre-registered falsification condition is met.}
-Appendix~\ref{sec:appendix-prereg} fixed, before these runs, that if
-$\text{STEER-F} - \textsc{uniform}$ straddled zero across seeds then the forecast's
-\emph{value} does not matter and the apparatus explains the effect. On the registered
-primary endpoint it straddles: $\num{CLosigneduniformacc}$ to
-$\num{CHisigneduniformacc}$ over $\num{Nsigneduniform}$ paired seeds, with
-$\num{CNegsigneduniformacc}$ negative. That clause calls this the claim of the paper,
-and we do not renegotiate it here. What it does not reach is the companion condition:
-$\text{STEER-F} - \textsc{permuted}$, which destroys only the pairing of $\AH$ to a
-branch and keeps its magnitudes, does not straddle
-($\num{CNegsignedpermutedacc}$ of $\num{Nsignedpermuted}$ negative), nor do the two
-structural conditions on the entropy ordering and on the mean token weight. The
-honest summary is that the pairing survives its registered test and the value does
-not, at this seed count, on this benchmark. Section~\ref{sec:res:contrasts} states the
-tension that leaves between the pre-registration's choice of central claim and the one
-this paper leads with.
+\paragraph{Empirical scope.} Every result is measured on one $1.5$B
+mathematics-specialized model, on $\num{Nseedsused}$ paired seeds
+($\num{Seedset}$; the registration planned five, Appendix~\ref{sec:appendix-prereg}),
+and validated on AIME24's $30$ problems, where one evaluation carries an
+across-problem standard error of $\num{SEaime}$. The seed count bounds effect sizes
+rather than the structural result, which is a comparison between groups of contrasts;
+but the accuracy gaps are inside the spread across seeds --- GRPO's converged accuracy
+moves by $\num{Sgrpoacc}$ across its seeds --- and the pre-registered accuracy test of
+the $\AH$ signal is not supported (Section~\ref{sec:res:contrasts}). The six-benchmark
+check covers one seed per arm. The base method lands below GRPO in our runs, where its
+paper reports it above; we ran it at its paper's $\lambda_{\min} = 0.7$ rather than its
+launcher's $0.8$, on $110$ rather than $200$ steps, and cannot separate these causes
+(Appendix~\ref{sec:res:ablate}). This reaches STEER-F $-$ \textsc{steer} and
+\textsc{steer} $-$ GRPO, not the contrasts against \textsc{uniform} and
+\textsc{permuted}, which hold every setting fixed. The comparison with published
+numbers (Section~\ref{sec:res:published}) is uncontrolled: the quoted rows were not
+re-run, our AIME24 column is the selection value and biased upward, and the sampler in
+those runs was chosen after the campaign.
 
-\paragraph{The forecaster does not earn its cost.}
-The calibration in Eq.~\eqref{eq:a3} suppresses heads beyond the first, so
-$\hat{H}_{\mathrm{togo}}$ is dominated by a single step ahead. This is the predicted
-behavior of Eq.~\eqref{eq:mi} rather than a bug, but
-Section~\ref{sec:res:locality} measures the consequence and it is worse than a
-short horizon: put through the same sibling baseline, the policy's own
-next-token entropy reproduces $\AH$ at $r = \num{Locadv}$ and
-$R^2 = \num{Locrsq}$, with the magnitudes in the ratio $\num{Locratio}$ that
-$\gamma_H a_1$ predicts. On that evidence the MTP heads, their warm-up and
-their calibration are machinery around a quantity the trainer already computes,
-and they carry the overhead of Section~\ref{sec:res:cost} to do it. The
-\textsc{oracle} arm of Table~\ref{tab:followups} is the direct test and it does not
-agree: made inside the training loop, the substitution saves
-$\num{Fsignedoraclesaving}\%$ of the step time and gives up
-$\num{Fsignedoracleacc}$ on the primary endpoint at the one seed it was run at. Both
-readings stand as measured. A correlation on a frozen policy does not predict a
-training loop, and one draw on each side does not overturn a correlation over
-$\num{Locgroups}$ prompts; whether the heads earn their cost is left open here, and
-the arm that closes it is the same arm at more seeds. What
-the measurement does not reach is the visitation channel itself: the local twin
-is not $\Om$, and it exists only because the tree supplies siblings to
-difference against. A forecaster whose error did not grow with $k$ would test
-the idea more sharply; a sequential forecaster is the obvious comparison and we
-have not run it.
+\paragraph{Estimator assumptions and efficiency.} The calibration suppresses heads
+beyond the first, so $\hat{H}_{\mathrm{togo}}$ is close to a one-step forecast, and on a
+frozen policy the policy's own next-token entropy reproduces $\AH$ at
+$R^2 = \num{Locrsq}$; the heads carry the step-time overhead of
+Appendix~\ref{sec:res:cost}. The in-loop \textsc{oracle} comparison favours the heads
+by $\num{Fsignedoracleacc}$ at one seed, which orders the two without sizing the
+difference; whether the heads earn their cost is open. Approximation B2, that an
+update does not change the conditional distribution at other positions, is false for
+a network with shared parameters; it is inherited from the base method, but our
+construction adds a second estimator that rests on it. The support is small by
+construction --- at most $2(n-1)/T$, about one position in eighty here.
 
-\paragraph{Few seeds, and a headline gap inside the spread.}
-Every contrast here carries a seed-level test, but on \num{Nseedsused} paired
-seeds, $\num{Seedset}$, for every row, which is few; and one of the three ran on a
-different machine from the other two (Section~\ref{sec:res:seeds}). This bounds the effect sizes rather than the
-structural result: the dissociation of Section~\ref{sec:res:entropy} is a comparison
-between two groups of contrasts whose $|t|$ do not overlap, and no single row carries
-it. The accuracy gap is the claim that does rest on one row, and
-Section~\ref{sec:res:seeds} shows the floor under it is not measured --- GRPO's
-converged-window accuracy moves \num{Sgrpoacc} across its \num{Nallgrpo} seeds,
-STEER-F's \num{Ssignedacc} across \num{Nallsigned}, and \textsc{permuted}'s only
-\num{Spermutedacc}, three estimates of the same noise differing by more than an order
-of magnitude, so none of them bounds the others. Against the largest, the headline
-\num{Csignedgrpoacc} is the smaller number. Rollout sampling is not seeded across
-processes, so re-running a configuration is a second draw rather than a restoration
---- which is what makes the repeat measurable and what makes it necessary. The
-pre-registration planned five seeds per arm; the campaign completed three for every
-arm (Appendix~\ref{sec:appendix-prereg} lists the deviations), which settles the
-structural result and not the size of the accuracy gap. At equal compute the gap is
-close to zero on the seeds where it can be measured (Section~\ref{sec:res:compute}).
-
-\paragraph{A single validation benchmark, and what our $t$-statistics do not cover.}
-Every claim rests on AIME 2024, which has $30$ problems. A single measurement of one
-arm carries an across-problem standard error of $\num{SEaime}$, so the gaps in
-Table~\ref{tab:contrast} are a fraction of one problem in absolute terms. The paired
-$t$ in that table is taken over seeds, so it speaks to re-running a configuration and
-not to a different set of questions; the within-run version, over the eight
-validation steps of a single trajectory, is reported separately in
-Appendix~\ref{sec:appendix-within} so the two are not read as one. The statistic
-that would speak to generalization --- the across-problem standard error of the
-\emph{paired} difference, in which per-problem difficulty cancels between two arms
-evaluated on the same questions --- is not recoverable from the \emph{training} logs,
-which record per-benchmark means and standard deviations rather than per-problem
-scores. The six-benchmark evaluation records the per-problem scores and so does carry
-it, on the three benchmarks large enough to support one; those figures are in
-Section~\ref{sec:res:bench}. What remains missing is the same statistic for AIME24
-itself, which is where every trajectory-level number in this paper is measured, and
-which is also the set the checkpoints were selected on. The gap this paragraph names
-is narrowed, not closed. The figure that narrows it rests on the seeds evaluated so
-far ($\num{Pairnseeds}$) and on one sample per problem at the validation temperature,
-so it carries the sampling noise of a single generation as well as the spread in
-difficulty; the evaluation covers one seed per arm, pairs \textsc{permuted} with
-nothing, and does not include \num{Benchmissing}.
-
-\paragraph{One prediction of the analysis is unmeasured.}
-Section~\ref{sec:blind} argues that the two channels are anti-correlated. The
-prefactor half of that claim is analytic and the $\AH$ half is inferred from a
-correlation with branch diversity; we have not measured their \emph{product} at real
-sibling-divergence positions in a live rollout. Until that measurement exists,
-Table~\ref{tab:anticorr} is a prediction rather than an observation.
-
-A second one is owed by the result we lead with. Section~\ref{sec:zerosum} says a
-sum-zero correction should widen the spread \emph{across siblings} at the positions
-it reaches, which is the positive claim behind the dissociation of
-Section~\ref{sec:res:entropy}; the release instruments the support-restricted split
-that tests it, and no run reported here carries it. The dissociation we do
-measure is the negative half --- that the aggregate does not move with $\AH$ --- and
-the two are not the same statement.
-
-\paragraph{The support is small by construction.}
-Section~\ref{sec:tree} bounds the fraction of positions carrying a non-zero $\AH$ at
-$2(n-1)/T$, on the order of a percent for our settings. Whether the effect scales
-with $n$, or with a branching schedule chosen adaptively rather than at fixed
-depths, is untested. The tree schedule is fixed and was introduced only to provide
-sibling-prefix support. Whether structured rollout sampling itself improves RLVR,
-and how branch positions should be chosen under a fixed compute budget, remain open
-questions; the single-seed sampler arm of Section~\ref{sec:res:ablate} is a reason
-to ask them and not an answer to either.
-
-\paragraph{The base method does not reproduce its reported gain.} We run the
-base method with $\lambda_{\min} = 0.7$, the value its paper sets; its released
-launcher uses $0.8$, and both lie in the range its paper reports as performing
-consistently. Under our schedule it lands below GRPO, where its authors report it
-above, and Section~\ref{sec:res:ablate} lists the setting differences we cannot
-separate: schedule length, checkpoint rule and number of runs. We did not run it at
-the released $0.8$ or at its full schedule, and we did not tune $\lambda_{\min}$ per
-arm.
-
-What this does not reach is the claim the paper makes. All four damped arms carry
-the same $\lambda_{\min}$, so it cancels between any two of them, and the
-contrasts that separate the forecast's value from its apparatus --- STEER-F
-against \textsc{uniform} and against \textsc{permuted} --- hold it fixed along
-with everything else. The two contrasts the discrepancy does reach, STEER-F $-$
-\textsc{steer} and \textsc{steer} $-$ GRPO, are reported with it stated.
-
-\paragraph{The comparison with published numbers is not controlled.}
-Section~\ref{sec:reported} sets two $200$-step runs beside the base method's
-published table. The quoted rows were not re-run, they come from different hardware
-and code, and their source does not state a run-to-run spread; the base method was
-not run under that protocol here. The sampler in those two runs was chosen after the
-five-arm campaign from measurements on training prompts, so it is an exploratory
-configuration and not a registered one. Their AIME24 column is the value the
-checkpoint selection used, biased upward by it, and whether the published column is
-the same kind of value is not stated by its source. Two runs bound none of this.
-
-\paragraph{An assumption with no remedy.}
-Approximation B2 --- that a token's update does not change the conditional
-distribution at other positions --- is false in a network with shared parameters.
-It is inherited from the base method rather than introduced here, but our
-construction adds a second estimator that relies on it.
-
-\paragraph{One model.}
-Every result here is measured on one $1.5$B mathematics-specialized model. We did
-not run a second backbone, so nothing in this paper says whether the dissociation,
-the ordering of the arms or the ablations carry over to a different scale or
-pre-training family. The derivation does not depend on the model; the measurements
-do, and a backbone on which the apparatus contrasts stopped moving the aggregate
-entropy, or the $\AH$ contrasts started to, would bear directly on the claim this
-paper leads with.
+\paragraph{Open structural predictions.} The prefactor half of
+Section~\ref{sec:blind} is analytic, but we have not measured the local and visitation
+terms together at real sibling-divergence positions in live rollouts, so
+Table~\ref{tab:anticorr} is a prediction rather than an observation. The positive
+prediction of the zero sum --- that the spread across siblings widens --- is
+instrumented but not carried by any run reported here; the dissociation we measure is
+its negative half. Whether the effect scales with the number of samples or with an
+adaptively chosen branching schedule is untested, and whether structured rollout
+sampling improves RLVR in its own right is a question this paper raises and does not
+answer.
 
 \section*{Ethics Statement}
 
@@ -1235,7 +1145,7 @@ genuinely safe}, and a local estimator that allocates them no protection is
 allocating correctly for its own objective. No refinement of the local term
 recovers the missing signal, because the missing signal is not local.
 
-\paragraph{The two channels are anti-correlated.}
+\paragraph{The two channels are oppositely ordered.}
 The visitation term's prefactor, derived in Section~\ref{sec:weights}, is
 $1 - \pi_a$, which approaches $1$ as the distribution flattens --- and the
 probability that a group of $n$ samples actually diverges at a position approaches
@@ -1247,7 +1157,7 @@ certain, the local term is identically zero and the visitation prefactor is maxi
 
 
 The statement we can therefore make is stronger than ``the local term is
-incomplete'': \emph{the local term is anti-correlated with the term it omits}, and
+incomplete'': \emph{the local term is weakest exactly where the term it omits is strongest}, and
 the omission cannot be fixed within the local channel.
 
 \subsection{Estimating the Visitation Channel}
