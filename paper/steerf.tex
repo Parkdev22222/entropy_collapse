@@ -98,7 +98,8 @@ seeds, but the pre-registered test of $\AH$'s value against a value-free control
 met as a refutation, so that gain --- measured against a base method that lands
 below GRPO in our runs --- belongs to the apparatus at least as much as to $\AH$. Under the base method's own protocol, two runs average
 $\num{ProtobestMeanAvg}$ on six benchmarks against its reported
-$\num{ProtorefSteerAvg}$, an uncontrolled comparison that we report as such.
+$\num{ProtorefSteerAvg}$, lower on $\num{ProtocmpSteerBelow}$ of the six; the
+comparison is uncontrolled and we report it as such.
 \end{abstract}
 
 \section{Introduction}
@@ -212,8 +213,9 @@ defined as a refutation (Section~\ref{sec:res:contrasts}). We report it as one, 
 we credit that gain to the apparatus at least as much as to $\AH$. Run under the base
 method's own protocol and set beside its published numbers, two runs of the method
 average $\num{ProtobestMeanAvg}$ on six benchmarks against a reported
-$\num{ProtorefSteerAvg}$ (Section~\ref{sec:reported}); that comparison is
-uncontrolled, and we use it only to place the method, not to rank it. This is a
+$\num{ProtorefSteerAvg}$, lower on $\num{ProtocmpSteerBelow}$ of the six
+(Section~\ref{sec:reported}); that comparison is uncontrolled, and we use it only to
+place the method, not to rank it. This is a
 paper about where token-level entropy control acts and what an aggregate entropy
 curve can and cannot tell us about it, not a paper claiming an accuracy gain.
 
@@ -2036,7 +2038,9 @@ itself used --- and is biased upward by that selection; the other five columns
 re-evaluate the selected checkpoint. The base method's paper selects the same way
 and evaluates the selected checkpoint, but does not say whether its AIME24 column is
 the selection value or a re-measurement; if it is a re-measurement, this column
-favours our rows.}
+favours our rows. Seed~$2$'s selected checkpoint was evaluated on one GPU (tensor
+parallel size~$1$), every other checkpoint of ours on four, because the four-GPU
+attempt stopped before producing a metric; the sampling settings are the same.}
 \label{tab:reported}
 \end{table}
 
@@ -2053,8 +2057,13 @@ mean is \num{ProtobestMeanAvg}, against \num{ProtorefSteerAvg} for the base meth
 AIME24 evaluation carries an across-problem standard error of \num{SEaime} as a
 fraction (Section~\ref{sec:valset}); a mean of two runs halves its variance and no
 more, and the quoted rows carry a noise of their own that their source does not
-state. \tocheck{We therefore read the table as placing the method at the level of
-the published numbers, and not as ordering it against them.} The step-$200$ row is
+state. Against the base method's reported row the two-run mean is lower on
+\num{ProtocmpSteerBelow} of the six columns and not lower on
+\num{ProtocmpSteerNotbelow}, the column the selection itself used; against the
+reported GRPO row it is higher on \num{ProtocmpGrpoAbove}. We therefore read the
+table as placing the method between the two reported rows and below the base method
+as reported, not level with it; how much of that gap belongs to the method and how
+much to the environment, an uncontrolled comparison cannot say. The step-$200$ row is
 printed because the selected checkpoint is chosen on AIME24 and so flatters its own
 row; the last checkpoint is chosen by nobody.
 
@@ -2093,10 +2102,10 @@ control straddles zero and is reported as a refutation; the test of its pairing
 survives. A practitioner should read this paper as an account of where token-level
 entropy control acts --- and of why an aggregate entropy curve cannot certify a
 correction of this kind --- not as a recommendation to adopt the method for accuracy.
-\tocheck{Under the base method's own protocol the method's two-run average sits beside the
-published numbers rather than above or below them by more than the measurement
-resolves} (Section~\ref{sec:reported}); that comparison is uncontrolled and does not
-change this reading.
+Under the base method's own protocol the method's two-run average falls between the
+published GRPO and base-method rows, below the latter on \num{ProtocmpSteerBelow} of
+six benchmarks (Section~\ref{sec:reported}); that comparison is uncontrolled and does
+not change this reading.
 
 Estimating $\Htogo$ is a separate problem, and the decomposition does not depend on
 how it is solved. Ours is a parallel multi-token-prediction forecaster whose error

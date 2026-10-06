@@ -84,6 +84,7 @@ def names() -> set[str]:
     for point in ("best", "last"):
         for who in list(SEEDS.values()) + ["Mean"]:
             out |= {f"Proto{point}{who}{c}" for c in cols}
+    out |= {"ProtocmpSteerBelow", "ProtocmpSteerNotbelow", "ProtocmpGrpoAbove"}
     return out
 
 
@@ -243,7 +244,32 @@ def collect(git_ref, log_dir, ref_path):
                 values[f"Proto{point}Mean{b}"] = pct(mean[ds])
         if len(mean) == len(BENCH):
             values[f"Proto{point}MeanAvg"] = pct(sum(mean.values()) / len(BENCH))
+    values.update(direction_counts(values))
     return values, notes
+
+
+def direction_counts(values: dict) -> dict:
+    """How the selected-checkpoint two-run mean sits against the reported rows.
+
+    Compared at the printed precision (one decimal), because the reported rows
+    have no more; a printed tie counts as neither above nor below.  Emitted only
+    when every cell it compares is present, so the prose cannot state a count
+    the table does not show.
+    """
+    cells = [(b, col) for _, b, _, col in BENCH]
+    need = [f"ProtobestMean{b}" for b, _ in cells]
+    need += [f"Protoref{r}{b}" for r in ("Steer", "Grpo") for b, _ in cells]
+    if not all(k in values for k in need):
+        return {}
+    ours = {b: float(values[f"ProtobestMean{b}"]) for b, _ in cells}
+    steer = {b: float(values[f"ProtorefSteer{b}"]) for b, _ in cells}
+    grpo = {b: float(values[f"ProtorefGrpo{b}"]) for b, _ in cells}
+    notbelow = [col for b, col in cells if ours[b] >= steer[b]]
+    return {
+        "ProtocmpSteerBelow": str(sum(ours[b] < steer[b] for b, _ in cells)),
+        "ProtocmpSteerNotbelow": " and ".join(notbelow) if notbelow else "none",
+        "ProtocmpGrpoAbove": str(sum(ours[b] > grpo[b] for b, _ in cells)),
+    }
 
 
 def main(argv=None):

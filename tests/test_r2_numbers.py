@@ -140,3 +140,23 @@ def test_unfinished_evaluation_is_reported_not_skipped(tmp_path):
     assert "ProtobestTwoAmc" not in values
     assert "ProtobestTwoAime" in values
     assert any("did not finish" in n for n in notes)
+
+
+def test_direction_counts_follow_the_printed_cells(tmp_path):
+    d = write_all(tmp_path)
+    values, _ = mod.collect(None, str(d), REF)
+    cols = ["Aime", "Aimefive", "Amc", "Mathfive", "Minerva", "Oly"]
+    labels = ["AIME24", "AIME25", "AMC23", "MATH500", "Minerva", "Olympiad"]
+    ours = [float(values[f"ProtobestMean{c}"]) for c in cols]
+    steer = [float(values[f"ProtorefSteer{c}"]) for c in cols]
+    grpo = [float(values[f"ProtorefGrpo{c}"]) for c in cols]
+    assert values["ProtocmpSteerBelow"] == str(sum(o < s for o, s in zip(ours, steer)))
+    assert values["ProtocmpGrpoAbove"] == str(sum(o > g for o, g in zip(ours, grpo)))
+    notbelow = [l for l, o, s in zip(labels, ours, steer) if o >= s]
+    assert values["ProtocmpSteerNotbelow"] == (" and ".join(notbelow) or "none")
+
+
+def test_direction_counts_need_every_cell(tmp_path):
+    d = write_all(tmp_path, evals=False)
+    values, _ = mod.collect(None, str(d), REF)
+    assert "ProtocmpSteerBelow" not in values
