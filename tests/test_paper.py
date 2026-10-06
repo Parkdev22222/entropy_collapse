@@ -222,6 +222,15 @@ def emittable_names():
     body = re.search(r"MACROS = \{(.*?)\n\}", pse, re.S)
     extra |= set(re.findall(r'"([A-Za-z]+)":\s*\(', body.group(1)))
 
+    # The protocol-matched comparison builds its names combinatorially (row x
+    # column), so the emitter exposes them as a function rather than a table.
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "emit_r2_numbers", ROOT / "scripts" / "emit_r2_numbers.py")
+    r2 = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(r2)
+    extra |= r2.names()
+
     return names | prefixed | extra
 
 

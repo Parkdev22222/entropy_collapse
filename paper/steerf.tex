@@ -64,6 +64,9 @@ Correcting the Visitation Channel in Token-Level Entropy Control for RLVR}
 %   run/run_eval_all.sh    ->  validation_data/eval/<arm>-s<seed>/avg1/0.jsonl
 %   scripts/eval_paired_se.py  ->  results/numbers-pairedse.tex
 \loadnumbers{numbers-pairedse.tex}
+% The two-root, 200-step runs set beside the base method's published table:
+%   scripts/emit_r2_numbers.py  ->  results/numbers-r2.tex
+\loadnumbers{numbers-r2.tex}
 
 \begin{document}
 \maketitle
@@ -102,7 +105,10 @@ forecaster is one estimator of this reward-to-go, not a part the decomposition
 depends on. On accuracy the evidence is weaker and we say so: the gain over GRPO
 ($\num{Csignedgrpoacc}$ over three seeds) sits inside GRPO's seed-to-seed spread and is
 close to zero on the two seeds where equal steps mean equal compute, and the pre-registered test of $\AH$'s value against a
-value-free control is met as a refutation.
+value-free control is met as a refutation. Run under the base method's own protocol
+and set beside its published table, two runs of the method average
+$\num{ProtobestMeanAvg}$ on six benchmarks against a reported $\num{ProtorefSteerAvg}$
+--- an uncontrolled comparison, which we report as such.
 \end{abstract}
 
 \section{Introduction}
@@ -947,7 +953,9 @@ the same optimizer settings, and differ only in the intervention; the five-arm
 decomposition and every ablation are run on it. We run no second backbone, and the
 Limitations say what that leaves open. All runs train on the same $17$k-problem
 competition-mathematics set, DAPO-Math-17k \citep{yu2025dapo}. With a training batch of $512$ prompts,
-$110$ optimization steps correspond to about $3.2$ epochs.
+$110$ optimization steps correspond to about $3.2$ epochs. Two further runs of the
+full method at $200$ steps, under the base method's own protocol, are described
+separately in Section~\ref{sec:reported}.
 
 
 \subsection{Validation set}
@@ -1070,7 +1078,8 @@ All numbers below come from the runs described in Section~\ref{sec:setup}:
 $110$ optimization steps per arm from the same initial checkpoint, validated on
 AIME24. Every figure is recomputed from a training log released with this paper by
 one script; we report our own measurements only, and no figure in this section is
-taken from prior work.
+taken from prior work. Section~\ref{sec:reported}, which follows it, is the one place
+that does.
 
 Every statistic is over the same $\num{Nseedsused}$ seeds, $\num{Seedset}$ --- the
 seeds on which all five arms finished --- so a difference of two rows of
@@ -1946,7 +1955,99 @@ problems, a maximum over a dozen noisy points is a biased statistic whose bias g
 with the number of checkpoints compared, and it is not the same for every arm: the
 lifts differ by more than the gap between \textsc{uniform} and \textsc{permuted},
 so ranking by the maximum would swap those two. We regard the window mean as the
-defensible statistic and use it throughout.
+defensible statistic and use it throughout. The one exception is
+Section~\ref{sec:reported}, which uses the maximum on purpose, because that is the
+rule of the table it is compared against.
+
+\section{Against the Reported Numbers}
+\label{sec:reported}
+
+Every number before this section is our own measurement under the schedule of
+Section~\ref{sec:setup}, which differs from the base method's in length, checkpoint
+rule and number of runs (Section~\ref{sec:res:ablate}). This section is the one place
+a figure is taken from prior work. It runs the full method under the base method's own
+protocol and sets the result beside that method's published $1.5$B table
+\citep[Table~12]{steer}, which also reports GRPO and the untrained model. It is a
+second kind of evidence, not a sixth arm, and we say below what it cannot show.
+
+\paragraph{Protocol.} Two independent runs, with data seeds $1$ and $2$, of $200$
+optimization steps each; AIME24 validation every $10$ steps; in each run the
+checkpoint with the highest AIME24 accuracy is selected and evaluated on the six
+benchmarks of Section~\ref{sec:res:bench}, and a table entry is the mean over the two
+runs. Each of these items is the base method's \citep[App.~E]{steer}. Everything else
+is the configuration of Section~\ref{sec:setup}, with one change: the tree sampler
+uses two roots, each cut at depths $\{64, 192\}$ with branching factor $2$, so the
+eight responses to a prompt form two independent groups of four instead of one group
+that shares its first $64$ tokens. We chose this shape after the five-arm campaign,
+from short runs measuring how often the eight rewards of a group tie, which removes
+signal from a GRPO update. The choice is exploratory, it was made on training prompts
+and not on any benchmark, and these runs are not one of the five arms. The selected
+steps are \num{ProtostepBestOne} and \num{ProtostepBestTwo}.
+
+\begin{table}[t]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{2.6pt}
+\resizebox{\ifdim\width>\linewidth\linewidth\else\width\fi}{!}{%
+\begin{tabular}{@{}lccccccc@{}}
+\toprule
+ & AIME24$^\dagger$ & AIME25 & AMC23 & MATH500 & Minerva & Olympiad & mean \\
+\midrule
+\multicolumn{8}{@{}l}{\emph{reported by \citet{steer}, not re-run}} \\
+base model & \num{ProtorefBaseAime} & \num{ProtorefBaseAimefive} & \num{ProtorefBaseAmc} & \num{ProtorefBaseMathfive} & \num{ProtorefBaseMinerva} & \num{ProtorefBaseOly} & \num{ProtorefBaseAvg} \\
+GRPO & \num{ProtorefGrpoAime} & \num{ProtorefGrpoAimefive} & \num{ProtorefGrpoAmc} & \num{ProtorefGrpoMathfive} & \num{ProtorefGrpoMinerva} & \num{ProtorefGrpoOly} & \num{ProtorefGrpoAvg} \\
+STEER & \num{ProtorefSteerAime} & \num{ProtorefSteerAimefive} & \num{ProtorefSteerAmc} & \num{ProtorefSteerMathfive} & \num{ProtorefSteerMinerva} & \num{ProtorefSteerOly} & \num{ProtorefSteerAvg} \\
+\midrule
+\multicolumn{8}{@{}l}{\emph{ours, mean of the two runs}} \\
+STEER-F, selected & \num{ProtobestMeanAime} & \num{ProtobestMeanAimefive} & \num{ProtobestMeanAmc} & \num{ProtobestMeanMathfive} & \num{ProtobestMeanMinerva} & \num{ProtobestMeanOly} & \num{ProtobestMeanAvg} \\
+STEER-F, step $200$ & \num{ProtolastMeanAime} & \num{ProtolastMeanAimefive} & \num{ProtolastMeanAmc} & \num{ProtolastMeanMathfive} & \num{ProtolastMeanMinerva} & \num{ProtolastMeanOly} & \num{ProtolastMeanAvg} \\
+\midrule
+\multicolumn{8}{@{}l}{\emph{ours, each run's selected checkpoint}} \\
+seed $1$ & \num{ProtobestOneAime} & \num{ProtobestOneAimefive} & \num{ProtobestOneAmc} & \num{ProtobestOneMathfive} & \num{ProtobestOneMinerva} & \num{ProtobestOneOly} & \num{ProtobestOneAvg} \\
+seed $2$ & \num{ProtobestTwoAime} & \num{ProtobestTwoAimefive} & \num{ProtobestTwoAmc} & \num{ProtobestTwoMathfive} & \num{ProtobestTwoMinerva} & \num{ProtobestTwoOly} & \num{ProtobestTwoAvg} \\
+\bottomrule
+\end{tabular}}
+\caption{Six benchmarks under the base method's protocol, accuracy in percent; the
+mean column is unweighted over the six. The upper block is quoted from the base
+method's paper and was not re-run. In each of our runs the selected checkpoint is
+the argmax of its AIME24 validation accuracy. $\dagger$: in our rows AIME24 is the
+training-time validation value at the selected step --- the value the selection
+itself used --- and is biased upward by that selection; the other five columns
+re-evaluate the selected checkpoint. The base method's paper selects the same way
+and evaluates the selected checkpoint, but does not say whether its AIME24 column is
+the selection value or a re-measurement; if it is a re-measurement, this column
+favours our rows.}
+\label{tab:reported}
+\end{table}
+
+Each AIME24 cell of ours is read from the training log and used only if it agrees
+with the reward printed beside it and with the trainer's own record of the best
+value; the other columns pass the coherence check of Section~\ref{sec:res:bench}
+(\texttt{scripts/emit\_r2\_numbers.py}). The two-run AIME24 mean is averaged over
+correct-sample counts rather than over two rounded fractions.
+
+\paragraph{Reading the table.} Averaged over the two runs, STEER-F's six-benchmark
+mean is \num{ProtobestMeanAvg}, against \num{ProtorefSteerAvg} for the base method and
+\num{ProtorefGrpoAvg} for GRPO as reported; on AIME24 the same three figures are
+\num{ProtobestMeanAime}, \num{ProtorefSteerAime} and \num{ProtorefGrpoAime}. One
+AIME24 evaluation carries an across-problem standard error of \num{SEaime} as a
+fraction (Section~\ref{sec:valset}); a mean of two runs halves its variance and no
+more, and the quoted rows carry a noise of their own that their source does not
+state. \tocheck{We therefore read the table as placing the method at the level of
+the published numbers, and not as ordering it against them.} The step-$200$ row is
+printed because the selected checkpoint is chosen on AIME24 and so flatters its own
+row; the last checkpoint is chosen by nobody.
+
+\paragraph{What this comparison is not.} It is not controlled. The quoted rows ran
+with the authors' code on different hardware (a cluster of H20 GPUs, against our four
+H100s), and the base method under this protocol in our environment is a run this
+paper does not have. The controlled comparison with the base method is the five-arm
+campaign, where $\text{STEER-F} - \textsc{steer}$ is \num{Csignedsteeracc} over
+\num{Nsignedsteer} paired seeds at $110$ steps (Table~\ref{tab:contrast}), with the
+caveats of Section~\ref{sec:res:ablate}. Nor does the table speak to the visitation
+channel: like every comparison between the full and the base method
+(Section~\ref{sec:setup}), it changes the sampler and the correction together, and
+the attribution rests on the controls of Section~\ref{sec:results} alone.
 
 \section{Conclusion}
 
@@ -1972,6 +2073,10 @@ control straddles zero and is reported as a refutation; the test of its pairing
 survives. A practitioner should read this paper as an account of where token-level
 entropy control acts --- and of why an aggregate entropy curve cannot certify a
 correction of this kind --- not as a recommendation to adopt the method for accuracy.
+\tocheck{Under the base method's own protocol the method's two-run average sits beside the
+published numbers rather than above or below them by more than the measurement
+resolves} (Section~\ref{sec:reported}); that comparison is uncontrolled and does not
+change this reading.
 
 Estimating $\Htogo$ is a separate problem, and the decomposition does not depend on
 how it is solved. Ours is a parallel multi-token-prediction forecaster whose error
@@ -2109,6 +2214,16 @@ contrasts that separate the forecast's value from its apparatus --- STEER-F
 against \textsc{uniform} and against \textsc{permuted} --- hold it fixed along
 with everything else. The two contrasts the discrepancy does reach, STEER-F $-$
 \textsc{steer} and \textsc{steer} $-$ GRPO, are reported with it stated.
+
+\paragraph{The comparison with published numbers is not controlled.}
+Section~\ref{sec:reported} sets two $200$-step runs beside the base method's
+published table. The quoted rows were not re-run, they come from different hardware
+and code, and their source does not state a run-to-run spread; the base method was
+not run under that protocol here. The sampler in those two runs was chosen after the
+five-arm campaign from measurements on training prompts, so it is an exploratory
+configuration and not a registered one. Their AIME24 column is the value the
+checkpoint selection used, biased upward by it, and whether the published column is
+the same kind of value is not stated by its source. Two runs bound none of this.
 
 \paragraph{An assumption with no remedy.}
 Approximation B2 --- that a token's update does not change the conditional
