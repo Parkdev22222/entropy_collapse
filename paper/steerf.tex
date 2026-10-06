@@ -679,7 +679,7 @@ seed with the STEER-F and \textsc{uniform} runs the six-benchmark evaluation pai
 The $\lambda = 0.25$ line is the reference and is Table~\ref{tab:plateau}'s
 across-seed mean rather than one run. Every row but \textsc{oracle} ran on the
 $\num{Rlamzerogpus}$-GPU box while the seed-1 STEER-F reference ran on the smaller
-one, so those rows carry the machine effect of Section~\ref{sec:res:seeds}
+one, so those rows carry the machine effect of Appendix~\ref{sec:res:seeds}
 ($\num{Boxdelta}$, in the direction that flatters them) on top of whatever the
 ablation does. The release emits a same-seed contrast for \textsc{oracle} alone,
 because it is the one row whose box matches its reference's. Each block isolates one
@@ -843,7 +843,7 @@ reward model encoding any objective, including a harmful one; we note that our
 method inherits, and does not mitigate, whatever the reward function encodes. The
 computational cost of the method (a forward pass through a set of small prediction
 heads at every optimization step) is a real environmental cost, which we quantify in
-Section~\ref{sec:res:cost} so that it can be weighed against the benefit.
+Appendix~\ref{sec:res:cost} so that it can be weighed against the benefit.
 
 \bibliography{custom}
 
@@ -910,7 +910,7 @@ distribution concentrates.
 We use Medusa-style parallel prediction heads \citep{medusa} not for their intended
 purpose (speculative decoding) but as an entropy forecaster: we need the entropy of
 the distribution over a token $k$ steps ahead, not a good sample of that token.
-Section~\ref{sec:approx} shows that this choice of estimator has a signed,
+Appendix~\ref{sec:approx} shows that this choice of estimator has a signed,
 monotone error which we characterize and correct.
 
 
@@ -970,7 +970,7 @@ loss becomes $\sum_u \alpha_u \cdot \mathrm{PPO\text{-}clip}(A_u, r_u)$, with
 a batch-normalized exponential map into $[\lambda_{\min}, 1]$, so the weight can
 only attenuate. The factor $1/\pi_{\mathrm{old}}$ in Eq.~\eqref{eq:omega} will
 matter later: it makes $\Om$ heavy-tailed, which is why the two channels must be
-normalized before they are combined (Section~\ref{sec:combine}).
+normalized before they are combined (Appendix~\ref{sec:combine}).
 
 \subsection{Two Channels}
 \label{sec:channels-app}
@@ -1151,7 +1151,7 @@ allocating correctly for its own objective. No refinement of the local term
 recovers the missing signal, because the missing signal is not local.
 
 \paragraph{The two channels are oppositely ordered.}
-The visitation term's prefactor, derived in Section~\ref{sec:weights}, is
+The visitation term's prefactor, derived in Appendix~\ref{sec:weights}, is
 $1 - \pi_a$, which approaches $1$ as the distribution flattens --- and the
 probability that a group of $n$ samples actually diverges at a position approaches
 $1$ in the same limit. Table~\ref{tab:anticorr} evaluates both channels on a family
@@ -1459,7 +1459,7 @@ $\AH$ is a deviation from a mean over token-identical siblings, and
 $\sum_j g_j / m$ does not reproduce $g_i$ bitwise, leaving $|\AH| \sim 6\times10^{-8}$
 where it is interpretively zero. Those residuals are $\sim\!10^{-6}$ relative to a
 real branch score and cannot move a weight, but they are counted in the support
-statistics of Section~\ref{sec:res:diag}, which should be read as an upper bound on
+statistics of Appendix~\ref{sec:res:diag}, which should be read as an upper bound on
 the branch-point fraction.
 
 \subsection{Tree-Structured Rollouts}
@@ -1561,7 +1561,7 @@ Limitations say what that leaves open. All runs train on the same $17$k-problem
 competition-mathematics set, DAPO-Math-17k \citep{yu2025dapo}. With a training batch of $512$ prompts,
 $110$ optimization steps correspond to about $3.2$ epochs. Two further runs of the
 full method at $200$ steps, under the base method's own protocol, are described
-separately in Section~\ref{sec:reported}.
+separately in Appendix~\ref{sec:reported}.
 
 
 \subsection{Validation set}
@@ -1575,7 +1575,7 @@ It bounds what any single validation point can resolve, which is why the primary
 statistic below is a window mean rather than one point; and it bounds checkpoint
 selection, since a benchmark this noisy chooses between nearby checkpoints partly by
 chance. Where a checkpoint is selected (the six-benchmark evaluation of
-Section~\ref{sec:res:bench}), the AIME24 column is therefore marked in-sample.
+Appendix~\ref{sec:res:bench}), the AIME24 column is therefore marked in-sample.
 
 Optimization uses GRPO \citep{shao2024deepseekmath} with $n = 8$ responses per prompt, a constant learning rate
 of $1\mathrm{e}{-6}$ with no warm-up (so that the schedule is independent of the
@@ -1585,7 +1585,7 @@ asymmetric, $\varepsilon_{\mathrm{low}} = 0.2$ and
 $\varepsilon_{\mathrm{high}} = 0.28$ as in \citet{yu2025dapo}, with
 the dual-clip lower bound at $c = 10$; we state this because ``GRPO'' with a
 symmetric $\varepsilon = 0.2$ and a KL term is a different baseline, and because
-the follow-up arm of Section~\ref{sec:res:ablate} is defined by moving these two
+the follow-up arm of Appendix~\ref{sec:res:ablate} is defined by moving these two
 numbers. Every arm, the baseline included, uses the same three values: the
 only configuration difference between the GRPO arm and STEER-F is the loss mode and
 the method hyperparameters listed next. Rollouts are sampled at temperature $1.0$ with no nucleus
@@ -1664,7 +1664,7 @@ All numbers below come from the runs described in Section~\ref{sec:setup}:
 $110$ optimization steps per arm from the same initial checkpoint, validated on
 AIME24. Every figure is recomputed from a training log released with this paper by
 one script; we report our own measurements only, and no figure in this section is
-taken from prior work. Section~\ref{sec:reported}, which follows it, is the one place
+taken from prior work. Appendix~\ref{sec:reported}, which follows it, is the one place
 that does.
 
 Every statistic is over the same $\num{Nseedsused}$ seeds, $\num{Seedset}$ --- the
@@ -1672,7 +1672,7 @@ seeds on which all five arms finished --- so a difference of two rows of
 Table~\ref{tab:plateau} is the corresponding paired entry of
 Table~\ref{tab:contrast}. Seed $2$ is excluded because its STEER-F run did not
 complete; its other four arms did, and every run, excluded or not, is in the
-released \texttt{per\_seed.tsv}. Section~\ref{sec:res:seeds} reports what the
+released \texttt{per\_seed.tsv}. Appendix~\ref{sec:res:seeds} reports what the
 repeats measure --- the run-to-run spread, and the machine each seed ran on.
 
 \paragraph{Which result carries which weight.} What follows is not one kind of
@@ -1686,8 +1686,8 @@ this campaign establishes. The accuracy contrasts after it rest on
 \num{Nsignedgrpo} paired seeds each, and they do not all survive: the gap against
 \textsc{steer} clears a conventional threshold, the gap against \textsc{permuted} is
 marginal, and the headline gap against GRPO is smaller than GRPO's own spread across
-its seeds (Section~\ref{sec:res:seeds}), does not, and is close to zero on the
-seeds where equal steps mean equal compute (Section~\ref{sec:res:compute}). One pre-registered
+its seeds (Appendix~\ref{sec:res:seeds}), does not, and is close to zero on the
+seeds where equal steps mean equal compute (Appendix~\ref{sec:res:compute}). One pre-registered
 falsification condition is met at this seed count, on the contrast that isolates
 $\AH$'s value; Section~\ref{sec:res:contrasts} states which and what it leaves
 standing. A reader who wants one result from this section should take the
@@ -1732,7 +1732,7 @@ entropy column tracks the damping apparatus and the accuracy column tracks $\AH$
 
 \paragraph{What the method predicts here, fixed in advance.} This method does not
 set out to hold the aggregate entropy up, and two facts already established above
-say it cannot. Section~\ref{sec:tree} bounds the positions at which $\AH$ can be
+say it cannot. Appendix~\ref{sec:tree} bounds the positions at which $\AH$ can be
 non-zero at $2(n-1)/T$, about one in eighty; Section~\ref{sec:zerosum} shows $\AH$
 sums to zero over a sibling set, so at the positions it does reach it redistributes
 weight among siblings rather than adding any. An intervention that is this sparse
@@ -1760,7 +1760,7 @@ pattern, and it is the sense in which this paper is not a method for suppressing
 entropy.
 
 \paragraph{A pre-registered condition we retire rather than score.} The
-pre-registration (Section~\ref{sec:appendix-prereg}) also fixed a condition on this
+pre-registration (Appendix~\ref{sec:appendix-prereg}) also fixed a condition on this
 section: if aggregate entropy orders the arms the same way accuracy does, a
 dissociation argument fails. We retire that condition instead of reporting it,
 and say plainly why, since retiring a registered test is exactly the move a reader
@@ -1783,14 +1783,14 @@ currently log tests it. The trainer does log an entropy split
 (\texttt{steerf/branch\_entropy}), and an earlier draft of this section read it as
 entropy at branch points; it is not. That monitor takes a fixed top decile of
 $\AH$ --- a tenth of all response tokens --- while the positions $\AH$ can reach are
-the one-in-eighty that Section~\ref{sec:res:diag} measures, an eighth as many. Since
+the one-in-eighty that Appendix~\ref{sec:res:diag} measures, an eighth as many. Since
 $\AH$ is exactly zero at almost every position, the remainder of that decile is
-filled by an arbitrary tie-break rather than by branching. Section~\ref{sec:res:diag} reports
+filled by an arbitrary tie-break rather than by branching. Appendix~\ref{sec:res:diag} reports
 what that monitor does and does not select. The replacement restricts the split to
 $\AH \ne 0$, the same predicate the correction itself uses, and is instrumented in
 the release; no run reported here carries it, so this test is registered and not
 performed. That test is registered
-in Section~\ref{sec:appendix-prereg}, before those runs, and we state here that it
+in Appendix~\ref{sec:appendix-prereg}, before those runs, and we state here that it
 is registered after this section's original condition was retired rather than
 before.
 
@@ -1823,7 +1823,7 @@ These contrasts carry less than the dissociation above, and we read them for
 direction rather than magnitude. They pair on the same \num{Nseedsused} seeds as
 that section, and the
 quantity they measure --- an accuracy gap --- is the one the seeds in hand do not
-separate from run-to-run spread (Section~\ref{sec:res:seeds}).
+separate from run-to-run spread (Appendix~\ref{sec:res:seeds}).
 
 \begin{table}[t]
 \centering
@@ -1866,7 +1866,7 @@ $p = \num{Psignedsteeracc}$; against \textsc{permuted} it is
 $\num{Csignedpermutedacc}$ at $p = \num{Psignedpermutedacc}$. Against
 \textsc{uniform} and against GRPO it is $\num{Psigneduniformacc}$ and
 $\num{Psignedgrpoacc}$ --- the headline contrast is the weakest row in the table, for
-the reason Section~\ref{sec:res:seeds} gives: it is the one that changes three things
+the reason Appendix~\ref{sec:res:seeds} gives: it is the one that changes three things
 at once, and GRPO's own spread across seeds is wider than the effect. The signs agree
 in the mean everywhere $\AH$ carries information, but the per-seed signs do not, and
 the next paragraph is about the one place they part.
@@ -1908,7 +1908,7 @@ accuracy claim as refuted at this seed count.
 
 \paragraph{The same contrast on questions the checkpoints were not chosen on.} The
 registered secondary check of this reading is the six-benchmark evaluation of
-Section~\ref{sec:res:bench}. On the evaluated seed (\num{Dirnseeds}) it counts
+Appendix~\ref{sec:res:bench}. On the evaluated seed (\num{Dirnseeds}) it counts
 STEER-F above \textsc{uniform} on \num{Dirconsistency} of six benchmarks, which the
 pre-registered thresholds call \emph{\num{Dirverdict}}, and on
 \num{Dirconsistencyheld} of the \num{Dirheldtotal} that played no part in selection;
@@ -1951,7 +1951,7 @@ $\lambda = 0$ tree arm --- the sampler with the future channel off, \textsc{stee
 local damping still in place --- reaches an uplift
 of $\num{Rlamzerouplift}$, against $\num{Rsteeruplift}$ for \textsc{steer} and
 $\num{Rsigneduplift}$ for STEER-F. On this evidence most of the structural gain is
-the sampler's, and Section~\ref{sec:res:ablate} reports it that way. The
+the sampler's, and Appendix~\ref{sec:res:ablate} reports it that way. The
 decomposition above is unaffected --- it is measured against GRPO, which has no tree
 --- but the attribution is not what the five-arm design alone could see. A gain that
 belongs to the sampler is outside what this paper set out to study, since the tree is
@@ -1961,7 +1961,7 @@ that studies structured sampling directly.
 \subsection{Mechanism diagnostics}
 \label{sec:res:diag}
 
-Section~\ref{sec:tree} bounds the fraction of positions that can carry a non-zero
+Appendix~\ref{sec:tree} bounds the fraction of positions that can carry a non-zero
 $\AH$ at $2(n-1)/T$ for any sampler. With $n = 8$ and the tree arms' mean response
 length of $\num{Treelen}$ tokens over the converged window the bound is
 $\num{Supportbound}$. Measured over the same window and seeds, the three tree arms
@@ -1969,7 +1969,7 @@ sit at $\num{Runiformbranchfrac}$ (\textsc{uniform}), $\num{Rpermutedbranchfrac}
 (\textsc{permuted}) and $\num{Rsignedbranchfrac}$ (STEER-F), i.e.\ at
 $\num{Supportpctlo}$--$\num{Supportpcthi}\%$ of a ceiling that no sampler can
 exceed. A plain-rollout pilot with the same $\lambda$ (seed $1$, released with the
-logs) reaches $.003$. As Section~\ref{sec:combine} notes, this
+logs) reaches $.003$. As Appendix~\ref{sec:combine} notes, this
 count admits float32 round-off and is an upper bound; the runs reported here predate
 the round-off-free counter, so we quote the loose figure and label it as such.
 
@@ -1994,7 +1994,7 @@ attributed to them. Section~\ref{sec:res:entropy} states what replaces it.
 \subsection{Is the future term a local term?}
 \label{sec:res:locality}
 
-Section~\ref{sec:approx} reports a calibration that suppresses every head past
+Appendix~\ref{sec:approx} reports a calibration that suppresses every head past
 the first, leaving $\hat{H}_{\mathrm{togo}}$ dominated by one step ahead. That
 invites the sharpest objection to the paper: if the forecast reaches one step,
 is $\AH$ anything a purely local quantity could not have produced? The question
@@ -2034,7 +2034,7 @@ sibling baseline and no tree, vanishes at a uniform branch point, and the twin
 exists only because the tree supplies siblings to difference against. What the
 measurement indicts is the \emph{forecasting apparatus} --- the MTP heads,
 their warm-up and their calibration --- not the visitation channel. Read
-alongside Section~\ref{sec:res:ablate}, where the sampler alone recovers
+alongside Appendix~\ref{sec:res:ablate}, where the sampler alone recovers
 $\num{Rlamzeroacc}$ against \textsc{steer}'s $\num{Rsteeracc}$ while the
 forecast adds the remainder, two independent measurements now point the same
 way.
@@ -2046,10 +2046,10 @@ than at the scheduled branch depths. The head-free arm of
 Table~\ref{tab:followups} is the direct test, and it has now been run.
 \textsc{oracle} reads $\Htogo$ from the policy's realised entropy, which verl
 \citep{sheng2025hybridflow} computes in the same pass, so it carries none of the MTP overhead of
-Section~\ref{sec:res:cost} --- $\num{Roraclecost}$\,s per optimization step
+Appendix~\ref{sec:res:cost} --- $\num{Roraclecost}$\,s per optimization step
 against STEER-F's $\num{Fsignedoracleref}$ at the same seed on the four-GPU box,
 $\num{Fsignedoraclesaving}\%$ less. It is also
-behind it on accuracy. Section~\ref{sec:res:ablate} reports both numbers and what
+behind it on accuracy. Appendix~\ref{sec:res:ablate} reports both numbers and what
 one seed of each can carry.
 
 \subsection{Seeds, not steps}
@@ -2088,7 +2088,7 @@ Table~\ref{tab:plateau}.
 
 Read that difference as an upper bound and not as an estimate. With
 $\num{Boxnlo}$ run on the smaller box it is one run against $\num{Boxnhi}$, and a
-single run carries this arm's own run-to-run spread (Section~\ref{sec:res:seeds}
+single run carries this arm's own run-to-run spread (Appendix~\ref{sec:res:seeds}
 below) inside it. We report it at that strength because the alternative was to keep a
 seed outside $\num{Seedset}$ alive for this one number while every other number in
 the paper excluded it, and a nuisance estimate is not worth a second seed set.
@@ -2147,7 +2147,7 @@ for want of an evaluation that passes it: \num{Benchmissing}. Each row averages 
 checkpoints evaluated at the seeds in its last column.
 
 One of the six is not held out. The checkpoint behind each row is the argmax of that
-run's AIME24 validation accuracy (Section~\ref{sec:valset}), so AIME24 is the set the
+run's AIME24 validation accuracy (Appendix~\ref{sec:valset}), so AIME24 is the set the
 selection was made on and its column is in-sample: the pre-registration
 (Appendix~\ref{sec:appendix-prereg}) records that this argmax lifts an arm by about a
 hundredth in absolute accuracy, and by an amount that differs between arms, so the
@@ -2175,7 +2175,7 @@ carry no such bias and only more variance.
 \caption{Six-benchmark evaluation of each arm's selected checkpoint, averaged over
 the seeds in the last column. The mean column is the unweighted mean over the six.
 $\dagger$: AIME24 is the set each checkpoint was selected on
-(Section~\ref{sec:valset}), so that column is in-sample; the other five are held out.
+(Appendix~\ref{sec:valset}), so that column is in-sample; the other five are held out.
 Rows at different seeds are not meant to be subtracted --- a seed index also names a
 training run and the machine it ran on --- and the contrasts below are counted within
 a seed.}
@@ -2223,7 +2223,7 @@ it. At $\mathrm{avg@}1$ each problem's score is a single Bernoulli draw, so thes
 errors carry the sampling noise of one generation per problem on top of the
 difficulty spread; and pooling problems across seeds treats a (seed, problem) pair as
 one observation, which ignores the clustering by seed that
-Section~\ref{sec:res:seeds} shows is real. GSM8K is computed the same way and left
+Appendix~\ref{sec:res:seeds} shows is real. GSM8K is computed the same way and left
 out of the pool: at $\mathrm{avg@}1$ it sits near saturation, where a paired
 difference measures the ceiling rather than the method.
 
@@ -2288,11 +2288,11 @@ $\num{Rlamzeroacc}$ and $\num{Rsignedacc}$.
 
 Three things keep this from being decisive, and none of them rescues the original
 reading. Every cell here is one run, and the spread across this block is about twice
-the run-to-run spread measured in Section~\ref{sec:res:seeds} --- suggestive, not
+the run-to-run spread measured in Appendix~\ref{sec:res:seeds} --- suggestive, not
 settled. The $\lambda$ sweep is not monotone: $\lambda = .1$ sits below
 $\lambda = 0$ on accuracy, which is what noise looks like at this sample size. And
 the row ran on the $\num{Rlamzerogpus}$-GPU box while the seed-1 references it is
-read against did not, so the $\num{Boxdelta}$ of Section~\ref{sec:res:seeds} sits
+read against did not, so the $\num{Boxdelta}$ of Appendix~\ref{sec:res:seeds} sits
 inside this comparison and points the same way as the conclusion drawn from it: the
 sampler's share is an upper bound, not an estimate. We
 report the block as measured and do not reconcile it. Whether the sampler or the
@@ -2305,7 +2305,7 @@ not designed or tuned as a sampler, and whether structured sampling improves RLV
 in its own right is a different question from the one this paper asks.
 
 \paragraph{The forecaster, replaced by what the trainer already has.}
-Section~\ref{sec:res:locality} builds the same sibling-differenced quantity from the
+Appendix~\ref{sec:res:locality} builds the same sibling-differenced quantity from the
 policy's own next-token entropy and finds it close to $\AH$. That measurement is
 taken on a frozen policy at one validation step, and it cannot say what the
 substitution does \emph{inside} the loop, where the weights it produces move the
@@ -2347,7 +2347,7 @@ An equal-step comparison is compute-fair only if the two arms cost the same per
 step, and here that depends on the machine. On the $\num{Costgpushi}$-GPU box
 (seeds $\num{Cmhiseeds}$) STEER-F's step costs $\num{Cmhiratio}$ times GRPO's,
 so equal steps is equal compute to within the seed spread of either arm
-(Section~\ref{sec:res:cost}). On the $\num{Costgpuslo}$-GPU box (seed
+(Appendix~\ref{sec:res:cost}). On the $\num{Costgpuslo}$-GPU box (seed
 $\num{Cmloseeds}$) it costs $\num{Cmloratio}$ times as much, and a GRPO run given
 the same wall clock would reach about step $\num{Cmlostep}$. We did not train GRPO
 past step $110$, so that point is not measured, and we do not extrapolate a
@@ -2371,7 +2371,7 @@ $\num{Costuniformhi}$ and $\num{Costpermutedhi}$\,s per step on the larger box.
 \label{sec:res:cost}
 
 Step times are read inside a box. A seed index also names a machine
-(Section~\ref{sec:res:seeds}), and the two boxes are further apart than any two arms
+(Appendix~\ref{sec:res:seeds}), and the two boxes are further apart than any two arms
 are, so a mean over both measures the campaign's scheduling.
 
 On the $\num{Costgpushi}$-GPU box, where every arm has finished
@@ -2398,7 +2398,7 @@ order. On the smaller box every arm has $\num{Costnsteerlo}$ seed inside
 $\num{Seedset}$, so there is no spread to put beside it at all. We therefore
 report these as the cost of the runs we made and not as a coefficient of the method.
 What does isolate the heads from the tree is the \textsc{oracle} arm of
-Section~\ref{sec:res:ablate}, which removes the heads at fixed tree and fixed seed.
+Appendix~\ref{sec:res:ablate}, which removes the heads at fixed tree and fixed seed.
 
 \subsection{A note on how these numbers were selected}
 \label{sec:res:selection}
@@ -2415,7 +2415,7 @@ with the number of checkpoints compared, and it is not the same for every arm: t
 lifts differ by more than the gap between \textsc{uniform} and \textsc{permuted},
 so ranking by the maximum would swap those two. We regard the window mean as the
 defensible statistic and use it throughout. The one exception is
-Section~\ref{sec:reported}, which uses the maximum on purpose, because that is the
+Appendix~\ref{sec:reported}, which uses the maximum on purpose, because that is the
 rule of the table it is compared against.
 
 
@@ -2424,7 +2424,7 @@ rule of the table it is compared against.
 
 Every number before this section is our own measurement under the schedule of
 Section~\ref{sec:setup}, which differs from the base method's in length, checkpoint
-rule and number of runs (Section~\ref{sec:res:ablate}). This section is the one place
+rule and number of runs (Appendix~\ref{sec:res:ablate}). This section is the one place
 a figure is taken from prior work. It runs the full method under the base method's own
 protocol and sets the result beside that method's published $1.5$B table
 \citep[Table~12]{steer}, which also reports GRPO and the untrained model. It is a
@@ -2433,7 +2433,7 @@ second kind of evidence, not a sixth arm, and we say below what it cannot show.
 \paragraph{Protocol.} Two independent runs, with data seeds $1$ and $2$, of $200$
 optimization steps each; AIME24 validation every $10$ steps; in each run the
 checkpoint with the highest AIME24 accuracy is selected and evaluated on the six
-benchmarks of Section~\ref{sec:res:bench}, and a table entry is the mean over the two
+benchmarks of Appendix~\ref{sec:res:bench}, and a table entry is the mean over the two
 runs. Each of these items is the base method's \citep[App.~E]{steer}. Everything else
 is the configuration of Section~\ref{sec:setup}, with one change: the tree sampler
 uses two roots, each cut at depths $\{64, 192\}$ with branching factor $2$, so the
@@ -2450,7 +2450,7 @@ steps are \num{ProtostepBestOne} and \num{ProtostepBestTwo}.
 
 Each AIME24 cell of ours is read from the training log and used only if it agrees
 with the reward printed beside it and with the trainer's own record of the best
-value; the other columns pass the coherence check of Section~\ref{sec:res:bench}
+value; the other columns pass the coherence check of Appendix~\ref{sec:res:bench}
 (\texttt{scripts/emit\_r2\_numbers.py}). The two-run AIME24 mean is averaged over
 correct-sample counts rather than over two rounded fractions.
 
@@ -2459,7 +2459,7 @@ mean is \num{ProtobestMeanAvg}, against \num{ProtorefSteerAvg} for the base meth
 \num{ProtorefGrpoAvg} for GRPO as reported; on AIME24 the same three figures are
 \num{ProtobestMeanAime}, \num{ProtorefSteerAime} and \num{ProtorefGrpoAime}. One
 AIME24 evaluation carries an across-problem standard error of \num{SEaime} as a
-fraction (Section~\ref{sec:valset}); a mean of two runs halves its variance and no
+fraction (Appendix~\ref{sec:valset}); a mean of two runs halves its variance and no
 more, and the quoted rows carry a noise of their own that their source does not
 state. Against the base method's reported row the two-run mean is lower on
 \num{ProtocmpSteerBelow} of the six columns and not lower on
@@ -2477,7 +2477,7 @@ H100s), and the base method under this protocol in our environment is a run this
 paper does not have. The controlled comparison with the base method is the five-arm
 campaign, where $\text{STEER-F} - \textsc{steer}$ is \num{Csignedsteeracc} over
 \num{Nsignedsteer} paired seeds at $110$ steps (Table~\ref{tab:contrast}), with the
-caveats of Section~\ref{sec:res:ablate}. Nor does the table speak to the visitation
+caveats of Appendix~\ref{sec:res:ablate}. Nor does the table speak to the visitation
 channel: like every comparison between the full and the base method
 (Section~\ref{sec:setup}), it changes the sampler and the correction together, and
 the attribution rests on the controls of Section~\ref{sec:results} alone.
@@ -2602,10 +2602,10 @@ STEER-F at seed $2$, which failed at start-up and was not relaunched; the seed-$
 runs were started and not completed. The analysis therefore uses the seeds on which
 all five arms finished, $\num{Seedset}$, and the other runs are released but enter
 no statistic. (ii) Machines: seed $1$ ran on a two-GPU box and seeds $3$ and $4$ on a
-four-GPU box, for every arm (Section~\ref{sec:res:seeds}). (iii) The six-benchmark
+four-GPU box, for every arm (Appendix~\ref{sec:res:seeds}). (iii) The six-benchmark
 evaluation covers one seed per arm and no \textsc{steer} checkpoint
-(Section~\ref{sec:res:bench}). (iv) The long GRPO run for the compute-matched
-comparison was not completed; Section~\ref{sec:res:compute} reports what the step
+(Appendix~\ref{sec:res:bench}). (iv) The long GRPO run for the compute-matched
+comparison was not completed; Appendix~\ref{sec:res:compute} reports what the step
 costs support instead. (v) The planned second backbones were not run. (vi) The
 support-restricted split registered below is instrumented but carried by no run
 reported here. (vii) Follow-up arms: the four advantage-estimator runs (RLOO and
@@ -2631,7 +2631,7 @@ committed --- and claims nothing from it in either direction. A first attempt at
 replacement, registered earlier on 2026-09-21, named
 \texttt{steerf/branch\_entropy}; that registration is withdrawn here rather than
 deleted, because the monitor it named selects a fixed top decile of $\AH$ rather than
-the support (Section~\ref{sec:res:diag}).
+the support (Appendix~\ref{sec:res:diag}).
 
 \emph{Registered now, before the runs that can answer it.} The quantity is
 \texttt{steerf/support\_entropy} and its gap, the entropy split on $\AH \ne 0$ ---
@@ -2670,13 +2670,13 @@ estimate of run-to-run uncertainty and cannot be read as one.
 We report it here because it is informative about a different thing --- whether a gap
 is an artifact of one lucky validation point --- and because the single-seed version
 of this manuscript quoted it. Where the two disagree, the seed-level statistic in
-Section~\ref{sec:res:seeds} governs.
+Appendix~\ref{sec:res:seeds} governs.
 
 The contrast between the two is the point. Table~\ref{tab:within} separates every
 $\AH$ comparison at $t_7$ between $\num{WTsignedpermutedacc}$ and
 $\num{WTsigneduniformacc}$, which reads as decisive and is not: the same gap sits at
 the same order as the run-to-run spread we measure in
-Section~\ref{sec:res:seeds}. A statistic can be this confident about a trajectory
+Appendix~\ref{sec:res:seeds}. A statistic can be this confident about a trajectory
 and say nothing about a re-run, which is exactly why we moved it out of the main
 text.
 
@@ -2696,7 +2696,7 @@ STEER-F $-$ \textsc{permuted} & \num{Wsignedpermutedacc} & \num{WTsignedpermuted
 \caption{Within-run stability over the eight converged-window validation points of
 seed~$\num{Wseed}$. The points are consecutive validations of one run and are
 therefore serially correlated, so $\mathrm{df}=7$ is generous and these $t$ values
-are not an estimate of run-to-run variation; see Section~\ref{sec:res:seeds} for
+are not an estimate of run-to-run variation; see Appendix~\ref{sec:res:seeds} for
 that. Majority-vote versions of the same four rows separate at
 $\num{WTsignedsteermaj}$ to $\num{WTsigneduniformmaj}$.}
 \label{tab:within}
