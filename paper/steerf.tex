@@ -83,8 +83,8 @@ estimators capture only the first, and the two are \emph{anti-correlated}: the l
 estimate is exactly zero at a uniform branch point, correctly so to first order,
 where the visitation term's prefactor is largest. We derive the missing channel into
 a per-token advantage $\AH$ whose reward-to-go is the remaining conditional entropy
-$\Htogo$, with an unbiased sibling-prefix baseline supplied by a tree-structured
-rollout. $\AH$ sums to zero within each sibling set, so it cannot change the average
+$\Htogo$, with an unbiased sibling-prefix baseline that a fixed tree-structured
+rollout schedule supplies, used for that purpose only. $\AH$ sums to zero within each sibling set, so it cannot change the average
 amount of damping, only which sibling is damped --- and it therefore predicts that
 the aggregate entropy curve, the usual evidence for such methods, cannot register
 it. A five-arm design that keeps the whole apparatus and destroys $\AH$'s value in
@@ -151,7 +151,9 @@ computes, and we obtain the state-only baseline from rollouts that share a prefi
 Plain group-relative rollouts almost never share prefixes, so we schedule the
 sharing: a tree-structured sampler branches a single root at fixed depths, and the
 resulting sibling sets give the baseline an actual support
-(Section~\ref{sec:tree}).
+(Section~\ref{sec:tree}). The tree is a device for the estimator. We use it because
+the visitation estimator cannot be computed without siblings, and we do not propose
+it as a sampling algorithm in its own right.
 
 The resulting per-token score $\AH$ is a deviation from a sibling mean and therefore
 sums to zero over each sibling set. This has a consequence we state up front because
@@ -177,9 +179,11 @@ We make the following contributions.
       ledger of the approximations that estimation requires, the sign of each one's
       error, and the mechanism that absorbs it
       (Sections~\ref{sec:ahdef}--\ref{sec:ledger}).
-\item A tree-structured rollout that supplies the sibling-prefix baseline, and a
-      bound showing what fraction of positions can carry a non-zero $\AH$ under
-      \emph{any} sampler (Section~\ref{sec:tree}).
+\item A fixed tree-structured rollout schedule as the device that supplies the
+      sibling-prefix baseline, and a bound showing what fraction of positions can
+      carry a non-zero $\AH$ under \emph{any} sampler (Section~\ref{sec:tree}). The
+      schedule is there to support the estimator; we make no claim for it as a
+      general-purpose sampler.
 \item A five-arm experiment that separates the contribution of $\AH$'s \emph{value}
       from that of the apparatus delivering it, by running the full pipeline twice
       with the value destroyed in two different ways, and the seed-paired contrasts
@@ -865,7 +869,10 @@ channel is not merely weak, it is identically absent.
 We therefore schedule the sharing. A tree sampler expands a single root and cuts it
 at fixed depths $d_1 < d_2 < d_3$ with branching factor $2$, yielding $n = 8$ leaves
 whose sibling structure is known in advance. The cuts create the only positions at
-which Eq.~\eqref{eq:branchonly} can fire.
+which Eq.~\eqref{eq:branchonly} can fire. This is the smallest change to the sampler
+that lets the estimator exist, and it is all we ask of the tree: the depths are
+fixed rather than chosen, and we do not tune or claim the schedule as a way to
+sample.
 
 \subsection{A ceiling on the support}
 
@@ -1462,7 +1469,10 @@ of $\num{Rlamzerouplift}$, against $\num{Rsteeruplift}$ for \textsc{steer} and
 $\num{Rsigneduplift}$ for STEER-F. On this evidence most of the structural gain is
 the sampler's, and Section~\ref{sec:res:ablate} reports it that way. The
 decomposition above is unaffected --- it is measured against GRPO, which has no tree
---- but the attribution is not what the five-arm design alone could see.
+--- but the attribution is not what the five-arm design alone could see. A gain that
+belongs to the sampler is outside what this paper set out to study, since the tree is
+here only to give $\AH$ its siblings; we report it and leave its explanation to work
+that studies structured sampling directly.
 
 \subsection{Mechanism diagnostics}
 \label{sec:res:diag}
@@ -1847,7 +1857,10 @@ report the block as measured and do not reconcile it. Whether the sampler or the
 forecast carries the structural term needs these arms at more seeds, which this
 paper does not have. Nothing here establishes that the tree does not carry it, and
 Section~\ref{sec:res:contrasts} is explicit that the forecast's \emph{value} does
-not survive its own registered test.
+not survive its own registered test. We do not turn this cell into a claim about the
+sampler either: the schedule was fixed in advance to give $\AH$ its siblings, it was
+not designed or tuned as a sampler, and whether structured sampling improves RLVR
+in its own right is a different question from the one this paper asks.
 
 \paragraph{The forecaster, replaced by what the trainer already has.}
 Section~\ref{sec:res:locality} builds the same sibling-differenced quantity from the
@@ -1982,10 +1995,13 @@ runs. Each of these items is the base method's \citep[App.~E]{steer}. Everything
 is the configuration of Section~\ref{sec:setup}, with one change: the tree sampler
 uses two roots, each cut at depths $\{64, 192\}$ with branching factor $2$, so the
 eight responses to a prompt form two independent groups of four instead of one group
-that shares its first $64$ tokens. We chose this shape after the five-arm campaign,
-from short runs measuring how often the eight rewards of a group tie, which removes
-signal from a GRPO update. The choice is exploratory, it was made on training prompts
-and not on any benchmark, and these runs are not one of the five arms. The selected
+that shares its first $64$ tokens. The purpose of the change was to keep the
+siblings the estimator needs while sharing less of each response, because short runs
+after the five-arm campaign showed the single-root tree making the eight rewards of a
+group tie more often, which removes signal from a GRPO update. It is an adjustment to
+keep the estimator's support affordable, not an attempt to improve the sampler. The
+choice is exploratory, it was made on training prompts and not on any benchmark, and
+these runs are not one of the five arms. The selected
 steps are \num{ProtostepBestOne} and \num{ProtostepBestTwo}.
 
 \begin{table}[t]
@@ -2095,6 +2111,13 @@ $\num{Fsignedoracleacc}$ below the forecast on the primary endpoint. That is a
 reason to keep the estimator rather than a licence to declare it necessary: a single
 draw on each side orders the two and does not size the difference.
 
+The tree, finally, was introduced only to give the estimator its siblings, and its
+schedule was fixed rather than chosen. Our ablations suggest that the sampler moves
+accuracy and majority vote on its own (Section~\ref{sec:res:ablate}). Whether
+structured rollout sampling improves RLVR in its own right, and where a fixed compute
+budget should place its branches, are questions this paper raises and does not
+answer.
+
 \section*{Limitations}
 
 \paragraph{A pre-registered falsification condition is met.}
@@ -2201,7 +2224,11 @@ the two are not the same statement.
 Section~\ref{sec:tree} bounds the fraction of positions carrying a non-zero $\AH$ at
 $2(n-1)/T$, on the order of a percent for our settings. Whether the effect scales
 with $n$, or with a branching schedule chosen adaptively rather than at fixed
-depths, is untested.
+depths, is untested. The tree schedule is fixed and was introduced only to provide
+sibling-prefix support. Whether structured rollout sampling itself improves RLVR,
+and how branch positions should be chosen under a fixed compute budget, remain open
+questions; the single-seed sampler arm of Section~\ref{sec:res:ablate} is a reason
+to ask them and not an answer to either.
 
 \paragraph{The base method does not reproduce its reported gain.} We run the
 base method with $\lambda_{\min} = 0.7$, the value its paper sets; its released
