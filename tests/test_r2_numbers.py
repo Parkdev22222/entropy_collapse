@@ -128,3 +128,15 @@ def test_missing_evaluations_leave_only_those_cells_red(tmp_path):
     assert values["ProtobestMeanAime"] == "17.4"
     assert "ProtobestMeanAmc" not in values
     assert sum("no evaluation log" in n for n in notes) == 4
+
+
+def test_unfinished_evaluation_is_reported_not_skipped(tmp_path):
+    # the 2026-10-06 s2 step-190 log: model path right, stopped before any metric
+    d = write_all(tmp_path)
+    (d / "eval-r2-s2-step190.log").write_text(
+        "actor_rollout_ref.model.path=checkpoints/STEER-F/steerf-r2-1p5b-s2-200/"
+        "global_step_190/actor/huggingface\n[score] 1.0\n")
+    values, notes = mod.collect(None, str(d), REF)
+    assert "ProtobestTwoAmc" not in values
+    assert "ProtobestTwoAime" in values
+    assert any("did not finish" in n for n in notes)

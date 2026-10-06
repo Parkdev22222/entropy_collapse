@@ -138,6 +138,8 @@ def eval_values(eval_text: str, run: str, step: int) -> tuple[dict, str]:
     seen, bad = check_eval_text(eval_text)
     if bad:
         return {}, "incoherent: " + "; ".join(bad)
+    if not seen:
+        return {}, "no metrics (the evaluation did not finish)"
     paths = set(re.findall(r"actor_rollout_ref\.model\.path=(\S+)", eval_text))
     want = f"{run}/global_step_{step}/"
     if not paths or not all(want in p for p in paths):
