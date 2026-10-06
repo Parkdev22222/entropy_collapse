@@ -72,43 +72,33 @@ Correcting the Visitation Channel in Token-Level Entropy Control for RLVR}
 \maketitle
 
 \begin{abstract}
-Reinforcement learning with verifiable rewards (RLVR) reliably drives a policy's
-entropy toward zero, and a growing family of methods intervenes by re-weighting the
-policy loss with a per-token estimate of how much each token's update costs in
-entropy. We show that every such method estimates only half of the relevant
-quantity. The gradient of the \emph{trajectory} entropy splits exactly into two
-terms: a \emph{local} channel, which asks how the conditional distribution at a
-visited state flattens or sharpens, and a \emph{visitation} channel, which asks how
-the probability of \emph{reaching} that state changes. Existing token-level
-estimators capture the first and are structurally blind to the second. We show the
-blindness is worse than an omission: the local estimator is exactly zero at a
-uniform branch point, that zero is the correct first-order answer, and the
-visitation term's prefactor is simultaneously maximal there --- the two channels are
-\emph{anti-correlated}, so no refinement of the local term can recover the missing
-signal. We then derive the missing channel into a per-token advantage $\AH$. Its
-reward-to-go is the remaining conditional entropy $\Htogo$, and the sibling-prefix
-baseline that keeps the estimator unbiased is supplied by a tree-structured rollout
-in which several samples share a prefix and diverge at scheduled depths. $\AH$ sums
-to zero within a sibling set by construction, so the correction cannot change the
-average amount of damping --- it can only decide which of two siblings is damped. A
-five-arm design, which runs the full pipeline twice with $\AH$'s value destroyed in
-two different ways, measures that consequence: switching the damping apparatus on or
-off moves the aggregate entropy ($t = \num{Tsteergrpoentropy}$ and
-$\num{Tuniformsteerentropy}$), while changing what $\AH$ carries with the apparatus
-held fixed does not move it detectably ($t = \num{Tsigneduniformentropy}$), and
-accuracy separates the two groups the other way round. The aggregate and the correction are dissociated, as
-the construction says they must be. We forecast $\Htogo$ with parallel
-multi-token-prediction heads, state the four approximations that estimation requires
-and what each discards, and report our own measurement that the forecast comes out
-close to a scalar multiple of a quantity the trainer already computes --- so the
-forecaster is one estimator of this reward-to-go, not a part the decomposition
-depends on. On accuracy the evidence is weaker and we say so: the gain over GRPO
-($\num{Csignedgrpoacc}$ over three seeds) sits inside GRPO's seed-to-seed spread and is
-close to zero on the two seeds where equal steps mean equal compute, and the pre-registered test of $\AH$'s value against a
-value-free control is met as a refutation. Run under the base method's own protocol
-and set beside its published table, two runs of the method average
-$\num{ProtobestMeanAvg}$ on six benchmarks against a reported $\num{ProtorefSteerAvg}$
---- an uncontrolled comparison, which we report as such.
+Reinforcement learning with verifiable rewards (RLVR) drives a policy's entropy
+toward zero, and a growing family of methods counters this by re-weighting the
+policy loss with a per-token estimate of each update's entropy cost. We show that
+these methods estimate only half of the relevant quantity. The gradient of the
+\emph{trajectory} entropy splits exactly into a \emph{local} channel --- how the
+conditional distribution at a visited state sharpens --- and a \emph{visitation}
+channel --- how the probability of reaching that state changes. Token-level
+estimators capture only the first, and the two are \emph{anti-correlated}: the local
+estimate is exactly zero at a uniform branch point, correctly so to first order,
+where the visitation term's prefactor is largest. We derive the missing channel into
+a per-token advantage $\AH$ whose reward-to-go is the remaining conditional entropy
+$\Htogo$, with an unbiased sibling-prefix baseline supplied by a tree-structured
+rollout. $\AH$ sums to zero within each sibling set, so it cannot change the average
+amount of damping, only which sibling is damped --- and it therefore predicts that
+the aggregate entropy curve, the usual evidence for such methods, cannot register
+it. A five-arm design that keeps the whole apparatus and destroys $\AH$'s value in
+two different ways confirms the dissociation over three seeds: switching the damping
+apparatus moves the aggregate entropy ($t = \num{Tsteergrpoentropy}$ and
+$\num{Tuniformsteerentropy}$), changing only what $\AH$ carries does not
+($t = \num{Tsigneduniformentropy}$), and accuracy separates the two groups the other
+way round. On accuracy we claim little. In our environment the method is above the
+base method by $\num{Csignedsteeracc}$ in converged AIME24 accuracy over three paired
+seeds, but the pre-registered test of $\AH$'s value against a value-free control is
+met as a refutation, so that gain --- measured against a base method that lands
+below GRPO in our runs --- belongs to the apparatus at least as much as to $\AH$. Under the base method's own protocol, two runs average
+$\num{ProtobestMeanAvg}$ on six benchmarks against its reported
+$\num{ProtorefSteerAvg}$, an uncontrolled comparison that we report as such.
 \end{abstract}
 
 \section{Introduction}
@@ -168,7 +158,12 @@ sums to zero over each sibling set. This has a consequence we state up front bec
 it determines what evidence can count: the method \emph{cannot} raise the average
 weight at branch points, only spread the weights of siblings apart. ``Total entropy
 went up'' is therefore not a prediction of this method, and an experiment looking
-for it is testing a different hypothesis (Section~\ref{sec:zerosum}).
+for it is testing a different hypothesis (Section~\ref{sec:zerosum}). The same
+property gives the experiment its target. If the correction cannot move the average,
+then the aggregate entropy curve --- the evidence usually offered for entropy control
+--- should move when the damping apparatus is switched and should not move when only
+$\AH$'s contents change. That is a prediction that can fail, and testing it is the
+empirical center of this paper.
 
 We make the following contributions.
 
@@ -198,16 +193,25 @@ We make the following contributions.
       is what this campaign establishes (Section~\ref{sec:res:entropy}).
 \end{itemize}
 
-We are equally explicit about what the campaign does not establish. Over three
-seeds STEER-F's converged AIME24 accuracy is above GRPO's by $\num{Csignedgrpoacc}$,
-but that gap is smaller than GRPO's own spread across seeds, it is carried mostly by
-the one seed on which the treatment also had the larger compute budget
-(Section~\ref{sec:res:compute}), and the pre-registered test of whether $\AH$'s
-\emph{value} matters --- STEER-F against the same apparatus with that value
-discarded --- straddles zero across seeds, which the registration defined as a
-refutation (Section~\ref{sec:res:contrasts}). We report it as one. This is a paper
-about where token-level entropy control acts and what an aggregate entropy curve can
-and cannot tell us about it, not a paper claiming an accuracy gain.
+We are equally explicit about what the campaign does not establish, which is an
+accuracy gain attributable to $\AH$. Over three paired seeds STEER-F's converged
+AIME24 accuracy is above the base method's by $\num{Csignedsteeracc}$ and above GRPO's
+by $\num{Csignedgrpoacc}$. The second gap is smaller than GRPO's own spread across
+seeds and is carried mostly by the one seed on which the treatment also had the
+larger compute budget (Section~\ref{sec:res:compute}). The first is the larger and
+the more stable, but it is measured against a base method that lands below GRPO in
+our environment (Section~\ref{sec:res:ablate}), it changes the sampler and the
+correction together, and the
+pre-registered test that separates them --- STEER-F against the same apparatus with
+$\AH$'s value discarded --- straddles zero across seeds, which the registration
+defined as a refutation (Section~\ref{sec:res:contrasts}). We report it as one, and
+we credit that gain to the apparatus at least as much as to $\AH$. Run under the base
+method's own protocol and set beside its published numbers, two runs of the method
+average $\num{ProtobestMeanAvg}$ on six benchmarks against a reported
+$\num{ProtorefSteerAvg}$ (Section~\ref{sec:reported}); that comparison is
+uncontrolled, and we use it only to place the method, not to rank it. This is a
+paper about where token-level entropy control acts and what an aggregate entropy
+curve can and cannot tell us about it, not a paper claiming an accuracy gain.
 
 \section{Related Work}
 \label{sec:related}
