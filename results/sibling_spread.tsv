@@ -1,0 +1,10 @@
+arm	seed	spread	n_steps	log
+permuted	1	0.175515	71	train-steer-f-Qwen2.5-Math-1.5B-s1-tree-rollout-permuted.log
+permuted	3	0.180765	71	train-steer-f-Qwen2.5-Math-1.5B-s3-tree-rollout-permuted.log
+permuted	4	0.180057	71	train-steer-f-Qwen2.5-Math-1.5B-s4-tree-rollout-permuted.log
+signed	1	0.174296	71	train-steer-f-Qwen2.5-Math-1.5B-s1-tree-rollout.log
+signed	3	0.185087	71	train-steer-f-Qwen2.5-Math-1.5B-s3-tree-rollout.log
+signed	4	0.180187	71	train-steer-f-Qwen2.5-Math-1.5B-s4-tree-rollout.log
+uniform	1	0.191291	71	train-steer-f-Qwen2.5-Math-1.5B-s1-tree-rollout-uniform.log
+uniform	3	0.182482	71	train-steer-f-Qwen2.5-Math-1.5B-s3-tree-rollout-uniform.log
+uniform	4	0.188994	71	train-steer-f-Qwen2.5-Math-1.5B-s4-tree-rollout-uniform.log

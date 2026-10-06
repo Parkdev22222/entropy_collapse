@@ -266,6 +266,12 @@ def emittable_names():
     spec.loader.exec_module(r2)
     extra |= r2.names()
 
+    spec = importlib.util.spec_from_file_location(
+        "sibling_spread", ROOT / "scripts" / "sibling_spread.py")
+    sp = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(sp)
+    extra |= sp.names()
+
     return names | prefixed | extra
 
 

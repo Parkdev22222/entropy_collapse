@@ -37,7 +37,8 @@ from pathlib import Path
 LOG_DIR = "logs/experiments"
 LOG_RE = re.compile(r"^(train|eval)-.*\.log$")
 RESULT_FILES = ["per_seed.tsv", "arm_means.tsv", "contrasts.tsv",
-                "compute_match.tsv", "summary.tsv", "paired_se.json"]
+                "compute_match.tsv", "summary.tsv", "paired_se.json",
+                "sibling_spread.tsv"]
 
 # Model-hub owners that are public organisations, not people: their paths are
 # kept (they name the models and datasets the paper uses).
