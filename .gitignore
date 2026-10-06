@@ -18,3 +18,4 @@ artifacts/
 # manuscript compiles without the training logs, the rest is regenerated
 results/*.tsv
 results/tables.tex
+paper/arr_supplement.zip

@@ -673,7 +673,7 @@ STEER-F        & --- & \num{Rxclipsignedacc} & \num{Rxclipsignedmaj} \\
 \bottomrule
 \end{tabular}
 \caption{Follow-up ablations, converged window, one seed per row and no error bar.
-The seed is whichever one the arm was run at, and the release emits it with the row;
+The seed is whichever one the arm was run at, and our analysis emits it with the row;
 the \textsc{oracle} arm is seed $\num{Roracleseed}$, run there so that it shares a
 seed with the STEER-F and \textsc{uniform} runs the six-benchmark evaluation pairs.
 The $\lambda = 0.25$ line is the reference and is Table~\ref{tab:plateau}'s
@@ -681,7 +681,7 @@ across-seed mean rather than one run. Every row but \textsc{oracle} ran on the
 $\num{Rlamzerogpus}$-GPU box while the seed-1 STEER-F reference ran on the smaller
 one, so those rows carry the machine effect of Appendix~\ref{sec:res:seeds}
 ($\num{Boxdelta}$, in the direction that flatters them) on top of whatever the
-ablation does. The release emits a same-seed contrast for \textsc{oracle} alone,
+ablation does. Our analysis emits a same-seed contrast for \textsc{oracle} alone,
 because it is the one row whose box matches its reference's. Each block isolates one
 element of the design. The relaxed-clipping block has no \textsc{steer} control: that
 run stopped at training step $\num{Rxclipsteerlaststep}$, before the converged window
@@ -1662,8 +1662,8 @@ distinction could matter, the length-corrected product as well.
 \label{sec:results-app}
 All numbers below come from the runs described in Section~\ref{sec:setup}:
 $110$ optimization steps per arm from the same initial checkpoint, validated on
-AIME24. Every figure is recomputed from a training log released with this paper by
-one script; we report our own measurements only, and no figure in this section is
+AIME24. Every figure is recomputed by one script from a training log included in the
+supplementary material; we report our own measurements only, and no figure in this section is
 taken from prior work. Appendix~\ref{sec:reported}, which follows it, is the one place
 that does.
 
@@ -1672,7 +1672,7 @@ seeds on which all five arms finished --- so a difference of two rows of
 Table~\ref{tab:plateau} is the corresponding paired entry of
 Table~\ref{tab:contrast}. Seed $2$ is excluded because its STEER-F run did not
 complete; its other four arms did, and every run, excluded or not, is in the
-released \texttt{per\_seed.tsv}. Appendix~\ref{sec:res:seeds} reports what the
+\texttt{per\_seed.tsv} of the supplementary material. Appendix~\ref{sec:res:seeds} reports what the
 repeats measure --- the run-to-run spread, and the machine each seed ran on.
 
 \paragraph{Which result carries which weight.} What follows is not one kind of
@@ -1702,7 +1702,7 @@ dissociation, not the gap.
 
 Table~\ref{tab:curve} gives AIME24 accuracy and majority-vote accuracy at every
 validation point of seed $1$, the one seed every arm ran first; the other seeds'
-trajectories are in the release. Four of the five arms start from an identical
+trajectories are in the supplementary logs. Four of the five arms start from an identical
 step-0 score; \textsc{steer} starts at $.043$ rather than $.039$, a gap we
 attribute to re-sampling noise rather than to a different checkpoint, since two
 validations of the \emph{same} base weights in our logs differ by $.004$ in
@@ -1739,8 +1739,9 @@ weight among siblings rather than adding any. An intervention that is this spars
 and mean-preserving by construction should leave an average over every response
 token close to where it found it. Both statements were written into the manuscript
 before the campaign was launched, Section~\ref{sec:zerosum} explicitly so
-(``we state it before presenting any experiment''), and the artifact history dates
-them an hour ahead of the pre-registration discussed below.
+(``we state it before presenting any experiment''), and the repository history, to
+be made public with the code, dates them an hour ahead of the pre-registration
+discussed below.
 
 \paragraph{What the seeds show.} Table~\ref{tab:entropy} groups the contrasts by
 what each one changes, and the grouping separates them cleanly. The two contrasts
@@ -1771,7 +1772,7 @@ means is not stable at this seed count: the rank correlation between converged
 entropy and converged accuracy comes out with a different sign depending on whether
 each arm is averaged over the seed common to all five (Table~\ref{tab:plateau}) or
 over its own, which differ in number while the campaign runs. Both seed sets are in
-the released \texttt{per\_seed.tsv}. Third, and because of the first two, \emph{we
+the supplementary \texttt{per\_seed.tsv}. Third, and because of the first two, \emph{we
 claim nothing from it in either direction}: the condition is not reported as passed,
 and the theory is not reported as damaged by it. It was the wrong instrument to have
 registered, and the honest correction is to say so and to register a better one.
@@ -1788,7 +1789,7 @@ $\AH$ is exactly zero at almost every position, the remainder of that decile is
 filled by an arbitrary tie-break rather than by branching. Appendix~\ref{sec:res:diag} reports
 what that monitor does and does not select. The replacement restricts the split to
 $\AH \ne 0$, the same predicate the correction itself uses, and is instrumented in
-the release; no run reported here carries it, so this test is registered and not
+our trainer; no run reported here carries it, so this test is registered and not
 performed. That test is registered
 in Appendix~\ref{sec:appendix-prereg}, before those runs, and we state here that it
 is registered after this section's original condition was retired rather than
@@ -1968,8 +1969,8 @@ $\num{Supportbound}$. Measured over the same window and seeds, the three tree ar
 sit at $\num{Runiformbranchfrac}$ (\textsc{uniform}), $\num{Rpermutedbranchfrac}$
 (\textsc{permuted}) and $\num{Rsignedbranchfrac}$ (STEER-F), i.e.\ at
 $\num{Supportpctlo}$--$\num{Supportpcthi}\%$ of a ceiling that no sampler can
-exceed. A plain-rollout pilot with the same $\lambda$ (seed $1$, released with the
-logs) reaches $.003$. As Appendix~\ref{sec:combine} notes, this
+exceed. A plain-rollout pilot with the same $\lambda$ (seed $1$, included with the
+supplementary logs) reaches $.003$. As Appendix~\ref{sec:combine} notes, this
 count admits float32 round-off and is an upper bound; the runs reported here predate
 the round-off-free counter, so we quote the loose figure and label it as such.
 
@@ -2075,8 +2076,8 @@ relaunches it with the same seed. STEER-F at seed $4$ stopped at training step $
 when its machine lost a GPU; it was relaunched at seed $4$ and the relaunch, which
 reached step $110$, is the run reported. STEER-F at seed $2$ failed at start-up on a
 missing module and was not relaunched within this campaign's budget, which is why
-seed $2$ is outside the seed set. Both failed runs are in the release, flagged
-rather than deleted.
+seed $2$ is outside the seed set. Both failed runs are in the supplementary logs,
+flagged rather than deleted.
 
 \paragraph{A seed index also names a machine.} A seed of this campaign ran on a
 two-GPU box or a four-GPU one, uniformly across arms, and the seed set this paper
@@ -2097,8 +2098,8 @@ What the figure does not reach is the comparisons, for two reasons that do not d
 on how well it is estimated. The contrasts pair inside a seed and therefore inside a
 machine, so whatever a box is worth cancels in the pair. And every arm in
 Table~\ref{tab:plateau} carries the same $\num{Boxnlo}$-to-$\num{Boxnhi}$ mix, so a
-row difference does not carry a box mix either. The release prints the per-arm machine
-mix on every run of the analysis.
+row difference does not carry a box mix either. Our analysis prints the per-arm machine
+mix on every run.
 
 \paragraph{Run-to-run spread, and it is the number that governs this section.}
 Every arm has now finished more than once. GRPO's converged-window accuracy moves
@@ -2140,8 +2141,8 @@ $\mathrm{avg@}1$.
 An evaluation enters the table only if its log agrees with itself. The trainer prints
 each benchmark twice on the same line, as accuracy and as the mean of a reward that is
 $+1$ for a correct sample and $-1$ otherwise, so on every benchmark the accuracy must
-equal half of one plus the reward; the release checks this for every evaluation log
-(\texttt{scripts/check\_eval\_logs.py}). It is a test of coherence, not of provenance
+equal half of one plus the reward; our analysis checks this for every evaluation log,
+and the supplementary logs let a reader repeat the check. It is a test of coherence, not of provenance
 --- an edit that moved both numbers together would pass it. Absent from the table,
 for want of an evaluation that passes it: \num{Benchmissing}. Each row averages the
 checkpoints evaluated at the seeds in its last column.
@@ -2549,10 +2550,11 @@ rather than to floating-point tolerance.
 \section{Pre-Registered Analysis}
 \label{sec:appendix-prereg}
 
-The analysis plan below was committed to the artifact repository before any run of
+The analysis plan below was committed, with a timestamp, to the project repository
+(to be made public with the code) before any run of
 the multi-seed campaign was launched, so that the statistics could not be chosen to
 fit the outcome. It is reproduced here in full; the file is
-\texttt{docs/preregistration\_5seed.md} in the release.
+\texttt{docs/preregistration\_5seed.md} in that repository.
 
 \paragraph{Unit and primary endpoint.} The unit of analysis is the seed, not the
 validation step. Each run is reduced to one number --- its mean $\mathrm{acc@}32$ on
@@ -2600,7 +2602,8 @@ recorded here rather than silently absorbed.
 not carried out in full. (i) Seeds: every arm completed seeds $1$--$4$ except
 STEER-F at seed $2$, which failed at start-up and was not relaunched; the seed-$5$
 runs were started and not completed. The analysis therefore uses the seeds on which
-all five arms finished, $\num{Seedset}$, and the other runs are released but enter
+all five arms finished, $\num{Seedset}$, and the other runs are in the supplementary
+logs but enter
 no statistic. (ii) Machines: seed $1$ ran on a two-GPU box and seeds $3$ and $4$ on a
 four-GPU box, for every arm (Appendix~\ref{sec:res:seeds}). (iii) The six-benchmark
 evaluation covers one seed per arm and no \textsc{steer} checkpoint
@@ -2613,9 +2616,9 @@ OPO, each with STEER-F and \textsc{steer}) failed at start-up on infrastructure
 errors and completed no training step; the base method at the released
 $\lambda_{\min} = 0.8$ was not launched; the relaxed-clipping \textsc{steer} control
 stopped at step $\num{Rxclipsteerlaststep}$. None of them enters
-Table~\ref{tab:followups}, and their logs are released. The choice to analyse on the common seed set was made after
+Table~\ref{tab:followups}, and their logs are in the supplementary material. The choice to analyse on the common seed set was made after
 per-seed results were visible; it is the only set on which all five arms exist, and
-every run outside it is released.
+every run outside it is in the supplementary logs.
 
 \paragraph{Second amendment, added 2026-09-21, after this section's own entropy
 condition was retired.} Everything above was fixed before the campaign ran. This

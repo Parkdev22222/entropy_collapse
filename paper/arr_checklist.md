@@ -33,9 +33,11 @@ Yes.
   training/evaluating mathematical reasoning, used for that purpose only.
 - **B4. Data containing personal information or offensive content?** No — competition
   mathematics problems; no personal data.
-- **B5. Documentation of the artifacts?** Yes for what we release: code, training
-  logs, `per_seed.tsv` and the analysis scripts are in the supplementary material
-  (anonymized).
+- **B5. Documentation of the artifacts?** Yes for what we submit: the training and
+  evaluation logs of every reported run and the per-seed result tables
+  (`per_seed.tsv` etc.) are in the anonymized supplementary archive
+  (`paper/arr_supplement.zip`, built by `scripts/make_supplement.py`), with a
+  README. Code is not submitted for review; it will be released upon publication.
 - **B6. Statistics of the data?** Yes — Section 5 and Appendix D: 17k training
   problems, 512 prompts × 110 steps, AIME24 30 problems × 32 samples; Appendix E.9
   for the six benchmarks.
@@ -60,8 +62,8 @@ Yes.
   per-seed ranges, and the across-problem SE of one AIME24 evaluation; single-seed
   ablations are marked n = 1 with no error bar.
 - **C4. Existing packages used, with versions and parameters?** Yes — verl, vLLM 0.8.4,
-  PyTorch 2.6, transformers 4.x (Appendix H; versions pinned in `run/setup_env.sh`
-  in the supplementary material). Answer extraction and grading: the base method's
+  PyTorch 2.6, transformers 4.x (Appendix H; exact versions will be
+  released with the code). Answer extraction and grading: the base method's
   released scorer (Math-Verify-style rule plus Qwen grader).
 
 ## D. Did you use human annotators or research with human subjects?
