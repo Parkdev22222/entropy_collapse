@@ -68,9 +68,6 @@ The Missing Visitation Channel in Token-Level Entropy Control for RLVR}
 % The two-root, 200-step runs set beside the base method's published table:
 %   scripts/emit_r2_numbers.py  ->  results/numbers-r2.tex
 \loadnumbers{numbers-r2.tex}
-% The sibling-spread proxy (exploratory; plan fixed first in
-% docs/sibling_spread_analysis.md):  scripts/sibling_spread.py -> results/numbers-spread.tex
-\loadnumbers{numbers-spread.tex}
 
 \begin{document}
 \maketitle
@@ -198,9 +195,8 @@ Our contributions are:
 \item \textbf{An experimental test of these predictions:} five arms that separate
       changes to the damping mechanism from changes to the branch-specific signal. The
       predicted dissociation is observed --- aggregate entropy tracks the mechanism, not
-      the signal --- while an exploratory proxy for the second prediction, a wider
-      spread across siblings, is inconclusive
-      (Sections~\ref{sec:setup}--\ref{sec:res:entropy}, Appendix~\ref{sec:res:spread}).
+      the signal; the second prediction, a wider spread across siblings, is not
+      measured here (Sections~\ref{sec:setup}--\ref{sec:res:entropy}).
 \end{itemize}
 We do not establish an accuracy gain from the correction: the pre-registered test of
 the $\AH$ signal against a signal-free control is not supported
@@ -568,10 +564,7 @@ predicts and the sense in which this is not a method for suppressing entropy.
 \paragraph{Caveat.} Three paired seeds establish the qualitative pattern more strongly
 than its effect sizes; a small difference that reproduces across seeds can still reach
 a large $t$, as the \textsc{permuted} row does. The positive prediction --- that the
-spread across siblings widens --- is not measured directly; a post hoc proxy built from
-the logged forecast does not detect it (STEER-F against \textsc{permuted}
-$\num{SpreadRelPermuted}\%$, against \textsc{uniform} $\num{SpreadRelUniform}\%$, both
-inside the logs' $5\%$ resolution; Appendix~\ref{sec:res:spread}); a registered condition on the ordering of arm means was
+spread across siblings widens --- is not measured; a registered condition on the ordering of arm means was
 retired rather than scored, for reasons given in Appendix~\ref{sec:res:entropy-app}.
 
 \subsection{Accuracy and entropy by arm}
@@ -837,9 +830,8 @@ Section~\ref{sec:blind} is analytic, but we have not measured the local and visi
 terms together at real sibling-divergence positions in live rollouts, so
 Table~\ref{tab:anticorr} is a prediction rather than an observation. The positive
 prediction of the zero sum --- that the spread across siblings widens --- is not
-measured directly; an exploratory proxy from the logged forecast, defined before it
-was computed, is inconclusive (Appendix~\ref{sec:res:spread}). The dissociation we
-measure is its negative half. Whether the effect scales with the number of samples or with an
+measured: no run logs the realized to-go entropy of siblings at their branch points.
+The dissociation we measure is its negative half. Whether the effect scales with the number of samples or with an
 adaptively chosen branching schedule is untested, and whether structured rollout
 sampling improves RLVR in its own right is a question this paper raises and does not
 answer.
@@ -1797,8 +1789,7 @@ registered, and the honest correction is to say so and to register a better one.
 \paragraph{The measurement that is actually owed.} Section~\ref{sec:zerosum} states
 the prediction that a sum-zero correction does make: not that entropy at branch
 points rises, but that the \emph{spread across siblings} widens. No quantity we
-currently log tests it directly; Appendix~\ref{sec:res:spread} reports the closest
-proxy the logs allow, defined before it was computed, and it is inconclusive. The trainer does log an entropy split
+currently log tests it directly. The trainer does log an entropy split
 (\texttt{steerf/branch\_entropy}), and an earlier draft of this section read it as
 entropy at branch points; it is not. That monitor takes a fixed top decile of
 $\AH$ --- a tenth of all response tokens --- while the positions $\AH$ can reach are
@@ -2418,44 +2409,6 @@ $\num{Seedset}$, so there is no spread to put beside it at all. We therefore
 report these as the cost of the runs we made and not as a coefficient of the method.
 What does isolate the heads from the tree is the \textsc{oracle} arm of
 Appendix~\ref{sec:res:ablate}, which removes the heads at fixed tree and fixed seed.
-
-\subsection{Sibling spread from the logged forecast (exploratory)}
-\label{sec:res:spread}
-
-The zero sum predicts that STEER-F widens the spread across siblings rather than
-raising their mean. No run logs that spread on realized entropy, so after the
-campaign we asked the closest question the logs can answer, and fixed the quantity,
-window, seeds, contrasts and verdict rule in a committed plan before computing any of
-it. The analysis is post hoc with respect to the pre-registration and is reported
-whatever it shows.
-
-\paragraph{Quantity.} At each training step, the RMS of $\AH$ per branch point,
-$S_t = \sigma_t(\AH)\sqrt{G\bar{L}_t / N_t}$, where $\sigma_t(\AH)$ is the logged
-standard deviation of $\AH$ over all response tokens ($\AH$ has mean zero because it
-sums to zero per sibling set), $G\bar{L}_t$ the number of response tokens and $N_t$
-the logged number of sibling divergence points. It measures how far a branch's
-\emph{forecast} to-go entropy sits from its siblings'. The plan first specified the
-mean absolute $\AH$; the trainer prints these monitors to three decimals, which
-rounds that to zero, and the plan was amended to the RMS before any contrast was
-computed. The same rounding quantizes a single step to about $5\%$, so a contrast
-smaller than that counts as not distinguishable.
-
-\paragraph{Result.} Over steps $40$--$110$ on seeds $\num{Seedset}$, STEER-F's
-spread relative to \textsc{permuted} is $\num{SpreadRelPermuted}\%$ (per seed
-$\num{SpreadLoPermuted}\%$ to $\num{SpreadHiPermuted}\%$, positive on
-$\num{SpreadPosPermuted}$ of $\num{SpreadNseeds}$, $t = \num{SpreadTPermuted}$), and
-relative to \textsc{uniform} it is $\num{SpreadRelUniform}\%$
-($\num{SpreadLoUniform}\%$ to $\num{SpreadHiUniform}\%$, positive on
-$\num{SpreadPosUniform}$, $t = \num{SpreadTUniform}$). The rule fixed in advance
-calls this \emph{\num{SpreadVerdict}}.
-
-\paragraph{Reading.} The proxy does not detect a widening. Three things limit what
-that says. It is the forecast's spread, not the policy's, and Appendix~\ref{sec:res:locality}
-shows the forecast is close to a one-step quantity. The logged monitors resolve about
-$5\%$, and both contrasts sit inside that. And three seeds with $\mathrm{df} = 2$ bound
-an effect of this size only loosely. The prediction is therefore neither supported nor
-refuted by these runs; the test it needs --- the spread of realized to-go entropy
-across siblings at the branch points, logged at full precision --- remains to be run.
 
 \subsection{A note on how these numbers were selected}
 \label{sec:res:selection}
