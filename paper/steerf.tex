@@ -254,6 +254,15 @@ rewards with token entropy \citep{cheng2025reasoning,tan2025gtpo,zhang2025dedge}
 \citet{steer} estimate each token's first-order effect on conditional entropy, the
 estimator our analysis extends.
 
+\paragraph{Tree-structured rollouts.} Sampling a group as a tree of shared prefixes has
+been used to give intermediate decisions their own reward credit, by estimating the
+expected outcome below each node \citep{hou2025treerl,yang2025treerpo,cao2026treeadv},
+and to choose where to branch: at high-uncertainty positions
+\citep{hou2025treerl,cao2026treeadv}, or where a branch most reduces uncertainty
+about the policy gradient \citep{khomich2026epig}. We use the same structure for a
+different quantity: siblings supply a baseline for the remaining entropy rather than
+for the reward, and the schedule is fixed.
+
 \paragraph{Trajectory-level diversity.} Token-level entropy can stay high while the
 diversity of final answers falls \citep{wu2025ainvisible}, and explicit outcome-level
 exploration targets that diversity directly \citep{song2025outcome}. The visitation
@@ -840,7 +849,7 @@ Table~\ref{tab:anticorr} is a prediction rather than an observation. The positiv
 prediction of the zero sum --- that the spread across siblings widens --- is not
 measured: no run logs the realized to-go entropy of siblings at their branch points.
 The dissociation we measure is its negative half. Whether the effect scales with the number of samples or with an
-adaptively chosen branching schedule is untested, and whether structured rollout
+adaptively chosen branching schedule \citep{cao2026treeadv,khomich2026epig} is untested, and whether structured rollout
 sampling improves RLVR in its own right is a question this paper raises and does not
 answer.
 
@@ -915,6 +924,22 @@ is what matters, and it motivates a per-token treatment; it does not, however,
 distinguish the two channels, since forking tokens are identified by their local
 entropy. Our analysis predicts that a local criterion will select a systematically
 different set from the one the visitation channel would select.
+
+\paragraph{Tree-structured rollouts.}
+TreeRL \citep{hou2025treerl} trains with on-policy tree search, branching from
+high-uncertainty intermediate steps, and derives step-level credit from the outcomes
+below each node; TreeRPO \citep{yang2025treerpo} forms step-level groups from tree
+sampling to estimate the expected reward of intermediate steps. TreeAdv
+\citep{cao2026treeadv} branches where the token entropy exceeds a threshold and
+assigns each shared segment the mean of the group-normalized advantages of the leaves
+below it. EPIG-Tree \citep{khomich2026epig} places branches where an additional
+branch most reduces uncertainty about the policy gradient. $\AH$ has the same shape
+as these node-level estimates --- an average over the continuations below a node,
+compared with a reference --- but its reward-to-go is the remaining conditional
+entropy, its reference is the sibling mean, so it sums to zero over each sibling set,
+and it enters through the token weight rather than through the advantage. Whether an
+adaptive schedule of the kind these methods use changes what the visitation term does
+is left open.
 
 \paragraph{Local stochasticity without global diversity.}
 \citet{wu2025ainvisible} report that token-level entropy can remain high while the
