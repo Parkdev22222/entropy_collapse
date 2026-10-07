@@ -195,9 +195,12 @@ Our contributions are:
 \item \textbf{A diagnostic consequence:} because the correction is mean-preserving within
       sibling sets, aggregate token entropy is not an appropriate diagnostic for whether
       it acts (Section~\ref{sec:zerosum}).
-\item \textbf{An experiment} with five arms that separates changes to the damping
-      mechanism from changes to the branch-specific signal and observes the predicted
-      dissociation in aggregate entropy (Sections~\ref{sec:setup}--\ref{sec:res:entropy}).
+\item \textbf{An experimental test of these predictions:} five arms that separate
+      changes to the damping mechanism from changes to the branch-specific signal. The
+      predicted dissociation is observed --- aggregate entropy tracks the mechanism, not
+      the signal --- while an exploratory proxy for the second prediction, a wider
+      spread across siblings, is inconclusive
+      (Sections~\ref{sec:setup}--\ref{sec:res:entropy}, Appendix~\ref{sec:res:spread}).
 \end{itemize}
 We do not establish an accuracy gain from the correction: the pre-registered test of
 the $\AH$ signal against a signal-free control is not supported
@@ -468,7 +471,9 @@ the branch-specific $\AH$ signal (Table~\ref{tab:arms}). \textsc{uniform} applie
 same attenuation to every position in the support: it removes the $\AH$ signal while
 preserving its support, which implements the ``raise the mean'' hypothesis.
 \textsc{permuted} shuffles $\AH$ within each sibling set: it preserves the distribution
-of $\AH$ magnitudes and the zero sum but destroys the branch--score assignment.
+of $\AH$ magnitudes and the zero sum but destroys the branch--score assignment. We
+call the arm that carries the correction STEER-F; it is the instrument with which the
+analysis's predictions are tested, not a method proposed for adoption.
 
 \begin{table}[t]
 \centering
@@ -482,7 +487,7 @@ GRPO      & ---   & plain & none \\
 STEER     & $0$   & plain & local $\Om$ only \\
 uniform   & $.25$ & tree  & support only \\
 permuted  & $.25$ & tree  & $\AH$ shuffled \\
-\textbf{STEER-F} & $.25$ & tree & $\AH$ as derived \\
+STEER-F & $.25$ & tree & $\AH$ as derived \\
 \bottomrule
 \end{tabular}
 \caption{The five arms. \textsc{uniform} and \textsc{permuted} keep the damping
@@ -504,66 +509,10 @@ every figure is recomputed from the training logs by one script.
 \section{Results}
 \label{sec:results}
 
-\subsection{Converged window}
-\label{sec:res:main}
-
-\begin{table}[t]
-\centering
-\scriptsize
-\setlength{\tabcolsep}{2.6pt}
-\begin{tabular}{@{}lcr@{\,$\pm$\,}lr@{\,$\pm$\,}lcc@{}}
-\toprule
-arm & $n$ & \multicolumn{2}{c}{acc@32} & \multicolumn{2}{c}{maj@32} & uplift & entropy \\
-\midrule
-GRPO             & \num{Ngrpo}     & \num{Rgrpoacc}     & \num{Egrpoacc}     & \num{Rgrpomaj}     & \num{Egrpomaj}     & \num{Rgrpouplift}     & \num{Rgrpoentropy}     \\
-\textsc{steer}   & \num{Nsteer}    & \num{Rsteeracc}    & \num{Esteeracc}    & \num{Rsteermaj}    & \num{Esteermaj}    & \num{Rsteeruplift}    & \num{Rsteerentropy}    \\
-\textsc{uniform} & \num{Nuniform}  & \num{Runiformacc}  & \num{Euniformacc}  & \num{Runiformmaj}  & \num{Euniformmaj}  & \num{Runiformuplift}  & \num{Runiformentropy}  \\
-\textsc{permuted}& \num{Npermuted} & \num{Rpermutedacc} & \num{Epermutedacc} & \num{Rpermutedmaj} & \num{Epermutedmaj} & \num{Rpermuteduplift} & \num{Rpermutedentropy} \\
-\textbf{STEER-F} & \num{Nsigned}   & \num{Rsignedacc}   & \num{Esignedacc}   & \num{Rsignedmaj}   & \num{Esignedmaj}   & \num{Rsigneduplift}   & \num{Rsignedentropy}   \\
-\bottomrule
-\end{tabular}
-\caption{Means over steps $40$--$110$ on seeds $\num{Seedset}$, $\pm$ the standard
-error across seeds. Because the seed set is shared, a difference of two rows is the
-paired contrast of Table~\ref{tab:entropy}. Entropy is the token-mean quantity.}
-\label{tab:plateau}
-\end{table}
-
-Table~\ref{tab:plateau} averages each arm over the converged window, and
-Table~\ref{tab:curve} gives one seed's full trajectory. The three arms without the
-$\AH$ signal --- \textsc{steer}, \textsc{uniform}, \textsc{permuted} --- sit below
-GRPO on accuracy and STEER-F above it, by less than GRPO's standard error across
-seeds. On entropy GRPO holds the most and the four damped arms sit close together. The
-two columns are neither aligned nor reversed; read as contrasts, they separate.
-
-\begin{table}[t]
-\centering
-\footnotesize
-\setlength{\tabcolsep}{2.6pt}
-\begin{tabular}{@{}rccccc@{}}
-\toprule
-step & GRPO & \textsc{steer} & \textsc{unif} & \textsc{perm} & \textbf{STEER-F} \\
-\midrule
-0   & .039/.035 & .043/.040 & .039/.035 & .039/.035 & .039/.035 \\
-10  & .075/.127 & .064/.109 & .070/.124 & .062/.126 & .078/.148 \\
-20  & .120/.176 & .114/.195 & .102/.171 & .087/.155 & .103/.181 \\
-30  & .108/.195 & .135/.215 & .121/.223 & .099/.178 & .113/.211 \\
-\midrule
-40  & .144/.236 & .115/.187 & .119/.201 & .116/.197 & .141/.230 \\
-50  & .120/.204 & .125/.196 & .121/.216 & .153/.224 & .145/.258 \\
-60  & .126/.178 & .139/.202 & .125/.203 & .135/.190 & .145/.237 \\
-70  & .130/.200 & .128/.200 & .129/.197 & .132/.227 & .147/.257 \\
-80  & .135/.182 & .135/.202 & .140/.204 & .134/.197 & .144/.206 \\
-90  & .136/.191 & .144/.212 & .142/.178 & .130/.210 & \textbf{.166}/.239 \\
-100 & .132/.171 & .146/.207 & .134/.192 & .144/.212 & .157/.222 \\
-110 & .157/.208 & .132/.181 & .140/.171 & .152/.218 & .151/.230 \\
-\bottomrule
-\end{tabular}
-\caption{AIME24 $\mathrm{acc@}32/\mathrm{maj@}32$ at every validation point, seed
-$1$. Rows below the rule are the converged window used for all subsequent
-statistics. One seed is one trajectory: the across-seed statistics are in
-Tables~\ref{tab:plateau} and~\ref{tab:contrast}.}
-\label{tab:curve}
-\end{table}
+The results are ordered by what the analysis predicts. The first is the
+dissociation the zero sum implies (Section~\ref{sec:res:entropy}); the per-arm
+numbers, accuracy included, come after it as the material the contrasts are built
+from.
 
 \subsection{Aggregate entropy tracks the damping mechanism, not the $\AH$ signal}
 \label{sec:res:entropy}
@@ -624,6 +573,68 @@ the logged forecast does not detect it (STEER-F against \textsc{permuted}
 $\num{SpreadRelPermuted}\%$, against \textsc{uniform} $\num{SpreadRelUniform}\%$, both
 inside the logs' $5\%$ resolution; Appendix~\ref{sec:res:spread}); a registered condition on the ordering of arm means was
 retired rather than scored, for reasons given in Appendix~\ref{sec:res:entropy-app}.
+
+\subsection{Accuracy and entropy by arm}
+\label{sec:res:main}
+
+\begin{table}[t]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{2.6pt}
+\begin{tabular}{@{}lcr@{\,$\pm$\,}lr@{\,$\pm$\,}lcc@{}}
+\toprule
+arm & $n$ & \multicolumn{2}{c}{acc@32} & \multicolumn{2}{c}{maj@32} & uplift & entropy \\
+\midrule
+GRPO             & \num{Ngrpo}     & \num{Rgrpoacc}     & \num{Egrpoacc}     & \num{Rgrpomaj}     & \num{Egrpomaj}     & \num{Rgrpouplift}     & \num{Rgrpoentropy}     \\
+\textsc{steer}   & \num{Nsteer}    & \num{Rsteeracc}    & \num{Esteeracc}    & \num{Rsteermaj}    & \num{Esteermaj}    & \num{Rsteeruplift}    & \num{Rsteerentropy}    \\
+\textsc{uniform} & \num{Nuniform}  & \num{Runiformacc}  & \num{Euniformacc}  & \num{Runiformmaj}  & \num{Euniformmaj}  & \num{Runiformuplift}  & \num{Runiformentropy}  \\
+\textsc{permuted}& \num{Npermuted} & \num{Rpermutedacc} & \num{Epermutedacc} & \num{Rpermutedmaj} & \num{Epermutedmaj} & \num{Rpermuteduplift} & \num{Rpermutedentropy} \\
+STEER-F & \num{Nsigned}   & \num{Rsignedacc}   & \num{Esignedacc}   & \num{Rsignedmaj}   & \num{Esignedmaj}   & \num{Rsigneduplift}   & \num{Rsignedentropy}   \\
+\bottomrule
+\end{tabular}
+\caption{Means over steps $40$--$110$ on seeds $\num{Seedset}$, $\pm$ the standard
+error across seeds. Because the seed set is shared, a difference of two rows is the
+paired contrast of Table~\ref{tab:entropy}. Entropy is the token-mean quantity.}
+\label{tab:plateau}
+\end{table}
+
+Table~\ref{tab:plateau} averages each arm over the converged window, and
+Table~\ref{tab:curve} gives one seed's full trajectory. The three arms without the
+$\AH$ signal --- \textsc{steer}, \textsc{uniform}, \textsc{permuted} --- sit below
+GRPO on accuracy and STEER-F above it, by less than GRPO's standard error across
+seeds. On entropy GRPO holds the most and the four damped arms sit close together. The
+two columns are neither aligned nor reversed; read as the contrasts of
+Section~\ref{sec:res:entropy}, they separate.
+
+\begin{table}[t]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{2.6pt}
+\begin{tabular}{@{}rccccc@{}}
+\toprule
+step & GRPO & \textsc{steer} & \textsc{unif} & \textsc{perm} & STEER-F \\
+\midrule
+0   & .039/.035 & .043/.040 & .039/.035 & .039/.035 & .039/.035 \\
+10  & .075/.127 & .064/.109 & .070/.124 & .062/.126 & .078/.148 \\
+20  & .120/.176 & .114/.195 & .102/.171 & .087/.155 & .103/.181 \\
+30  & .108/.195 & .135/.215 & .121/.223 & .099/.178 & .113/.211 \\
+\midrule
+40  & .144/.236 & .115/.187 & .119/.201 & .116/.197 & .141/.230 \\
+50  & .120/.204 & .125/.196 & .121/.216 & .153/.224 & .145/.258 \\
+60  & .126/.178 & .139/.202 & .125/.203 & .135/.190 & .145/.237 \\
+70  & .130/.200 & .128/.200 & .129/.197 & .132/.227 & .147/.257 \\
+80  & .135/.182 & .135/.202 & .140/.204 & .134/.197 & .144/.206 \\
+90  & .136/.191 & .144/.212 & .142/.178 & .130/.210 & \textbf{.166}/.239 \\
+100 & .132/.171 & .146/.207 & .134/.192 & .144/.212 & .157/.222 \\
+110 & .157/.208 & .132/.181 & .140/.171 & .152/.218 & .151/.230 \\
+\bottomrule
+\end{tabular}
+\caption{AIME24 $\mathrm{acc@}32/\mathrm{maj@}32$ at every validation point, seed
+$1$. Rows below the rule are the converged window used for all subsequent
+statistics. One seed is one trajectory: the across-seed statistics are in
+Tables~\ref{tab:plateau} and~\ref{tab:contrast}.}
+\label{tab:curve}
+\end{table}
 
 \subsection{Does the branch-specific $\AH$ signal matter for accuracy?}
 \label{sec:res:contrasts}
@@ -766,7 +777,7 @@ against $\num{ProtorefSteerAvg}$ for the base method and $\num{ProtorefGrpoAvg}$
 GRPO as reported: lower than the former on $\num{ProtocmpSteerBelow}$ of six benchmarks
 (not on \num{ProtocmpSteerNotbelow}, the selection column) and higher than the latter
 on $\num{ProtocmpGrpoAbove}$. The quoted rows were not re-run and used different
-hardware and code, so the comparison places the method between the two reported rows
+hardware and code, so the comparison places the corrected arm between the two reported rows
 without ranking it (Appendix~\ref{sec:reported}).
 
 \section{Conclusion}
@@ -783,7 +794,7 @@ trajectory diversity without a corresponding change in aggregate token entropy, 
 experiment observes that dissociation: aggregate entropy tracks the damping mechanism,
 not the $\AH$ signal. We do not establish an accuracy benefit, and this paper should be
 read as an account of where token-level entropy control acts and of what an aggregate
-entropy curve cannot see, not as a recommendation to adopt the method for accuracy.
+entropy curve cannot see, not as a recommendation to adopt the correction for accuracy.
 Whether a cheaper estimator of $\Htogo$ suffices, and whether structured sampling helps
 RLVR in its own right, remain open.
 
