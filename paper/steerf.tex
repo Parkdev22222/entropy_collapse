@@ -180,7 +180,9 @@ Our contributions are:
 \begin{itemize}\setlength\itemsep{1pt}
 \item \textbf{An exact decomposition} of the trajectory-entropy gradient into a local
       term, which changes conditional entropy at visited states, and a visitation term,
-      which changes which states the policy reaches (Section~\ref{sec:channels}).
+      which changes which states the policy reaches (Section~\ref{sec:channels}). The
+      identity is standard in maximum-entropy RL; what is new is reading token-level
+      entropy control through it.
 \item \textbf{A structural mismatch:} the local estimator used by current token-level
       methods vanishes at flat branch points, precisely where the visitation prefactor
       is largest, so the omission cannot be repaired within the local channel
@@ -261,7 +263,13 @@ preserved while the trajectory distribution concentrates.
 Prior work either controls conditional entropy at visited states or selects tokens by
 local uncertainty. We instead differentiate the entropy of the trajectory distribution
 itself, which reveals a term caused by changes in which states the updated policy
-reaches. We use Medusa-style heads \citep{medusa} not for decoding but as an entropy
+reaches. The identity this rests on is not new: the trajectory entropy is the entropy
+term of the maximum-entropy RL objective, and its policy gradient, which credits
+per-state entropy through a reward-to-go, is standard there
+\citep{schulman2017equivalence,levine2018reinforcement}. What we add is its use to
+locate token-level entropy control: current estimators measure only the local term,
+and Section~\ref{sec:blind} shows that this term vanishes where the other is largest.
+We use Medusa-style heads \citep{medusa} not for decoding but as an entropy
 forecaster. Appendix~\ref{sec:related} expands this section.
 
 \section{Two Channels}
@@ -914,6 +922,17 @@ diversity of final answers falls. This is precisely the signature our decomposit
 predicts when the visitation channel is unmanaged: per-state entropies are
 preserved --- the local channel is doing its job --- while the trajectory
 distribution concentrates.
+
+\paragraph{Maximum-entropy policy gradients.}
+Treating per-state entropy as a reward is the maximum-entropy formulation of RL
+\citep{ziebart2008maximum,levine2018reinforcement}, and its policy gradient already
+contains both terms of Eq.~\eqref{eq:twochannel}: the entropy at a state is credited
+to earlier actions through a reward-to-go, which is our visitation channel, alongside
+the direct gradient of the entropy at the visited state, which is our local channel
+\citep{schulman2017equivalence}. We claim no novelty for the identity. The
+contribution is to apply it to the token-level estimators used in RLVR, which keep
+only the second term, and to show (Section~\ref{sec:blind}) that the term they keep
+is zero exactly where the term they drop is largest.
 
 \paragraph{Multi-token prediction.}
 We use Medusa-style parallel prediction heads \citep{medusa} not for their intended
