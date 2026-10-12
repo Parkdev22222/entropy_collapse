@@ -13,7 +13,7 @@ own declaration and must be confirmed by them before pasting. Section numbers re
   unmeasured sibling-spread prediction, the small support, the base method's
   non-reproduced gain over GRPO, the uncontrolled published-number comparison,
   Assumption B2, and a single model.
-- **A2. Did you discuss any potential risks of your work?** Yes — *Ethics Statement*:
+- **A2. Did you discuss any potential risks of your work?** Yes — *Ethical Considerations*:
   the method inherits whatever the reward function encodes, and carries an extra
   compute cost that Appendix E.12 quantifies.
 
@@ -86,3 +86,5 @@ used it):
   paper are emitted by scripts from the training and evaluation logs; the authors
   reviewed the code, checked every claim and citation, and take responsibility for
   the content. The AI assistant is not an author.
+  The same disclosure is in the paper's Acknowledgements, as the ARR CFP asks
+  ("Details should be included in the Acknowledgements section").
