@@ -183,6 +183,13 @@ def parse_log(path: Path) -> dict[int, dict[str, float]]:
             hit = re.search(re.escape(key) + r":(-?[0-9.]+)", line)
             if hit:
                 row[short] = float(hit.group(1))
+        # Length-corrected trajectory entropy. actor/entropy is a token mean,
+        # i.e. H_traj divided by mean length; the per-step product undoes that.
+        # Where a log also carries actor/seq_entropy (the per-sequence sum) the
+        # two agree to the rounding of the logged token mean -- but the seed-1
+        # logs predate that key, so the product is the one quantity every run has.
+        if "entropy" in row and "resp_len" in row:
+            row["htraj"] = row["entropy"] * row["resp_len"]
         if "acc" in row:            # a validation step, not a plain train step
             out[step] = row
         elif row:                   # keep timing from non-val steps too
@@ -402,7 +409,7 @@ def plateau(steps: dict[int, dict[str, float]], lo: int, hi: int) -> dict[str, f
     train_only = [r for s, r in steps.items()
                   if lo <= s <= hi and "acc" not in r and "s_per_step" in r]
     agg = {}
-    for short in list(METRICS.values()):
+    for short in list(METRICS.values()) + ["htraj"]:
         vals = [r[short] for r in rows if short in r]
         if vals:
             agg[short] = sum(vals) / len(vals)
@@ -985,7 +992,7 @@ def main(argv=None) -> int:
             held_s = ",".join(map(str, held)) if held else "-"
             if not shared:
                 continue
-            for metric in ("acc", "maj", "uplift", "entropy",
+            for metric in ("acc", "maj", "uplift", "entropy", "htraj",
                            "brentropy", "nbrentropy", "brgap",
                            "supentropy", "nsupentropy", "supgap"):
                 d = [per_seed[a][s][metric] - per_seed[b][s][metric]
@@ -1397,7 +1404,9 @@ def main(argv=None) -> int:
             if key in seen:
                 continue
             seen.add(key)
-            fh.write(mac(f"C{key}", st["mean"], "{:+.4f}"))
+            # htraj is in nats per response (hundreds), not a rate.
+            cf = "{:+.1f}" if metric == "htraj" else "{:+.4f}"
+            fh.write(mac(f"C{key}", st["mean"], cf))
             fh.write(mac(f"T{key}", st["t"], "{:+.2f}"))
             fh.write(mac(f"P{key}", st["p"], "{:.3f}"))
             fh.write(mac(f"N{a}{b}", st["n"], "{:d}"))
@@ -1406,8 +1415,8 @@ def main(argv=None) -> int:
             # Lo/Hi: `Lo{arm}{metric}` is already taken, by one arm's
             # run-to-run spread (Losignedacc). Two different quantities under
             # one prefix is how a caption ends up quoting the wrong one.
-            fh.write(mac(f"CLo{key}", st.get("lo"), "{:+.4f}"))
-            fh.write(mac(f"CHi{key}", st.get("hi"), "{:+.4f}"))
+            fh.write(mac(f"CLo{key}", st.get("lo"), cf))
+            fh.write(mac(f"CHi{key}", st.get("hi"), cf))
             fh.write(mac(f"CNeg{key}", st.get("neg"), "{:d}")
                      if st.get("neg") is not None else mac(f"CNeg{key}", None))
 

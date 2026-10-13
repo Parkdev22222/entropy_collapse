@@ -572,7 +572,11 @@ $\num{Csigneduniformentropy}$, and destroying the branch--score assignment by
 $\num{Csignedpermutedentropy}$. The smaller mechanism effect is more than twice the
 larger signal effect. Accuracy runs the other way: the signal contrasts give
 $\num{Csigneduniformacc}$ and $\num{Csignedpermutedacc}$, the mechanism contrasts
-$\num{Csteergrpoacc}$ and $\num{Cuniformsteeracc}$.
+$\num{Csteergrpoacc}$ and $\num{Cuniformsteeracc}$. The split survives length
+correction: on the trajectory entropy $\Htraj$ itself the mechanism contrasts are
+$\num{Csteergrpohtraj}$ and $\num{Cuniformsteerhtraj}$ nats per response and the
+signal contrasts $\num{Csigneduniformhtraj}$ and $\num{Csignedpermutedhtraj}$
+(Appendix Table~\ref{tab:htraj}).
 
 \paragraph{Interpretation.} Aggregate entropy primarily reflects the damping mechanism
 rather than the branch-specific $\AH$ signal, which is the dissociation the zero sum
@@ -1722,8 +1726,42 @@ different questions and we are explicit about which is in use.
 One instrumentation caveat propagates into every entropy number we report. The
 logged \texttt{actor/entropy} is aggregated with a token-mean, so it is
 $\Htraj$ divided by the mean response length, not $\Htraj$. Since response lengths
-differ by under $5\%$ across arms, we report the raw quantity and, where the
-distinction could matter, the length-corrected product as well.
+differ by under $5\%$ across arms, we report the raw quantity in the main tables and
+give the length-corrected quantity for the dissociation contrasts in
+Table~\ref{tab:htraj}. It is computed at every step as the token-mean entropy times
+the mean response length, then averaged over the same validation steps as every other
+entry. The runs on seeds $3$ and $4$ also log the per-response sum directly
+(\texttt{actor/seq\_entropy}); on all $1{,}100$ steps of those ten runs the product
+agrees with it to within $0.5\%$, the rounding of the logged token mean. The seed-$1$
+runs predate that key, so the product is used throughout.
+
+\begin{table}[h]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+contrast & $n$ & $\Delta\Htraj$ (nats) & $t$ & seeds $<0$ \\
+\midrule
+\multicolumn{5}{@{}l}{\emph{the damping mechanism changes, the $\AH$ signal does not}} \\
+\textsc{steer} $-$ GRPO & \num{Nsteergrpo} & $\num{Csteergrpohtraj}$ & $\num{Tsteergrpohtraj}$ & \num{CNegsteergrpohtraj} \\
+\textsc{unif} $-$ \textsc{steer} & \num{Nuniformsteer} & $\num{Cuniformsteerhtraj}$ & $\num{Tuniformsteerhtraj}$ & \num{CNeguniformsteerhtraj} \\
+\midrule
+\multicolumn{5}{@{}l}{\emph{the $\AH$ signal changes, the damping mechanism does not}} \\
+STEER-F $-$ \textsc{unif} & \num{Nsigneduniform} & $\num{Csigneduniformhtraj}$ & $\num{Tsigneduniformhtraj}$ & \num{CNegsigneduniformhtraj} \\
+STEER-F $-$ \textsc{perm} & \num{Nsignedpermuted} & $\num{Csignedpermutedhtraj}$ & $\num{Tsignedpermutedhtraj}$ & \num{CNegsignedpermutedhtraj} \\
+\midrule
+\multicolumn{5}{@{}l}{\emph{both change}} \\
+STEER-F $-$ \textsc{steer} & \num{Nsignedsteer} & $\num{Csignedsteerhtraj}$ & $\num{Tsignedsteerhtraj}$ & \num{CNegsignedsteerhtraj} \\
+STEER-F $-$ GRPO & \num{Nsignedgrpo} & $\num{Csignedgrpohtraj}$ & $\num{Tsignedgrpohtraj}$ & \num{CNegsignedgrpohtraj} \\
+\bottomrule
+\end{tabular}
+\caption{The contrasts of Table~\ref{tab:entropy} on the length-corrected
+trajectory entropy $\Htraj$ (token-mean entropy $\times$ mean response length,
+nats per response), paired within a seed. The mechanism contrasts move $\Htraj$ in the
+same direction on every seed; the signal contrasts do not.}
+\label{tab:htraj}
+\end{table}
 
 
 \section{Additional Results}
