@@ -84,3 +84,39 @@ result is reported either way, with the per-seed values.
 - The correction touches about 0.1-0.2% of tokens with a small weight change,
   so the effect may be below what 512 prompts can resolve. A null here means
   "not detected at this resolution", not "absent".
+
+## Amendment 1 (2026-10-15), before any probe was built or checkpoint scored
+
+**Why.** The registered design needs the AIME24-argmax checkpoint of five arms
+on seeds 1, 3, 4. An inventory of both Hub repos and the pod volume found
+only `permuted s1`, `grpo s1` (steps 80-110 each) and `signed s3` (step 100).
+Seeds 3 and 4 were kept only on the pods that trained them. The registered
+contrasts therefore cannot be formed, on any seed. This amendment is driven
+by checkpoint availability alone; no probe output exists yet.
+
+**What can be formed.** The run `pilot-steer-f-1p5b-s1-150` is the main
+campaign's STEER-F seed-1 configuration re-run on H100x4: same `data.seed`,
+tree (one root, depths 64/192/384, factors 2/2/2), `steerf_lam` .25, MTP
+forecast with heads of the same file name, damping band [0.7, 1.0], learning
+rate, batch and clip settings. It differs in GPU count (4 vs 2), and so in
+kernel-level nondeterminism. It kept steps 50, 100, 150 and 200.
+
+**Amended comparison.** Seed 1, step 100:
+
+- STEER-F = `pilot-steer-f-1p5b-s1-150/global_step_100`
+- permuted = `steer-f-Qwen2.5-Math-1.5B-s1-tree-rollout-permuted/global_step_100`
+- GRPO = `grpo-Qwen2.5-Math-1.5B-s1/global_step_100` (context only)
+
+There is no uniform or STEER checkpoint on seed 1, so the STEER-F - uniform
+contrast is absent.
+
+**Amended rule.** One seed leaves no seed-level variance, so the unit becomes
+the branch point. On the shared probe, the per-point difference
+D_STEER-F - D_permuted is averaged and a 95% bootstrap interval is taken over
+branch points (10,000 resamples, fixed seed). The check counts as passed when
+the interval lies above zero. Anything else is reported as not passed.
+
+**What this result can and cannot carry.** It is one seed, one step and one
+contrast, on runs from two different machines. It is exploratory and is
+reported as such. A pass says the trace the correction should leave is
+present in one pair of runs; it does not replicate across seeds.

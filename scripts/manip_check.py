@@ -218,9 +218,9 @@ def cmd_fetch(a) -> None:
                     steps.add(int(m.group(1)))
         except Exception:
             continue
-        if not steps:
+        if not steps or (a.step is not None and a.step not in steps):
             continue
-        step = max(steps)
+        step = a.step if a.step is not None else max(steps)
         if a.dry:
             print(f"hub:{repo}/{a.run}/global_step_{step}")
             return
@@ -271,6 +271,32 @@ def verdict(per_seed: dict[str, list[float]]) -> str:
     return "passed" if ok and len(per_seed) == len(PRIMARY) else "not passed"
 
 
+def point_contrast(rows_x: list[dict], rows_y: list[dict], stat: str = "D",
+                   n_boot: int = 10000, seed: int = 0) -> dict:
+    """Mean of the per-point difference x - y over shared branch points, with a
+    percentile bootstrap interval over points. Both checkpoints were scored on
+    the same probe, so the points pair exactly (Amendment 1)."""
+    ys = {r["id"]: r[stat] for r in rows_y}
+    d = [r[stat] - ys[r["id"]] for r in rows_x if r["id"] in ys]
+    n = len(d)
+    if n == 0:
+        return {"n": 0}
+    m = sum(d) / n
+    rng = random.Random(seed)
+    boots = sorted(sum(rng.choices(d, k=n)) / n for _ in range(n_boot))
+    return {"n": n, "mean": m, "ci_lo": boots[int(0.025 * n_boot)],
+            "ci_hi": boots[int(0.975 * n_boot) - 1]}
+
+
+def verdict_amended(cs: dict[str, dict]) -> str:
+    """Amendment 1: every primary contrast that can be formed has its 95%
+    interval above zero, and at least one can be formed."""
+    have = [c for c in cs.values() if c.get("n")]
+    if not have:
+        return "not applicable"
+    return "passed" if all(c["ci_lo"] > 0 for c in have) else "not passed"
+
+
 def analyze(probe: Path) -> dict:
     from analyze_seeds import paired
     togo = json.loads((probe / "togo.json").read_text())
@@ -286,9 +312,10 @@ def analyze(probe: Path) -> dict:
                   for a, b in togo.values() if a and b)
     cut = gaps[len(gaps) // 2] if gaps else None
 
-    per_model = {}
+    per_model, point_rows = {}, {}
     for label, rec in scores.items():
         rows = point_stats(togo, base, rec["lp"])
+        point_rows[label] = rows
         per_model[label] = {"step": rec.get("step"),
                             "all": summarise(rows, None),
                             "strong": summarise(rows, cut)}
@@ -311,8 +338,28 @@ def analyze(probe: Path) -> dict:
                     "per_seed": diffs, **paired(diffs)}
     primary = {f"{x}-{y}": contrasts.get(f"{x}-{y}:all:D", {}).get("per_seed", [])
                for x, y in PRIMARY}
+    # Point-level contrasts within each seed (Amendment 1). Labels are kept
+    # as given, so a checkpoint from a differently named run is paired by the
+    # arm and seed it is scored under.
+    points = {}
+    for x, y in PRIMARY + CONTEXT:
+        for s in seeds:
+            lx, ly = f"{x}:{s}", f"{y}:{s}"
+            if lx not in point_rows or ly not in point_rows:
+                continue
+            strong_x = [r for r in point_rows[lx] if cut is not None and r["gap"] >= cut]
+            points[f"{x}-{y}:s{s}:all:D"] = point_contrast(point_rows[lx], point_rows[ly])
+            points[f"{x}-{y}:s{s}:strong:D"] = point_contrast(strong_x, point_rows[ly])
+            points[f"{x}-{y}:s{s}:all:S"] = point_contrast(point_rows[lx], point_rows[ly], "S")
+    amended = {k: v for k, v in points.items()
+               if k.endswith(":all:D") and k.split(":")[0] in
+               {f"{x}-{y}" for x, y in PRIMARY}}
+    n_seeds = min((len(v) for v in primary.values()), default=0)
     return {"gap_cut": cut, "per_model": per_model, "contrasts": contrasts,
-            "primary": primary, "verdict": verdict(primary)}
+            "primary": primary,
+            "verdict": verdict(primary) if n_seeds >= 3
+            else f"not applicable ({n_seeds} seed(s); see Amendment 1)",
+            "points": points, "verdict_amended": verdict_amended(amended)}
 
 
 def cmd_analyze(a) -> None:
@@ -329,8 +376,15 @@ def cmd_analyze(a) -> None:
         if ":all:D" in key or ":strong:D" in key:
             print(f"{key:28s} mean {c['mean']:+.4f}  t {c['t']:+.2f}  "
                   f"seeds {' '.join(f'{x:+.4f}' for x in c['per_seed'])}")
+    print()
+    for key, c in res["points"].items():
+        if c.get("n"):
+            print(f"{key:30s} n {c['n']:5d}  mean {c['mean']:+.4f}  "
+                  f"95% CI [{c['ci_lo']:+.4f}, {c['ci_hi']:+.4f}]")
     print(f"\nregistered rule (both primary contrasts > 0 on every seed): "
           f"{res['verdict']}")
+    print(f"amended rule (point-level 95% CI above zero): "
+          f"{res['verdict_amended']}")
     print(f"wrote {a.out}")
 
 
@@ -365,6 +419,8 @@ def main(argv=None) -> int:
     f.add_argument("--repos", required=True)
     f.add_argument("--run", required=True)
     f.add_argument("--dest", required=True)
+    f.add_argument("--step", type=int, default=None,
+                   help="a specific global_step; default the highest")
     f.add_argument("--dry", action="store_true")
 
     z = sub.add_parser("analyze")

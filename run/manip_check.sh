@@ -11,6 +11,11 @@
 #   analyze-> results/manip_check.json
 # A checkpoint that is not on disk is fetched from EVAL_REPOS with the same
 # layout run_eval_all.sh reads, scored, and deleted again to keep the disk free.
+#
+# Amendment 1 (docs/manipulation_check.md): the registered checkpoints do not
+# exist, so the checkpoints can instead be named explicitly, one label=dir each:
+#   CKPTS="signed:1=/path/a permuted:1=/path/b grpo:1=/path/c" bash run/manip_check.sh
+# When CKPTS is set, SEEDS/ARMS/EVAL_REPOS are not used.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "${ROOT}"
@@ -27,6 +32,7 @@ CKPT_ROOT=${CKPT_ROOT:-"${ROOT}/checkpoints/STEER-F"}
 STAGE=${STAGE:-"${ROOT}/checkpoints/_manip_stage"}
 EVAL_REPOS=${EVAL_REPOS:-}
 N_PROMPTS=${N_PROMPTS:-512}
+CKPTS=${CKPTS:-}
 DRY=${DRY:-0}
 PY="python3 scripts/manip_check.py"
 
@@ -47,6 +53,18 @@ local_ckpt () {   # <arm> <seed> -> HF dir with weights, or nothing
 echo "base=${BASE}  probe=${PROBE}  seeds=${SEEDS}  arms=${ARMS}"
 echo "checkpoints:"
 missing=0
+if [ -n "${CKPTS}" ]; then
+    for e in ${CKPTS}; do
+        label="${e%%=*}"; p="${e#*=}"
+        if hf_weights_present "${p}"; then
+            printf '  %-12s %s\n' "${label}" "${p}"
+        else
+            printf '  %-12s MISSING (no weights in %s)\n' "${label}" "${p}"
+            missing=$((missing + 1))
+        fi
+    done
+    SEEDS=""   # the explicit list replaces the arm x seed loops below
+fi
 for seed in ${SEEDS}; do
     for arm in ${ARMS}; do
         rn="$(run_name_for "${arm}" "${seed}")"
@@ -66,6 +84,15 @@ mkdir -p "${PROBE}/scores"
     --probe "${PROBE}" --n-prompts "${N_PROMPTS}"
 [ -s "${PROBE}/togo.json" ] || ${PY} togo --base "${BASE}" --probe "${PROBE}"
 [ -s "${PROBE}/scores/base.json" ] || ${PY} score --model "${BASE}" --label base --probe "${PROBE}"
+
+for e in ${CKPTS}; do
+    label="${e%%=*}"; p="${e#*=}"
+    if [ -s "${PROBE}/scores/${label/:/-s}.json" ]; then continue; fi
+    if ! hf_weights_present "${p}"; then
+        echo "[manip] MISSING ${label} (${p}) -- skipped"; continue
+    fi
+    ${PY} score --model "${p}" --label "${label}" --probe "${PROBE}"
+done
 
 for seed in ${SEEDS}; do
     for arm in ${ARMS}; do
