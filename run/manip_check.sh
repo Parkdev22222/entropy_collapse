@@ -36,6 +36,13 @@ CKPTS=${CKPTS:-}
 DRY=${DRY:-0}
 PY="python3 scripts/manip_check.py"
 
+# A score file counts as done only if it was made from THIS checkpoint. Keyed
+# on the label alone, a rerun that pointed permuted:1 at step 100 kept the
+# step-110 scores of an earlier invocation and compared them with step 100.
+scored () {   # <score-file> <model-dir>
+    [ -s "$1" ] && python3 -c 'import json,sys; sys.exit(json.load(open(sys.argv[1]))["model"] != sys.argv[2])' "$1" "$2"
+}
+
 local_ckpt () {   # <arm> <seed> -> HF dir with weights, or nothing
     local rn cand d best=""
     rn="$(run_name_for "$1" "$2")"
@@ -87,7 +94,7 @@ mkdir -p "${PROBE}/scores"
 
 for e in ${CKPTS}; do
     label="${e%%=*}"; p="${e#*=}"
-    if [ -s "${PROBE}/scores/${label/:/-s}.json" ]; then continue; fi
+    if scored "${PROBE}/scores/${label/:/-s}.json" "${p}"; then continue; fi
     if ! hf_weights_present "${p}"; then
         echo "[manip] MISSING ${label} (${p}) -- skipped"; continue
     fi
