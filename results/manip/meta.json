@@ -1,0 +1,17 @@
+{
+  "base": "Qwen/Qwen2.5-Math-1.5B",
+  "data": "datasets/DAPO-Math-17k.parquet",
+  "n_prompts": 512,
+  "seed": 20261013,
+  "depths": [
+    64,
+    192,
+    384
+  ],
+  "draws": 8,
+  "k": 4,
+  "max_len": 3072,
+  "points_cut": 1395,
+  "points_kept": 580,
+  "dropped_one_token": 815
+}
