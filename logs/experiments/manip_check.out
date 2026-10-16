@@ -1,29 +1,31 @@
-nohup: ignoring input
 base=Qwen/Qwen2.5-Math-1.5B  probe=results/manip  seeds=1 3 4  arms=signed uniform permuted steer grpo
 checkpoints:
   signed:1     /workspace/entropy_lora/checkpoints/STEER-F/pilot-steer-f-1p5b-s1-150/global_step_100/actor/huggingface
   permuted:1   checkpoints/_manip/steer-f-Qwen2.5-Math-1.5B-s1-tree-rollout-permuted/global_step_100
   grpo:1       checkpoints/_manip/grpo-Qwen2.5-Math-1.5B-s1/global_step_100
 `torch_dtype` is deprecated! Use `dtype` instead!
-Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:  50%|█████     | 1/2 [00:00<00:00,  2.29it/s]Loading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00,  3.72it/s]Loading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00,  3.40it/s]
-[score] signed:1: 580 branch points
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:  50%|█████     | 1/2 [00:00<00:00,  2.19it/s]Loading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00,  3.83it/s]Loading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00,  3.44it/s]
+[score] permuted:1: 580 branch points
+`torch_dtype` is deprecated! Use `dtype` instead!
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:  50%|█████     | 1/2 [00:00<00:00,  2.42it/s]Loading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00,  3.56it/s]Loading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00,  3.33it/s]
+[score] grpo:1: 580 branch points
 checkpoint        step     n         D     (se)         S     (se)
-grpo:1             110   580   +0.0096   0.0664   -0.0395   0.0790
-permuted:1         110   580   +0.0317   0.0485   -0.0634   0.0591
+grpo:1             100   580   +0.0117   0.0633   -0.0456   0.0756
+permuted:1         100   580   +0.0305   0.0458   -0.0497   0.0564
 signed:1           100   580   +0.0218   0.0621   -0.0387   0.0744
 signed:3           100   580   +0.0576   0.0545   -0.0797   0.0663
 
-signed-permuted:all:D        mean -0.0098  t +nan  seeds -0.0098
-signed-permuted:strong:D     mean -0.0474  t +nan  seeds -0.0474
-signed-grpo:all:D            mean +0.0122  t +nan  seeds +0.0122
-signed-grpo:strong:D         mean -0.0112  t +nan  seeds -0.0112
+signed-permuted:all:D        mean -0.0087  t +nan  seeds -0.0087
+signed-permuted:strong:D     mean -0.0460  t +nan  seeds -0.0460
+signed-grpo:all:D            mean +0.0101  t +nan  seeds +0.0101
+signed-grpo:strong:D         mean -0.0078  t +nan  seeds -0.0078
 
-signed-permuted:s1:all:D       n   580  mean -0.0098  95% CI [-0.0769, +0.0536]
-signed-permuted:s1:strong:D    n   290  mean -0.0474  95% CI [-0.1547, +0.0444]
-signed-permuted:s1:all:S       n   580  mean +0.0247  95% CI [-0.0471, +0.1010]
-signed-grpo:s1:all:D           n   580  mean +0.0122  95% CI [-0.0533, +0.0759]
-signed-grpo:s1:strong:D        n   290  mean -0.0112  95% CI [-0.0971, +0.0757]
-signed-grpo:s1:all:S           n   580  mean +0.0008  95% CI [-0.0717, +0.0737]
+signed-permuted:s1:all:D       n   580  mean -0.0087  95% CI [-0.0716, +0.0497]
+signed-permuted:s1:strong:D    n   290  mean -0.0460  95% CI [-0.1444, +0.0381]
+signed-permuted:s1:all:S       n   580  mean +0.0110  95% CI [-0.0578, +0.0829]
+signed-grpo:s1:all:D           n   580  mean +0.0101  95% CI [-0.0494, +0.0676]
+signed-grpo:s1:strong:D        n   290  mean -0.0078  95% CI [-0.0816, +0.0667]
+signed-grpo:s1:all:S           n   580  mean +0.0069  95% CI [-0.0591, +0.0733]
 
 registered rule (both primary contrasts > 0 on every seed): not applicable (0 seed(s); see Amendment 1)
 amended rule (point-level 95% CI above zero): not passed
