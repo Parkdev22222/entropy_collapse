@@ -1,0 +1,53 @@
+nohup: ignoring input
+set=all  out=results/decomp
+intervals: base:grpo100 base:perm100 base:signed100 grpo80:grpo110 perm80:perm110 base:signed50 signed50:signed100 signed100:signed150 signed150:signed200
+checkpoints:
+  base       Qwen/Qwen2.5-Math-1.5B
+  grpo100    checkpoints/_manip/grpo-Qwen2.5-Math-1.5B-s1/global_step_100
+  perm100    checkpoints/_manip/steer-f-Qwen2.5-Math-1.5B-s1-tree-rollout-permuted/global_step_100
+  signed100  /workspace/entropy_lora/checkpoints/STEER-F/pilot-steer-f-1p5b-s1-150/global_step_100/actor/huggingface
+  grpo80     fetch grpo-Qwen2.5-Math-1.5B-s1 step 80
+  grpo110    fetch grpo-Qwen2.5-Math-1.5B-s1 step 110
+  perm80     fetch steer-f-Qwen2.5-Math-1.5B-s1-tree-rollout-permuted step 80
+  perm110    fetch steer-f-Qwen2.5-Math-1.5B-s1-tree-rollout-permuted step 110
+  signed50   /workspace/entropy_lora/checkpoints/STEER-F/pilot-steer-f-1p5b-s1-150/global_step_50/actor/huggingface
+  signed150  /workspace/entropy_lora/checkpoints/STEER-F/pilot-steer-f-1p5b-s1-150/global_step_150/actor/huggingface
+  signed200  /workspace/entropy_lora/checkpoints/STEER-F/pilot-steer-f-1p5b-s1-150/global_step_200/actor/huggingface
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.12/dist-packages/huggingface_hub/file_download.py", line 399, in http_get
+    import hf_transfer  # type: ignore[no-redef]
+    ^^^^^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'hf_transfer'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/workspace/entropy_logs_paper/scripts/manip_check.py", line 437, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/workspace/entropy_logs_paper/scripts/manip_check.py", line 431, in main
+    {"build": cmd_build, "togo": cmd_togo, "score": cmd_score,
+  File "/workspace/entropy_logs_paper/scripts/manip_check.py", line 227, in cmd_fetch
+    local = snapshot_download(repo, repo_type="model", local_dir=a.dest,
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/huggingface_hub/utils/_validators.py", line 114, in _inner_fn
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/huggingface_hub/_snapshot_download.py", line 330, in snapshot_download
+    _inner_hf_hub_download(file)
+  File "/usr/local/lib/python3.12/dist-packages/huggingface_hub/_snapshot_download.py", line 306, in _inner_hf_hub_download
+    return hf_hub_download(
+           ^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/huggingface_hub/utils/_validators.py", line 114, in _inner_fn
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/huggingface_hub/file_download.py", line 994, in hf_hub_download
+    return _hf_hub_download_to_local_dir(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/huggingface_hub/file_download.py", line 1304, in _hf_hub_download_to_local_dir
+    _download_to_tmp_and_move(
+  File "/usr/local/lib/python3.12/dist-packages/huggingface_hub/file_download.py", line 1742, in _download_to_tmp_and_move
+    http_get(
+  File "/usr/local/lib/python3.12/dist-packages/huggingface_hub/file_download.py", line 401, in http_get
+    raise ValueError(
+ValueError: Fast download using 'hf_transfer' is enabled (HF_HUB_ENABLE_HF_TRANSFER=1) but 'hf_transfer' package is not available in your environment. Try `pip install hf_transfer`.
