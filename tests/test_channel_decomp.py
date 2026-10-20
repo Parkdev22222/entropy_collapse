@@ -67,3 +67,31 @@ def test_arm_contrast_is_paired_on_prompts(tmp_path):
     c = res["contrasts"]["perm100-grpo100"]
     assert abs(c["L"]["mean"] - 20.0) < 1e-9 and abs(c["V"]["mean"]) < 1e-9
     assert c["consistent_with_local"] is True
+
+
+def test_macros_name_every_registered_quantity(tmp_path):
+    n = 40
+    for arm, (loc, vis) in {"grpo100": (-30.0, -10.0), "perm100": (-10.0, -12.0),
+                            "signed100": (-20.0, -11.0)}.items():
+        _write(tmp_path, "base", "base", [[100.0 + (i % 3)] * 4 for i in range(n)])
+        _write(tmp_path, "base", arm, [[100.0 + loc + (i % 3)] * 4 for i in range(n)])
+        _write(tmp_path, arm, "base", [[100.0 + vis + (i % 3)] * 4 for i in range(n)])
+        _write(tmp_path, arm, arm, [[100.0 + vis + loc + (i % 3)] * 4 for i in range(n)])
+    res = C.analyze(tmp_path, n_boot=200)
+    res["exploratory_robustness"] = {"x": {"a": {"V_share": 0.81}, "b": {"V_share": 0.86}}}
+    out = C.emit(res)
+    assert {k for k in C.MACROS if not k.startswith("DecRob")} <= set(out)
+    assert out["DecGrpoDH"] == "-40.0" and out["DecGrpoV"] == "-10.0"
+    assert out["DecGrpoShare"] == "0.25" and out["DecNprompts"] == "40"
+    assert out["DecPermdL"] == "20.0" and out["DecPermdV"] == "-2.0"
+    assert (out["DecRobustMin"], out["DecRobustMax"]) == ("0.81", "0.86")
+
+
+def test_macros_leave_missing_intervals_pending(tmp_path):
+    n = 10
+    _write(tmp_path, "base", "base", [[100.0] * 4] * n)
+    _write(tmp_path, "base", "grpo100", [[90.0] * 4] * n)
+    _write(tmp_path, "grpo100", "base", [[80.0] * 4] * n)
+    _write(tmp_path, "grpo100", "grpo100", [[70.0] * 4] * n)
+    out = C.emit(C.analyze(tmp_path, n_boot=100))
+    assert "DecGrpoDH" in out and "DecPermDH" not in out and "DecRobustMin" not in out

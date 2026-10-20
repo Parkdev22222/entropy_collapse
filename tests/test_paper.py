@@ -272,6 +272,12 @@ def emittable_names():
     spec.loader.exec_module(sp)
     extra |= sp.names()
 
+    spec = importlib.util.spec_from_file_location(
+        "channel_decomp", ROOT / "scripts" / "channel_decomp.py")
+    cd = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cd)
+    extra |= cd.names()
+
     return names | prefixed | extra
 
 

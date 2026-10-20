@@ -68,6 +68,9 @@ The Missing Visitation Channel in Token-Level Entropy Control for RLVR}
 % The two-root, 200-step runs set beside the base method's published table:
 %   scripts/emit_r2_numbers.py  ->  results/numbers-r2.tex
 \loadnumbers{numbers-r2.tex}
+% The measured two-channel decomposition between checkpoints:
+%   scripts/channel_decomp.py macros  ->  results/numbers-decomp.tex
+\loadnumbers{numbers-decomp.tex}
 
 \begin{document}
 \maketitle
@@ -91,7 +94,9 @@ without changing aggregate token entropy. A five-arm experiment over three paire
 seeds observes this dissociation: changing the damping mechanism shifts the aggregate
 entropy by $\num{Csteergrpoentropy}$ and $\num{Cuniformsteerentropy}$, whereas changing
 only the branch-specific $\AH$ signal shifts it by $\num{Csigneduniformentropy}$ and
-$\num{Csignedpermutedentropy}$. We do not establish an accuracy gain from the
+$\num{Csignedpermutedentropy}$. On one seed, an exact decomposition between
+checkpoints attributes $\num{DecGrpoShare}$ of the trajectory entropy that GRPO loses
+to the visitation channel. We do not establish an accuracy gain from the
 correction --- a pre-registered accuracy test is not supported --- and the experiments
 instead support the structural claim that aggregate entropy cannot diagnose the
 visitation channel.
@@ -194,6 +199,10 @@ Our contributions are:
 \item \textbf{A diagnostic consequence:} because the correction is mean-preserving within
       sibling sets, aggregate token entropy is not an appropriate diagnostic for whether
       it acts (Section~\ref{sec:zerosum}).
+\item \textbf{A measurement of where collapse goes:} between checkpoints, the entropy
+      that training loses splits exactly into the two channels, and
+      $\num{DecGrpoShare}$ of GRPO's loss goes through the visitation channel that
+      token-level estimators omit (Section~\ref{sec:res:decomp}).
 \item \textbf{An experimental test of these predictions:} five arms that separate
       changes to the damping mechanism from changes to the branch-specific signal. The
       predicted dissociation is observed --- aggregate entropy tracks the mechanism, not
@@ -522,10 +531,65 @@ every figure is recomputed from the training logs by one script.
 \section{Results}
 \label{sec:results}
 
-The results are ordered by what the analysis predicts. The first is the
-dissociation the zero sum implies (Section~\ref{sec:res:entropy}); the per-arm
-numbers, accuracy included, come after it as the material the contrasts are built
-from.
+The results are ordered by what the analysis predicts. The first measures how much
+of the entropy that training loses goes through each channel
+(Section~\ref{sec:res:decomp}); the second is the dissociation the zero sum implies
+(Section~\ref{sec:res:entropy}); the per-arm numbers, accuracy included, come after
+them as the material the contrasts are built from.
+
+\subsection{Where measured collapse goes}
+\label{sec:res:decomp}
+
+Section~\ref{sec:channels} splits the gradient of $\Htraj$ into two channels; it does
+not say how much of the entropy that training actually loses passes through each.
+Between two checkpoints $a$ and $b$ the change splits exactly. With
+$\mathbb{E}_x[S_m]$ the mean, over responses sampled from $x$, of model $m$'s
+next-token entropies summed along the response,
+\[
+\Delta H = \underbrace{\mathbb{E}_b[S_b] - \mathbb{E}_b[S_a]}_{L}
+         + \underbrace{\mathbb{E}_b[S_a] - \mathbb{E}_a[S_a]}_{V},
+\]
+averaged with the reverse ordering: $L$ is the change at the states $b$ visits, $V$
+the change in which states are visited, scored by one fixed model. We measured it from
+the base model to step $100$ of the seed-$1$ runs, with rules registered before
+sampling (Appendix~\ref{sec:decomp}).
+
+\begin{table}[t]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}lrrrc@{}}
+\toprule
+$0 \to 100$ & $\Delta H$ & $L$ & $V$ & $V/\Delta H$ \\
+\midrule
+GRPO & $\num{DecGrpoDH}$ & $\num{DecGrpoL}$ & $\num{DecGrpoV}$ & \num{DecGrpoShare} [\num{DecGrpoShareLo}, \num{DecGrpoShareHi}] \\
+\textsc{permuted} & $\num{DecPermDH}$ & $\num{DecPermL}$ & $\num{DecPermV}$ & \num{DecPermShare} [\num{DecPermShareLo}, \num{DecPermShareHi}] \\
+\textsc{signed} & $\num{DecSignedDH}$ & $\num{DecSignedL}$ & $\num{DecSignedV}$ & \num{DecSignedShare} [\num{DecSignedShareLo}, \num{DecSignedShareHi}] \\
+\bottomrule
+\end{tabular}
+\caption{Where the trajectory entropy lost between the base model
+($H_a = \num{DecGrpoHa}$ nats per response) and step $100$ goes; seed $1$,
+$\num{DecNprompts}$ training prompts, four responses each. $L$: same states, sharper
+conditionals; $V$: other states visited; $\Delta H = L + V$ exactly. Brackets: 95\%
+prompt-bootstrap interval.}
+\label{tab:decomp}
+\end{table}
+
+GRPO loses $\num{DecGrpoDH}$ nats per response, and the visitation channel carries
+$\num{DecGrpoShare}$ of it, which meets the registered criterion for a measurable
+visitation share (Table~\ref{tab:decomp}). Most of the measured collapse is therefore
+not sharpening at the states the policy already visited: the trained policy moves to
+states where the base model was already confident, and the local channel, the only
+one a token-level estimator sees, carries the remainder. The two damping arms give
+nearly the same split. Because $\Htraj$ grows with response length and long responses
+are cut at $3072$ tokens, we checked after seeing the result whether truncation or
+length carries the share; without truncated responses, per token, or both, it stays
+between $\num{DecRobustMin}$ and $\num{DecRobustMax}$ (exploratory,
+Appendix~\ref{sec:decomp}). The registered prediction for the damping arms is not
+borne out: relative to GRPO they change $V$ more than $L$ (\textsc{permuted}
+$\num{DecPermdV}$ against $\num{DecPermdL}$, \textsc{signed} $\num{DecSigneddV}$
+against $\num{DecSigneddL}$ nats), so the difference damping makes, integrated over
+training, is also mostly a difference in where the policy goes.
 
 \subsection{Aggregate entropy tracks the damping mechanism, not the $\AH$ signal}
 \label{sec:res:entropy}
@@ -737,63 +801,12 @@ $\num{Rsignedbranchfrac}$ of positions against a ceiling of $\num{Supportbound}$
 the four-GPU box a \textsc{signed} step costs $\num{Costoverheadhi}\%$ more than
 \textsc{steer}'s (Appendix~\ref{sec:res:cost}).
 
-\subsection{Calibration against published numbers}
-\label{sec:res:published}
-
-To check that our pipeline lands in the range the base method's paper reports, we also
-ran the \textsc{signed} configuration under that paper's protocol \citep[App.~E]{steer}: two
-independent $200$-step runs (data seeds $1$, $2$), AIME24 validation every $10$ steps,
-and the AIME24-best checkpoint of each run evaluated on six benchmarks and averaged.
-The tree uses two roots cut at $\{64, 192\}$, chosen after the five-arm campaign on
-training prompts to keep the siblings while making fewer rewards in a group tie; the
-choice is exploratory. Table~\ref{tab:reported} sets the result beside the base
-method's published 1.5B table.
-
-\begin{table}[t]
-\centering
-\scriptsize
-\setlength{\tabcolsep}{2.6pt}
-\resizebox{\ifdim\width>\linewidth\linewidth\else\width\fi}{!}{%
-\begin{tabular}{@{}lccccccc@{}}
-\toprule
- & AIME24$^\dagger$ & AIME25 & AMC23 & MATH500 & Minerva & Olympiad & mean \\
-\midrule
-\multicolumn{8}{@{}l}{\emph{reported by \citet{steer}, not re-run}} \\
-base model & \num{ProtorefBaseAime} & \num{ProtorefBaseAimefive} & \num{ProtorefBaseAmc} & \num{ProtorefBaseMathfive} & \num{ProtorefBaseMinerva} & \num{ProtorefBaseOly} & \num{ProtorefBaseAvg} \\
-GRPO & \num{ProtorefGrpoAime} & \num{ProtorefGrpoAimefive} & \num{ProtorefGrpoAmc} & \num{ProtorefGrpoMathfive} & \num{ProtorefGrpoMinerva} & \num{ProtorefGrpoOly} & \num{ProtorefGrpoAvg} \\
-STEER & \num{ProtorefSteerAime} & \num{ProtorefSteerAimefive} & \num{ProtorefSteerAmc} & \num{ProtorefSteerMathfive} & \num{ProtorefSteerMinerva} & \num{ProtorefSteerOly} & \num{ProtorefSteerAvg} \\
-\midrule
-\multicolumn{8}{@{}l}{\emph{ours, mean of the two runs}} \\
-\textsc{signed}, selected & \num{ProtobestMeanAime} & \num{ProtobestMeanAimefive} & \num{ProtobestMeanAmc} & \num{ProtobestMeanMathfive} & \num{ProtobestMeanMinerva} & \num{ProtobestMeanOly} & \num{ProtobestMeanAvg} \\
-\textsc{signed}, step $200$ & \num{ProtolastMeanAime} & \num{ProtolastMeanAimefive} & \num{ProtolastMeanAmc} & \num{ProtolastMeanMathfive} & \num{ProtolastMeanMinerva} & \num{ProtolastMeanOly} & \num{ProtolastMeanAvg} \\
-\midrule
-\multicolumn{8}{@{}l}{\emph{ours, each run's selected checkpoint}} \\
-seed $1$ & \num{ProtobestOneAime} & \num{ProtobestOneAimefive} & \num{ProtobestOneAmc} & \num{ProtobestOneMathfive} & \num{ProtobestOneMinerva} & \num{ProtobestOneOly} & \num{ProtobestOneAvg} \\
-seed $2$ & \num{ProtobestTwoAime} & \num{ProtobestTwoAimefive} & \num{ProtobestTwoAmc} & \num{ProtobestTwoMathfive} & \num{ProtobestTwoMinerva} & \num{ProtobestTwoOly} & \num{ProtobestTwoAvg} \\
-\bottomrule
-\end{tabular}}
-\caption{Six benchmarks under the base method's protocol, accuracy in percent; the
-mean column is unweighted over the six. The upper block is quoted from the base
-method's paper and was not re-run. In each of our runs the selected checkpoint is
-the argmax of its AIME24 validation accuracy. $\dagger$: in our rows AIME24 is the
-training-time validation value at the selected step --- the value the selection
-itself used --- and is biased upward by that selection; the other five columns
-re-evaluate the selected checkpoint. The base method's paper selects the same way
-and evaluates the selected checkpoint, but does not say whether its AIME24 column is
-the selection value or a re-measurement; if it is a re-measurement, this column
-favours our rows. Seed~$2$'s selected checkpoint was evaluated on one GPU (tensor
-parallel size~$1$), every other checkpoint of ours on four, because the four-GPU
-attempt stopped before producing a metric; the sampling settings are the same.}
-\label{tab:reported}
-\end{table}
-
-The \textsc{signed} arm's two-run mean is $\num{ProtobestMeanAvg}$,
-against $\num{ProtorefSteerAvg}$ for the base method and $\num{ProtorefGrpoAvg}$ for
-GRPO as reported: lower than the former on $\num{ProtocmpSteerBelow}$ of six benchmarks
-(not on \num{ProtocmpSteerNotbelow}, the selection column) and higher than the latter
-on $\num{ProtocmpGrpoAbove}$. The quoted rows were not re-run and used different
-hardware and code, so the comparison places the corrected arm between the two reported rows
-without ranking it (Appendix~\ref{sec:reported}).
+\paragraph{Calibration against published numbers.} Run under the base method's own
+protocol (two $200$-step runs, the AIME24-best checkpoint, six benchmarks), the
+\textsc{signed} configuration averages $\num{ProtobestMeanAvg}$, against
+$\num{ProtorefSteerAvg}$ for the base method and $\num{ProtorefGrpoAvg}$ for GRPO as
+that method's paper reports them. The quoted rows were not re-run, so this places the
+corrected arm between the two without ranking it (Appendix~\ref{sec:reported}).
 
 \section{Conclusion}
 \label{sec:conclusion}
@@ -807,7 +820,9 @@ is the remaining conditional entropy, and a fixed tree supplies the sibling base
 that makes it estimable. The resulting correction is mean-preserving, so it can change
 trajectory diversity without a corresponding change in aggregate token entropy, and the
 experiment observes that dissociation: aggregate entropy tracks the damping mechanism,
-not the $\AH$ signal. We do not establish an accuracy benefit, and this paper should be
+not the $\AH$ signal. Measured between checkpoints, most of the entropy that training
+loses ($\num{DecGrpoShare}$ under GRPO, one seed) goes through the visitation channel,
+the one token-level estimators do not see. We do not establish an accuracy benefit, and this paper should be
 read as an account of where token-level entropy control acts and of what an aggregate
 entropy curve cannot see, not as a recommendation to adopt the correction for accuracy.
 Whether a cheaper estimator of $\Htogo$ suffices, and whether structured sampling helps
@@ -831,9 +846,12 @@ launcher's $0.8$, on $110$ rather than $200$ steps, and cannot separate these ca
 (Appendix~\ref{sec:res:ablate}). This reaches \textsc{signed} $-$ \textsc{steer} and
 \textsc{steer} $-$ GRPO, not the contrasts against \textsc{uniform} and
 \textsc{permuted}, which hold every setting fixed. The comparison with published
-numbers (Section~\ref{sec:res:published}) is uncontrolled: the quoted rows were not
+numbers (Appendix~\ref{sec:reported}) is uncontrolled: the quoted rows were not
 re-run, our AIME24 column is the selection value and biased upward, and the sampler in
-those runs was chosen after the campaign.
+those runs was chosen after the campaign. The channel decomposition
+(Section~\ref{sec:res:decomp}) is one seed, between checkpoints $100$ steps apart, so
+it measures the integrated split rather than the gradient's; its \textsc{signed}
+checkpoint is a re-run of that configuration on different hardware.
 
 \paragraph{Estimator assumptions and efficiency.} The calibration suppresses heads
 beyond the first, so $\hat{H}_{\mathrm{togo}}$ is close to a one-step forecast, and on a
@@ -849,7 +867,8 @@ construction --- at most $2(n-1)/T$, about one position in eighty here.
 
 \paragraph{Open structural predictions.} The prefactor half of
 Section~\ref{sec:blind} is analytic, but we have not measured the local and visitation
-terms together at real sibling-divergence positions in live rollouts, so
+terms together at real sibling-divergence positions in live rollouts --- Table~\ref{tab:decomp}
+gives their totals between checkpoints, not their values at branch points --- so
 Table~\ref{tab:anticorr} is a prediction rather than an observation. The positive
 prediction of the zero sum --- that the spread across siblings widens --- is not
 measured: no run logs the realized to-go entropy of siblings at their branch points.
@@ -2527,6 +2546,81 @@ Appendix~\ref{sec:reported}, which uses the maximum on purpose, because that is 
 rule of the table it is compared against.
 
 
+\section{Measuring the Two Channels}
+\label{sec:decomp}
+
+\paragraph{Procedure.} The prompt set is $\num{DecNprompts}$ training prompts drawn
+from DAPO-Math-17k with a fixed seed, the same for every checkpoint. Each checkpoint
+samples four responses per prompt at temperature $1$, top-$p$ $1$, up to $3072$
+tokens, the training sampler. Every response set of an interval is scored by both of
+its checkpoints: the next-token entropy over the full vocabulary, from an fp32
+log-softmax of the model's logits, summed over the response. $\mathbb{E}_x[S_m]$ is
+the mean of these sums over the responses of $x$, taken per prompt. The split depends
+on whose states are used, so we average the ordering of
+Section~\ref{sec:res:decomp} with the reverse one,
+$L' = \mathbb{E}_a[S_b] - \mathbb{E}_a[S_a]$ and
+$V' = \mathbb{E}_b[S_b] - \mathbb{E}_a[S_b]$; both add to $\Delta H$ exactly. For GRPO
+the two orderings' local terms differ by $\num{DecGrpoLgap}$ nats. Intervals are 95\%
+percentile bootstraps over prompts with $10{,}000$ resamples; prompts are resampled
+jointly, so contrasts between arms stay paired. For GRPO, $\Delta H$ lies in
+$[\num{DecGrpoDHLo}, \num{DecGrpoDHHi}]$, $L$ in $[\num{DecGrpoLLo},
+\num{DecGrpoLHi}]$ and $V$ in $[\num{DecGrpoVLo}, \num{DecGrpoVHi}]$.
+
+\paragraph{Registration.} Two rules were fixed before any sample was drawn. The claim
+that a measurable share of collapse goes through the visitation channel is made only
+if the interval of $V$ for base $\to$ GRPO excludes zero with the sign of $\Delta H$;
+it does. A damping arm is called consistent with the prediction that token-level
+damping acts on the local channel only if the interval of $L_{\text{arm}} -
+L_{\text{GRPO}}$ excludes zero and $|L_{\text{arm}} - L_{\text{GRPO}}| >
+|V_{\text{arm}} - V_{\text{GRPO}}|$; neither arm is (Table~\ref{tab:decompcontrast}).
+Intervals between later checkpoints were registered as secondary, without a rule. The
+\textsc{signed} checkpoint comes from a re-run of the campaign's seed-$1$
+configuration on four GPUs, because the campaign's own checkpoints were not kept.
+
+\begin{table}[h]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}lcc@{}}
+\toprule
+arm $-$ GRPO & $\Delta L$ & $\Delta V$ \\
+\midrule
+\textsc{permuted} & $\num{DecPermdL}$ [$\num{DecPermdLLo}$, $\num{DecPermdLHi}$] & $\num{DecPermdV}$ [$\num{DecPermdVLo}$, $\num{DecPermdVHi}$] \\
+\textsc{signed} & $\num{DecSigneddL}$ [$\num{DecSigneddLLo}$, $\num{DecSigneddLHi}$] & $\num{DecSigneddV}$ [$\num{DecSigneddVLo}$, $\num{DecSigneddVHi}$] \\
+\bottomrule
+\end{tabular}
+\caption{Each damping arm against GRPO in the two channels, base $\to$ step $100$,
+nats per response, prompt-paired 95\% intervals.}
+\label{tab:decompcontrast}
+\end{table}
+
+\paragraph{Robustness (exploratory).} This check was added after the registered
+result was seen. Long responses are cut at $3072$ tokens and $\Htraj$ grows with
+length, so a policy that stops running to the limit loses entropy through $V$ whatever
+else changes. Table~\ref{tab:decomprobust} recomputes the share without truncated
+responses (a prompt is kept when each of its four response-and-scorer combinations
+has at least one untruncated response), per token (summed entropies over summed
+lengths), and both.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+$V/\Delta H$ & GRPO & \textsc{permuted} & \textsc{signed} \\
+\midrule
+as registered & \num{DecGrpoShare} & \num{DecPermShare} & \num{DecSignedShare} \\
+no truncated & \num{DecRobDropGrpo} & \num{DecRobDropPerm} & \num{DecRobDropSigned} \\
+per token & \num{DecRobTokGrpo} & \num{DecRobTokPerm} & \num{DecRobTokSigned} \\
+both & \num{DecRobBothGrpo} & \num{DecRobBothPerm} & \num{DecRobBothSigned} \\
+\bottomrule
+\end{tabular}
+\caption{The visitation share under the exploratory variants. Prompts kept without
+truncated responses: $\num{DecRobDropGrpoN}$, $\num{DecRobDropPermN}$,
+$\num{DecRobDropSignedN}$.}
+\label{tab:decomprobust}
+\end{table}
+
 \section{Calibration Against the Reported Numbers}
 \label{sec:reported}
 
@@ -2537,6 +2631,44 @@ a figure is taken from prior work. It runs the \textsc{signed} configuration und
 protocol and sets the result beside that method's published $1.5$B table
 \citep[Table~12]{steer}, which also reports GRPO and the untrained model. It is a
 second kind of evidence, not a sixth arm, and we say below what it cannot show.
+
+\begin{table}[t]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{2.6pt}
+\resizebox{\ifdim\width>\linewidth\linewidth\else\width\fi}{!}{%
+\begin{tabular}{@{}lccccccc@{}}
+\toprule
+ & AIME24$^\dagger$ & AIME25 & AMC23 & MATH500 & Minerva & Olympiad & mean \\
+\midrule
+\multicolumn{8}{@{}l}{\emph{reported by \citet{steer}, not re-run}} \\
+base model & \num{ProtorefBaseAime} & \num{ProtorefBaseAimefive} & \num{ProtorefBaseAmc} & \num{ProtorefBaseMathfive} & \num{ProtorefBaseMinerva} & \num{ProtorefBaseOly} & \num{ProtorefBaseAvg} \\
+GRPO & \num{ProtorefGrpoAime} & \num{ProtorefGrpoAimefive} & \num{ProtorefGrpoAmc} & \num{ProtorefGrpoMathfive} & \num{ProtorefGrpoMinerva} & \num{ProtorefGrpoOly} & \num{ProtorefGrpoAvg} \\
+STEER & \num{ProtorefSteerAime} & \num{ProtorefSteerAimefive} & \num{ProtorefSteerAmc} & \num{ProtorefSteerMathfive} & \num{ProtorefSteerMinerva} & \num{ProtorefSteerOly} & \num{ProtorefSteerAvg} \\
+\midrule
+\multicolumn{8}{@{}l}{\emph{ours, mean of the two runs}} \\
+\textsc{signed}, selected & \num{ProtobestMeanAime} & \num{ProtobestMeanAimefive} & \num{ProtobestMeanAmc} & \num{ProtobestMeanMathfive} & \num{ProtobestMeanMinerva} & \num{ProtobestMeanOly} & \num{ProtobestMeanAvg} \\
+\textsc{signed}, step $200$ & \num{ProtolastMeanAime} & \num{ProtolastMeanAimefive} & \num{ProtolastMeanAmc} & \num{ProtolastMeanMathfive} & \num{ProtolastMeanMinerva} & \num{ProtolastMeanOly} & \num{ProtolastMeanAvg} \\
+\midrule
+\multicolumn{8}{@{}l}{\emph{ours, each run's selected checkpoint}} \\
+seed $1$ & \num{ProtobestOneAime} & \num{ProtobestOneAimefive} & \num{ProtobestOneAmc} & \num{ProtobestOneMathfive} & \num{ProtobestOneMinerva} & \num{ProtobestOneOly} & \num{ProtobestOneAvg} \\
+seed $2$ & \num{ProtobestTwoAime} & \num{ProtobestTwoAimefive} & \num{ProtobestTwoAmc} & \num{ProtobestTwoMathfive} & \num{ProtobestTwoMinerva} & \num{ProtobestTwoOly} & \num{ProtobestTwoAvg} \\
+\bottomrule
+\end{tabular}}
+\caption{Six benchmarks under the base method's protocol, accuracy in percent; the
+mean column is unweighted over the six. The upper block is quoted from the base
+method's paper and was not re-run. In each of our runs the selected checkpoint is
+the argmax of its AIME24 validation accuracy. $\dagger$: in our rows AIME24 is the
+training-time validation value at the selected step --- the value the selection
+itself used --- and is biased upward by that selection; the other five columns
+re-evaluate the selected checkpoint. The base method's paper selects the same way
+and evaluates the selected checkpoint, but does not say whether its AIME24 column is
+the selection value or a re-measurement; if it is a re-measurement, this column
+favours our rows. Seed~$2$'s selected checkpoint was evaluated on one GPU (tensor
+parallel size~$1$), every other checkpoint of ours on four, because the four-GPU
+attempt stopped before producing a metric; the sampling settings are the same.}
+\label{tab:reported}
+\end{table}
 
 \paragraph{Protocol.} Two independent runs, with data seeds $1$ and $2$, of $200$
 optimization steps each; AIME24 validation every $10$ steps; in each run the

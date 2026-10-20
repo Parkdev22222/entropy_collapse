@@ -15,13 +15,17 @@ Subcommands, one GPU process each:
     sample   responses of one checkpoint on the shared prompt set (vLLM)
     entropy  summed entropies of one sample set under one model (HF)
     analyze  decomposition, contrasts and bootstrap intervals (CPU only)
+    macros   the manuscript's \\num{} values, recomputed from a git ref (CPU only)
 """
 from __future__ import annotations
 
 import argparse
 import json
 import random
+import subprocess
 import sys
+import tarfile
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -147,6 +151,7 @@ def analyze(out: Path, n_boot: int = 10000) -> dict:
         lo, hi = boot(lambda v, d: mean(v) / mean(d), [t["V"], t["dH"]], n_boot)
         row["V_share"] = {"mean": mean(t["V"]) / mean(t["dH"]), "ci": [lo, hi]}
         row["H_a"], row["H_b"] = mean(E[(a, a)]), mean(E[(b, b)])
+        row["n_prompts"] = len(t["dH"])
         row["L_ordering_gap"] = mean(t["L_b_states"]) - mean(t["L_a_states"])
         res["intervals"][f"{a}->{b}"] = row
 
@@ -240,6 +245,122 @@ def cmd_analyze(a) -> None:
     print(f"wrote {a.result}")
 
 
+# ------------------------------------------------------------------- macros
+# macro name -> (path into the analyze() result, format). tests/test_paper.py
+# reads names() to decide which slots a run can fill, as it does for the other
+# emitters, so a name the manuscript asks for has to be here.
+_I = {"Grpo": "base->grpo100", "Perm": "base->perm100", "Signed": "base->signed100"}
+MACROS = {
+    "DecGrpoHa":        (("intervals", _I["Grpo"], "H_a"), "1f"),
+    "DecGrpoHb":        (("intervals", _I["Grpo"], "H_b"), "1f"),
+    "DecGrpoDH":        (("intervals", _I["Grpo"], "dH", "mean"), "1f"),
+    "DecGrpoDHLo":      (("intervals", _I["Grpo"], "dH", "ci", 0), "1f"),
+    "DecGrpoDHHi":      (("intervals", _I["Grpo"], "dH", "ci", 1), "1f"),
+    "DecGrpoL":         (("intervals", _I["Grpo"], "L", "mean"), "1f"),
+    "DecGrpoLLo":       (("intervals", _I["Grpo"], "L", "ci", 0), "1f"),
+    "DecGrpoLHi":       (("intervals", _I["Grpo"], "L", "ci", 1), "1f"),
+    "DecGrpoV":         (("intervals", _I["Grpo"], "V", "mean"), "1f"),
+    "DecGrpoVLo":       (("intervals", _I["Grpo"], "V", "ci", 0), "1f"),
+    "DecGrpoVHi":       (("intervals", _I["Grpo"], "V", "ci", 1), "1f"),
+    "DecGrpoShare":     (("intervals", _I["Grpo"], "V_share", "mean"), "2f"),
+    "DecGrpoShareLo":   (("intervals", _I["Grpo"], "V_share", "ci", 0), "2f"),
+    "DecGrpoShareHi":   (("intervals", _I["Grpo"], "V_share", "ci", 1), "2f"),
+    "DecPermHb":        (("intervals", _I["Perm"], "H_b"), "1f"),
+    "DecPermDH":        (("intervals", _I["Perm"], "dH", "mean"), "1f"),
+    "DecPermL":         (("intervals", _I["Perm"], "L", "mean"), "1f"),
+    "DecPermV":         (("intervals", _I["Perm"], "V", "mean"), "1f"),
+    "DecPermShare":     (("intervals", _I["Perm"], "V_share", "mean"), "2f"),
+    "DecPermShareLo":   (("intervals", _I["Perm"], "V_share", "ci", 0), "2f"),
+    "DecPermShareHi":   (("intervals", _I["Perm"], "V_share", "ci", 1), "2f"),
+    "DecSignedHb":      (("intervals", _I["Signed"], "H_b"), "1f"),
+    "DecSignedDH":      (("intervals", _I["Signed"], "dH", "mean"), "1f"),
+    "DecSignedL":       (("intervals", _I["Signed"], "L", "mean"), "1f"),
+    "DecSignedV":       (("intervals", _I["Signed"], "V", "mean"), "1f"),
+    "DecSignedShare":   (("intervals", _I["Signed"], "V_share", "mean"), "2f"),
+    "DecSignedShareLo": (("intervals", _I["Signed"], "V_share", "ci", 0), "2f"),
+    "DecSignedShareHi": (("intervals", _I["Signed"], "V_share", "ci", 1), "2f"),
+    "DecPermdL":        (("contrasts", "perm100-grpo100", "L", "mean"), "1f"),
+    "DecPermdLLo":      (("contrasts", "perm100-grpo100", "L", "ci", 0), "1f"),
+    "DecPermdLHi":      (("contrasts", "perm100-grpo100", "L", "ci", 1), "1f"),
+    "DecPermdV":        (("contrasts", "perm100-grpo100", "V", "mean"), "1f"),
+    "DecPermdVLo":      (("contrasts", "perm100-grpo100", "V", "ci", 0), "1f"),
+    "DecPermdVHi":      (("contrasts", "perm100-grpo100", "V", "ci", 1), "1f"),
+    "DecSigneddL":      (("contrasts", "signed100-grpo100", "L", "mean"), "1f"),
+    "DecSigneddLLo":    (("contrasts", "signed100-grpo100", "L", "ci", 0), "1f"),
+    "DecSigneddLHi":    (("contrasts", "signed100-grpo100", "L", "ci", 1), "1f"),
+    "DecSigneddV":      (("contrasts", "signed100-grpo100", "V", "mean"), "1f"),
+    "DecSigneddVLo":    (("contrasts", "signed100-grpo100", "V", "ci", 0), "1f"),
+    "DecSigneddVHi":    (("contrasts", "signed100-grpo100", "V", "ci", 1), "1f"),
+    "DecGrpoLgap":      (("intervals", _I["Grpo"], "L_ordering_gap"), "1f"),
+}
+# The exploratory robustness rows (robust()), one share and one prompt count
+# per variant and interval.
+_R = {"Drop": "drop_truncated", "Tok": "per_token", "Both": "drop_truncated_per_token"}
+for _v, _rk in _R.items():
+    for _arm, _ik in _I.items():
+        MACROS[f"DecRob{_v}{_arm}"] = (("exploratory_robustness", _rk, _ik, "V_share"), "2f")
+        MACROS[f"DecRob{_v}{_arm}Lo"] = (("exploratory_robustness", _rk, _ik, "ci", 0), "2f")
+        MACROS[f"DecRob{_v}{_arm}Hi"] = (("exploratory_robustness", _rk, _ik, "ci", 1), "2f")
+        MACROS[f"DecRob{_v}{_arm}N"] = (("exploratory_robustness", _rk, _ik, "n"), "0f")
+
+
+def names() -> set[str]:
+    """Every macro emit() can write; tests/test_paper.py reads this."""
+    return set(MACROS) | {"DecNprompts", "DecRobustMin", "DecRobustMax"}
+
+
+def _get(doc, path):
+    for k in path:
+        doc = doc[k]
+    return doc
+
+
+def emit(res: dict) -> dict[str, str]:
+    """macro name -> rendered value; anything the result lacks stays \\PENDING."""
+    out = {}
+    for name, (path, how) in MACROS.items():
+        try:
+            out[name] = f"{float(_get(res, path)):.{how}}"
+        except (KeyError, IndexError, TypeError):
+            continue
+    first = next(iter(res["intervals"].values()), None)
+    if first:
+        out["DecNprompts"] = str(first["n_prompts"])
+    shares = [r["V_share"] for rows in res.get("exploratory_robustness", {}).values()
+              for r in rows.values()]
+    if shares:
+        out["DecRobustMin"] = f"{min(shares):.2f}"
+        out["DecRobustMax"] = f"{max(shares):.2f}"
+    return out
+
+
+def cmd_macros(a) -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        arc = subprocess.run(["git", "archive", a.git_ref, a.path],
+                             check=True, capture_output=True).stdout
+        tar = Path(tmp) / "a.tar"
+        tar.write_bytes(arc)
+        with tarfile.open(tar) as t:
+            t.extractall(tmp)
+        out = Path(tmp) / a.path
+        if (out / "samples.tar.gz").exists():
+            with tarfile.open(out / "samples.tar.gz") as t:
+                t.extractall(out)
+        res = analyze(out, a.n_boot)
+        if (out / "samples").is_dir():
+            res["exploratory_robustness"] = robust(out)
+    values = emit(res)
+    lines = ["% generated by scripts/channel_decomp.py macros -- do not edit",
+             f"% source: {a.git_ref}:{a.path}"]
+    lines += [f"\\providecommand{{\\{k}}}{{{v}}}" for k, v in sorted(values.items())]
+    Path(a.tex).parent.mkdir(parents=True, exist_ok=True)
+    Path(a.tex).write_text("\n".join(lines) + "\n")
+    missing = sorted(set(MACROS) - set(values))
+    print(f"[decomp-macros] {len(values)} macros -> {a.tex}")
+    if missing:
+        print(f"[decomp-macros] not in the result, left red: {missing}")
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -263,8 +384,14 @@ def main(argv=None) -> int:
     z.add_argument("--out", required=True)
     z.add_argument("--result", required=True)
     z.add_argument("--n-boot", type=int, default=10000)
+    m = sub.add_parser("macros")
+    m.add_argument("--git-ref", default="origin/paper")
+    m.add_argument("--path", default="results/decomp")
+    m.add_argument("--tex", default="results/numbers-decomp.tex")
+    m.add_argument("--n-boot", type=int, default=10000)
     a = ap.parse_args(argv)
-    {"sample": cmd_sample, "entropy": cmd_entropy, "analyze": cmd_analyze}[a.cmd](a)
+    {"sample": cmd_sample, "entropy": cmd_entropy, "analyze": cmd_analyze,
+     "macros": cmd_macros}[a.cmd](a)
     return 0
 
 
