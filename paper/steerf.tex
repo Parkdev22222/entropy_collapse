@@ -83,9 +83,10 @@ entropy goes. The trajectory entropy changes through two channels, exactly and w
 approximation: a \emph{local} channel, the sharpening of the conditional distribution
 at the states the policy visits, and a \emph{visitation} channel, the change in which
 states it visits. Token-level control acts only on the first. Measuring the split
-between checkpoints of a $1.5$B model on one training seed, we find that
-$\num{DecGrpoShare}$ $[\num{DecGrpoShareLo}, \num{DecGrpoShareHi}]$ of the trajectory
-entropy GRPO loses by step $100$ goes through the visitation channel: the trained
+between checkpoints of a $1.5$B model, we find that $\num{DecGrpoShare}$
+$[\num{DecGrpoShareLo}, \num{DecGrpoShareHi}]$ of the trajectory entropy GRPO loses by
+step $100$ goes through the visitation channel, and a registered replication on two
+further seeds gives $\num{DecRepGrpoShare}$ and $\num{DecRepSignedShare}$: the trained
 policy moves to states where the base model was already confident, rather than
 becoming more confident at the states it already visited. The share is the same under
 two entropy-damping variants and changes little when truncated responses are dropped
@@ -176,7 +177,8 @@ How much of real collapse goes through each channel is an empirical question, an
 the same split answers it exactly between two checkpoints: the change at the states
 the later policy visits, and the change in which states are visited, each scored by a
 fixed model (Section~\ref{sec:res:decomp}). From the base model to step $100$ of GRPO,
-$\num{DecGrpoShare}$ of the lost trajectory entropy goes through visitation. Most of
+$\num{DecGrpoShare}$ of the lost trajectory entropy goes through visitation, and the
+share replicates on two other seeds. Most of
 what is called entropy collapse is therefore not sharpening at fixed states but the
 policy settling on paths along which the base model was already confident --- the part
 token-level control does not touch.
@@ -207,8 +209,8 @@ Our contributions are:
 \begin{itemize}\setlength\itemsep{1pt}
 \item \textbf{A measurement of where collapse goes:} an exact between-checkpoint split
       of the entropy that training loses, which assigns $\num{DecGrpoShare}$ of GRPO's
-      loss to the visitation channel, the same under two damping variants
-      (Section~\ref{sec:res:decomp}).
+      loss to the visitation channel, the same under two damping variants and
+      replicated on two further seeds (Section~\ref{sec:res:decomp}).
 \item \textbf{Why token-level control cannot reach it:} the trajectory-entropy gradient
       splits into the same two channels (Section~\ref{sec:channels}; the identity is
       standard in maximum-entropy RL, the reading of token-level control through it is
@@ -570,19 +572,25 @@ sampling (Appendix~\ref{sec:decomp}).
 \begin{table}[t]
 \centering
 \footnotesize
-\setlength{\tabcolsep}{3pt}
+\setlength{\tabcolsep}{2.4pt}
 \begin{tabular}{@{}lrrrc@{}}
 \toprule
-$0 \to 100$ & $\Delta H$ & $L$ & $V$ & $V/\Delta H$ \\
+base $\to$ & $\Delta H$ & $L$ & $V$ & $V/\Delta H$ \\
 \midrule
+\multicolumn{5}{@{}l}{\emph{seed $1$, step $100$}} \\
 GRPO & $\num{DecGrpoDH}$ & $\num{DecGrpoL}$ & $\num{DecGrpoV}$ & \num{DecGrpoShare} [\num{DecGrpoShareLo}, \num{DecGrpoShareHi}] \\
 \textsc{permuted} & $\num{DecPermDH}$ & $\num{DecPermL}$ & $\num{DecPermV}$ & \num{DecPermShare} [\num{DecPermShareLo}, \num{DecPermShareHi}] \\
 \textsc{signed} & $\num{DecSignedDH}$ & $\num{DecSignedL}$ & $\num{DecSignedV}$ & \num{DecSignedShare} [\num{DecSignedShareLo}, \num{DecSignedShareHi}] \\
+\midrule
+\multicolumn{5}{@{}l}{\emph{replication, other seeds}} \\
+GRPO s$2$, $80$ & $\num{DecRepGrpoDH}$ & $\num{DecRepGrpoL}$ & $\num{DecRepGrpoV}$ & \num{DecRepGrpoShare} [\num{DecRepGrpoShareLo}, \num{DecRepGrpoShareHi}] \\
+\textsc{signed} s$3$, $100$ & $\num{DecRepSignedDH}$ & $\num{DecRepSignedL}$ & $\num{DecRepSignedV}$ & \num{DecRepSignedShare} [\num{DecRepSignedShareLo}, \num{DecRepSignedShareHi}] \\
 \bottomrule
 \end{tabular}
 \caption{Where the trajectory entropy lost between the base model
-($H_a = \num{DecGrpoHa}$ nats per response) and step $100$ goes; seed $1$,
-$\num{DecNprompts}$ training prompts, four responses each. $L$: same states, sharper
+($H_a = \num{DecGrpoHa}$ nats per response) and a later checkpoint goes;
+$\num{DecNprompts}$ training prompts, four responses each. The replication rows are
+the two checkpoints off seed $1$ that the Hub retained (seed, step). $L$: same states, sharper
 conditionals; $V$: other states visited; $\Delta H = L + V$ exactly. Brackets: 95\%
 prompt-bootstrap interval.}
 \label{tab:decomp}
@@ -612,7 +620,10 @@ intervals for the share; registered without a decision rule.}
 
 GRPO loses $\num{DecGrpoDH}$ nats per response, and the visitation channel carries
 $\num{DecGrpoShare}$ of it, which meets the registered criterion for a measurable
-visitation share (Table~\ref{tab:decomp}). Most of the measured collapse is therefore
+visitation share (Table~\ref{tab:decomp}). A replication registered before sampling,
+on the two checkpoints off seed $1$ that were retained, meets the same criterion:
+GRPO on seed $2$ at step $80$ gives $\num{DecRepGrpoShare}$, and the campaign's
+\textsc{signed} run on seed $3$ at step $100$ gives $\num{DecRepSignedShare}$. Most of the measured collapse is therefore
 not sharpening at the states the policy already visited: the trained policy moves to
 states where the base model was already confident, and the local channel, the only
 one a token-level estimator sees, carries the remainder. The two damping arms give
@@ -708,7 +719,7 @@ accuracy claim.
 
 Entropy collapse in RLVR is mostly a change in where the policy goes. Measured between
 checkpoints, $\num{DecGrpoShare}$ of the trajectory entropy GRPO loses goes through the
-visitation channel (one seed), and current token-level entropy control acts only on
+visitation channel, a share that replicates on two further seeds, and current token-level entropy control acts only on
 the remainder. The gradient of trajectory entropy has both terms; the local estimator
 vanishes, for a correct reason, exactly where the visitation term is largest, so the
 omission cannot be repaired by a better local estimator. The missing term is a
@@ -720,7 +731,7 @@ entropy tracks the damping mechanism, not the $\AH$ signal. We do not establish 
 accuracy benefit; this paper should be read as an account of where entropy collapse
 happens, where token-level control acts, and what an aggregate entropy curve cannot
 see, not as a recommendation to adopt the correction. Whether a cheaper estimator of
-$\Htogo$ suffices, whether the visitation share holds across seeds and scales, and
+$\Htogo$ suffices, whether the visitation share holds across model scales, and
 whether structured sampling helps RLVR in its own right, remain open.
 
 
@@ -744,9 +755,11 @@ launcher's $0.8$, on $110$ rather than $200$ steps, and cannot separate these ca
 numbers (Appendix~\ref{sec:reported}) is uncontrolled: the quoted rows were not
 re-run, our AIME24 column is the selection value and biased upward, and the sampler in
 those runs was chosen after the campaign. The channel decomposition
-(Section~\ref{sec:res:decomp}) is one seed, between checkpoints $100$ steps apart, so
-it measures the integrated split rather than the gradient's; its \textsc{signed}
-checkpoint is a re-run of that configuration on different hardware.
+(Section~\ref{sec:res:decomp}) rests on seed $1$ and one checkpoint each of seeds $2$
+and $3$, the ones the Hub retained, so the seed-$2$ GRPO point is at step $80$ rather
+than $100$; it is between checkpoints, so it measures the integrated split rather than
+the gradient's; and the seed-$1$ \textsc{signed} checkpoint is a re-run of that
+configuration on different hardware.
 
 \paragraph{Estimator assumptions and efficiency.} The calibration suppresses heads
 beyond the first, so $\hat{H}_{\mathrm{togo}}$ is close to a one-step forecast, and on a
@@ -2626,7 +2639,13 @@ damping acts on the local channel only if the interval of $L_{\text{arm}} -
 L_{\text{GRPO}}$ excludes zero and $|L_{\text{arm}} - L_{\text{GRPO}}| >
 |V_{\text{arm}} - V_{\text{GRPO}}|$; neither arm is (Table~\ref{tab:decompcontrast}).
 Intervals between later checkpoints were registered as secondary, without a rule, and
-are reported descriptively in Table~\ref{tab:decompsec}. The
+are reported descriptively in Table~\ref{tab:decompsec}. A replication on seeds $3$
+or $4$ at step $100$ was registered after the seed-$1$ result and before any of its
+samples; no such checkpoint had been kept, so an amendment, also before sampling,
+moved it to the two retained checkpoints off seed $1$ that match a primary arm (GRPO,
+seed $2$, step $80$; \textsc{signed}, seed $3$, step $100$), under the same rule. Both
+meet it (Table~\ref{tab:decomp}); the exploratory variants below give
+$\num{DecRepRobustMin}$ to $\num{DecRepRobustMax}$ on them. The
 \textsc{signed} checkpoint comes from a re-run of the campaign's seed-$1$
 configuration on four GPUs, because the campaign's own checkpoints were not kept.
 

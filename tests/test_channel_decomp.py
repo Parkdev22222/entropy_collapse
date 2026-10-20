@@ -80,7 +80,7 @@ def test_macros_name_every_registered_quantity(tmp_path):
     res = C.analyze(tmp_path, n_boot=200)
     res["exploratory_robustness"] = {"x": {"a": {"V_share": 0.81}, "b": {"V_share": 0.86}}}
     out = C.emit(res)
-    assert {k for k in C.MACROS if not k.startswith(("DecRob", "DecSec"))} <= set(out)
+    assert {k for k in C.MACROS if not k.startswith(("DecRob", "DecSec", "DecRep"))} <= set(out)
     assert out["DecGrpoDH"] == "-40.0" and out["DecGrpoV"] == "-10.0"
     assert out["DecGrpoShare"] == "0.25" and out["DecNprompts"] == "40"
     assert out["DecPermdL"] == "20.0" and out["DecPermdV"] == "-2.0"
@@ -109,3 +109,18 @@ def test_named_intervals_and_rule_per_interval(tmp_path):
                     intervals=C.parse_intervals("base:grpos2at80"))
     r = res["intervals"]["base->grpos2at80"]
     assert abs(r["V_share"]["mean"] - 40 / 45) < 1e-9 and r["q1_rule_holds"] is True
+
+
+def test_replication_macros_come_from_their_own_block(tmp_path):
+    n = 30
+    _write(tmp_path, "base", "base", [[100.0 + (i % 3)] * 4 for i in range(n)])
+    for lab in ("grpos2at80", "signeds3at100"):
+        _write(tmp_path, "base", lab, [[95.0 + (i % 3)] * 4 for i in range(n)])
+        _write(tmp_path, lab, "base", [[60.0 + (i % 3)] * 4 for i in range(n)])
+        _write(tmp_path, lab, lab, [[55.0 + (i % 3)] * 4 for i in range(n)])
+    rep = C.analyze(tmp_path, n_boot=200, intervals=C.parse_intervals(C.REPLICATION))
+    rep["exploratory_robustness"] = {"x": {"a": {"V_share": 0.88}, "b": {"V_share": 0.92}}}
+    out = C.emit({"intervals": {}, "replication": rep})
+    assert out["DecRepGrpoShare"] == "0.89" and out["DecRepSignedDH"] == "-45.0"
+    assert (out["DecRepRobustMin"], out["DecRepRobustMax"]) == ("0.88", "0.92")
+    assert "DecGrpoShare" not in out and "DecRobustMin" not in out
