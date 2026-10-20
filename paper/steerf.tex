@@ -28,8 +28,8 @@
 \newcommand{\gradt}{\nabla_{\theta}}
 \newcommand{\pit}{\pi_{\theta}}
 
-\title{Entropy Collapse Has a Direction:\\
-The Missing Visitation Channel in Token-Level Entropy Control for RLVR}
+\title{Where Does Entropy Collapse Go?\\
+Measuring the Visitation Channel That Token-Level Entropy Control Misses}
 
 \author{Anonymous ACL submission}
 
@@ -76,30 +76,30 @@ The Missing Visitation Channel in Token-Level Entropy Control for RLVR}
 \maketitle
 
 \begin{abstract}
-Reinforcement learning with verifiable rewards (RLVR) drives a policy's entropy
-toward zero, and a recent family of methods counters this by re-weighting the policy
-loss with a per-token estimate of each update's entropy cost. These methods account
-for how visited states sharpen, but not for how an update changes \emph{which states
-are visited}. We show that the gradient of the trajectory entropy splits exactly into
-a \emph{local} channel --- the change of the conditional distribution at visited
-states --- and a \emph{visitation} channel --- the change in the probability of
-reaching them --- and that token-level estimators capture only the first. The local
-estimate vanishes, correctly to first order, at a flat branch point, which is exactly
-where the visitation prefactor is largest, so no refinement of the local estimator
-recovers the missing term. We derive the visitation term as a per-token REINFORCE
-advantage $\AH$ whose reward-to-go is the remaining conditional entropy, made
-estimable by a sibling-prefix baseline that a fixed tree-structured rollout supplies.
-$\AH$ sums to zero within each sibling set, so it can change trajectory diversity
-without changing aggregate token entropy. A five-arm experiment over three paired
-seeds observes this dissociation: changing the damping mechanism shifts the aggregate
-entropy by $\num{Csteergrpoentropy}$ and $\num{Cuniformsteerentropy}$, whereas changing
-only the branch-specific $\AH$ signal shifts it by $\num{Csigneduniformentropy}$ and
-$\num{Csignedpermutedentropy}$. On one seed, an exact decomposition between
-checkpoints attributes $\num{DecGrpoShare}$ of the trajectory entropy that GRPO loses
-to the visitation channel. We do not establish an accuracy gain from the
-correction --- a pre-registered accuracy test is not supported --- and the experiments
-instead support the structural claim that aggregate entropy cannot diagnose the
-visitation channel.
+Reinforcement learning with verifiable rewards (RLVR) drives a language model's
+entropy toward zero, and token-level entropy control --- bonuses, clips, and per-token
+re-weighting of the policy loss --- is the standard response. We ask where the lost
+entropy goes. The trajectory entropy changes through two channels, exactly and without
+approximation: a \emph{local} channel, the sharpening of the conditional distribution
+at the states the policy visits, and a \emph{visitation} channel, the change in which
+states it visits. Token-level control acts only on the first. Measuring the split
+between checkpoints of a $1.5$B model on one training seed, we find that
+$\num{DecGrpoShare}$ $[\num{DecGrpoShareLo}, \num{DecGrpoShareHi}]$ of the trajectory
+entropy GRPO loses by step $100$ goes through the visitation channel: the trained
+policy moves to states where the base model was already confident, rather than
+becoming more confident at the states it already visited. The share is the same under
+two entropy-damping variants and changes little when truncated responses are dropped
+or entropy is counted per token. We show why the local channel cannot be extended to
+cover the other: the local estimate vanishes at flat branch points, exactly where the
+visitation term is largest. We derive the visitation term as a per-token advantage
+$\AH$, estimable from sibling rollouts, and note that it sums to zero within each
+sibling set, so aggregate entropy cannot register it. A five-arm experiment over three
+paired seeds bears this out: changing the damping mechanism shifts aggregate entropy
+by $\num{Csteergrpoentropy}$ and $\num{Cuniformsteerentropy}$, changing only the $\AH$
+signal by $\num{Csigneduniformentropy}$ and $\num{Csignedpermutedentropy}$. We do not
+establish an accuracy gain from correcting the visitation channel; the paper is an
+account of where entropy collapse happens and of what an aggregate entropy curve can
+and cannot show.
 \end{abstract}
 
 \section{Introduction}
@@ -111,11 +111,13 @@ monotone and, past a point, coincident with the end of useful learning. The stan
 remedies spend part of the update budget slowing it down: an entropy bonus, a KL
 anchor, a clip on the tokens that lose most entropy, or, most recently, a per-token
 re-weighting of the policy loss by a first-order estimate of the entropy each token's
-update destroys \citep{steer}.
+update destroys \citep{steer}. All of them act token by token, on the conditional
+distribution at a state the policy has reached. This paper asks a prior question:
+when RLVR loses entropy, how much of the loss is sharpening at the states the policy
+visits, and how much is a change in which states it visits?
 
-These remedies account for how the conditional distribution at a visited state
-sharpens. They do not account for how an update changes which states are visited, and
-this omission is structural rather than a matter of estimator quality.
+The distinction matters because token-level control can only see the first, and the
+omission is structural rather than a matter of estimator quality.
 Figure~\ref{fig:branch} shows the case that makes it concrete. At a state with two
 equiprobable continuations the conditional distribution is as entropic as it can be,
 and its first-order entropy change under a small push is zero. Yet a small shift of
@@ -170,44 +172,42 @@ mean; it vanishes at a flat branch point, correctly, since the entropy loss ther
 second order. The visitation term's prefactor $1 - \pit(y_t \mid s_t)$ is largest at
 those same points.
 
-The missing term is estimable. Causality turns it into a REINFORCE estimator whose
-reward-to-go is the remaining conditional entropy $\Htogo$, and a baseline from
-rollouts that share a prefix turns that into a per-token advantage $\AH$. Plain group
-rollouts almost never share prefixes, so we schedule the sharing with a fixed tree,
-which we use only as a device for the estimator. Because $\AH$ is a deviation from a
-sibling mean it sums to zero over each sibling set: it changes which sibling is damped,
-not how much damping there is on average. This gives the experiment its target. The
-aggregate entropy curve --- the evidence usually offered for entropy control --- should
-move when the damping mechanism changes and should not move when only the
-branch-specific $\AH$ signal changes, a prediction that can fail.
+How much of real collapse goes through each channel is an empirical question, and
+the same split answers it exactly between two checkpoints: the change at the states
+the later policy visits, and the change in which states are visited, each scored by a
+fixed model (Section~\ref{sec:res:decomp}). From the base model to step $100$ of GRPO,
+$\num{DecGrpoShare}$ of the lost trajectory entropy goes through visitation. Most of
+what is called entropy collapse is therefore not sharpening at fixed states but the
+policy settling on paths along which the base model was already confident --- the part
+token-level control does not touch.
+
+The missing term is also estimable during training. Causality turns it into a
+REINFORCE estimator whose reward-to-go is the remaining conditional entropy $\Htogo$,
+and a baseline from rollouts that share a prefix, scheduled with a fixed tree, turns
+that into a per-token advantage $\AH$. Because $\AH$ is a deviation from a sibling
+mean it sums to zero over each sibling set, which predicts that the aggregate entropy
+curve --- the evidence usually offered for entropy control --- moves when the damping
+mechanism changes and not when only the $\AH$ signal changes, a prediction that can
+fail.
 
 Our contributions are:
 \begin{itemize}\setlength\itemsep{1pt}
-\item \textbf{An exact decomposition} of the trajectory-entropy gradient into a local
-      term, which changes conditional entropy at visited states, and a visitation term,
-      which changes which states the policy reaches (Section~\ref{sec:channels}). The
-      identity is standard in maximum-entropy RL; what is new is reading token-level
-      entropy control through it.
-\item \textbf{A structural mismatch:} the local estimator used by current token-level
-      methods vanishes at flat branch points, precisely where the visitation prefactor
-      is largest, so the omission cannot be repaired within the local channel
-      (Section~\ref{sec:blind}).
-\item \textbf{An estimable visitation term:} a per-token REINFORCE advantage $\AH$ whose
-      reward-to-go is the remaining conditional entropy, with a sibling-prefix baseline,
-      a ledger of every approximation and the sign of its error, and a bound on how many
-      positions can carry it under any sampler (Section~\ref{sec:ahdef}).
-\item \textbf{A diagnostic consequence:} because the correction is mean-preserving within
-      sibling sets, aggregate token entropy is not an appropriate diagnostic for whether
-      it acts (Section~\ref{sec:zerosum}).
-\item \textbf{A measurement of where collapse goes:} between checkpoints, the entropy
-      that training loses splits exactly into the two channels, and
-      $\num{DecGrpoShare}$ of GRPO's loss goes through the visitation channel that
-      token-level estimators omit (Section~\ref{sec:res:decomp}).
-\item \textbf{An experimental test of these predictions:} five arms that separate
-      changes to the damping mechanism from changes to the branch-specific signal. The
-      predicted dissociation is observed --- aggregate entropy tracks the mechanism, not
-      the signal; the second prediction, a wider spread across siblings, is not
-      measured here (Sections~\ref{sec:setup}--\ref{sec:res:entropy}).
+\item \textbf{A measurement of where collapse goes:} an exact between-checkpoint split
+      of the entropy that training loses, which assigns $\num{DecGrpoShare}$ of GRPO's
+      loss to the visitation channel, the same under two damping variants
+      (Section~\ref{sec:res:decomp}).
+\item \textbf{Why token-level control cannot reach it:} the trajectory-entropy gradient
+      splits into the same two channels (Section~\ref{sec:channels}; the identity is
+      standard in maximum-entropy RL, the reading of token-level control through it is
+      new), and the local estimator vanishes at flat branch points, where the
+      visitation prefactor is largest (Section~\ref{sec:blind}).
+\item \textbf{An estimable visitation term and its diagnostic consequence:} a per-token
+      REINFORCE advantage $\AH$ with a sibling-prefix baseline and a ledger of its
+      approximations (Section~\ref{sec:ahdef}); it is mean-preserving within sibling
+      sets, so aggregate token entropy cannot diagnose it (Section~\ref{sec:zerosum}).
+\item \textbf{A test of that consequence:} five arms that separate the damping
+      mechanism from the branch-specific signal; aggregate entropy tracks the
+      mechanism, not the signal (Section~\ref{sec:res:entropy}).
 \end{itemize}
 We do not establish an accuracy gain from the correction: the pre-registered test of
 the $\AH$ signal against a signal-free control is not supported
@@ -581,7 +581,13 @@ visitation share (Table~\ref{tab:decomp}). Most of the measured collapse is ther
 not sharpening at the states the policy already visited: the trained policy moves to
 states where the base model was already confident, and the local channel, the only
 one a token-level estimator sees, carries the remainder. The two damping arms give
-nearly the same split. Because $\Htraj$ grows with response length and long responses
+nearly the same split. The loss is front-loaded: by step $50$ the \textsc{signed} run
+has already lost $\num{DecSecSignedADH}$ nats, $\num{DecSecSignedAShare}$ of it through
+visitation. Between later checkpoints the changes are much smaller and the local
+channel's part is larger (visitation share $\num{DecSecSignedBShare}$ from step $50$
+to $100$), and where entropy rises late --- \textsc{signed} after step $100$, GRPO from
+step $80$ to $110$ --- the rise again goes mostly through visitation
+(Appendix~\ref{sec:decomp}). Because $\Htraj$ grows with response length and long responses
 are cut at $3072$ tokens, we checked after seeing the result whether truncation or
 length carries the share; without truncated responses, per token, or both, it stays
 between $\num{DecRobustMin}$ and $\num{DecRobustMax}$ (exploratory,
@@ -811,22 +817,22 @@ corrected arm between the two without ranking it (Appendix~\ref{sec:reported}).
 \section{Conclusion}
 \label{sec:conclusion}
 
-Current token-level entropy control in RLVR accounts for how visited states sharpen,
-but not for how policy updates change which states are visited. The gradient of
-trajectory entropy has both terms; the local estimator vanishes, for a correct reason,
-exactly where the visitation term is largest, so the omission cannot be repaired by a
-better local estimator. The missing term is a REINFORCE estimator whose reward-to-go
-is the remaining conditional entropy, and a fixed tree supplies the sibling baseline
-that makes it estimable. The resulting correction is mean-preserving, so it can change
-trajectory diversity without a corresponding change in aggregate token entropy, and the
-experiment observes that dissociation: aggregate entropy tracks the damping mechanism,
-not the $\AH$ signal. Measured between checkpoints, most of the entropy that training
-loses ($\num{DecGrpoShare}$ under GRPO, one seed) goes through the visitation channel,
-the one token-level estimators do not see. We do not establish an accuracy benefit, and this paper should be
-read as an account of where token-level entropy control acts and of what an aggregate
-entropy curve cannot see, not as a recommendation to adopt the correction for accuracy.
-Whether a cheaper estimator of $\Htogo$ suffices, and whether structured sampling helps
-RLVR in its own right, remain open.
+Entropy collapse in RLVR is mostly a change in where the policy goes. Measured between
+checkpoints, $\num{DecGrpoShare}$ of the trajectory entropy GRPO loses goes through the
+visitation channel (one seed), and current token-level entropy control acts only on
+the remainder. The gradient of trajectory entropy has both terms; the local estimator
+vanishes, for a correct reason, exactly where the visitation term is largest, so the
+omission cannot be repaired by a better local estimator. The missing term is a
+REINFORCE estimator whose reward-to-go is the remaining conditional entropy, and a
+fixed tree supplies the sibling baseline that makes it estimable. It is
+mean-preserving, so it can change trajectory diversity without a corresponding change
+in aggregate token entropy, and the experiment observes that dissociation: aggregate
+entropy tracks the damping mechanism, not the $\AH$ signal. We do not establish an
+accuracy benefit; this paper should be read as an account of where entropy collapse
+happens, where token-level control acts, and what an aggregate entropy curve cannot
+see, not as a recommendation to adopt the correction. Whether a cheaper estimator of
+$\Htogo$ suffices, whether the visitation share holds across seeds and scales, and
+whether structured sampling helps RLVR in its own right, remain open.
 
 
 \section*{Limitations}
@@ -2573,7 +2579,8 @@ it does. A damping arm is called consistent with the prediction that token-level
 damping acts on the local channel only if the interval of $L_{\text{arm}} -
 L_{\text{GRPO}}$ excludes zero and $|L_{\text{arm}} - L_{\text{GRPO}}| >
 |V_{\text{arm}} - V_{\text{GRPO}}|$; neither arm is (Table~\ref{tab:decompcontrast}).
-Intervals between later checkpoints were registered as secondary, without a rule. The
+Intervals between later checkpoints were registered as secondary, without a rule, and
+are reported descriptively in Table~\ref{tab:decompsec}. The
 \textsc{signed} checkpoint comes from a re-run of the campaign's seed-$1$
 configuration on four GPUs, because the campaign's own checkpoints were not kept.
 
@@ -2592,6 +2599,28 @@ arm $-$ GRPO & $\Delta L$ & $\Delta V$ \\
 \caption{Each damping arm against GRPO in the two channels, base $\to$ step $100$,
 nats per response, prompt-paired 95\% intervals.}
 \label{tab:decompcontrast}
+\end{table}
+
+\begin{table}[h]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{2.5pt}
+\resizebox{\ifdim\width>\linewidth\linewidth\else\width\fi}{!}{%
+\begin{tabular}{@{}lrrrc@{}}
+\toprule
+interval & $\Delta H$ & $L$ & $V$ & $V/\Delta H$ \\
+\midrule
+GRPO $80 \to 110$ & $\num{DecSecGrpoLateDH}$ & $\num{DecSecGrpoLateL}$ & $\num{DecSecGrpoLateV}$ & \num{DecSecGrpoLateShare} [\num{DecSecGrpoLateShareLo}, \num{DecSecGrpoLateShareHi}] \\
+\textsc{perm.} $80 \to 110$ & $\num{DecSecPermLateDH}$ & $\num{DecSecPermLateL}$ & $\num{DecSecPermLateV}$ & \num{DecSecPermLateShare} [\num{DecSecPermLateShareLo}, \num{DecSecPermLateShareHi}] \\
+\textsc{signed} $0 \to 50$ & $\num{DecSecSignedADH}$ & $\num{DecSecSignedAL}$ & $\num{DecSecSignedAV}$ & \num{DecSecSignedAShare} [\num{DecSecSignedAShareLo}, \num{DecSecSignedAShareHi}] \\
+\textsc{signed} $50 \to 100$ & $\num{DecSecSignedBDH}$ & $\num{DecSecSignedBL}$ & $\num{DecSecSignedBV}$ & \num{DecSecSignedBShare} [\num{DecSecSignedBShareLo}, \num{DecSecSignedBShareHi}] \\
+\textsc{signed} $100 \to 150$ & $\num{DecSecSignedCDH}$ & $\num{DecSecSignedCL}$ & $\num{DecSecSignedCV}$ & \num{DecSecSignedCShare} [\num{DecSecSignedCShareLo}, \num{DecSecSignedCShareHi}] \\
+\textsc{signed} $150 \to 200$ & $\num{DecSecSignedDDH}$ & $\num{DecSecSignedDL}$ & $\num{DecSecSignedDV}$ & \num{DecSecSignedDShare} [\num{DecSecSignedDShareLo}, \num{DecSecSignedDShareHi}] \\
+\bottomrule
+\end{tabular}}
+\caption{Secondary intervals, seed $1$, nats per response, with 95\% prompt-bootstrap
+intervals for the share; registered without a decision rule.}
+\label{tab:decompsec}
 \end{table}
 
 \paragraph{Robustness (exploratory).} This check was added after the registered

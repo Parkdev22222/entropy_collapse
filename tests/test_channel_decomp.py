@@ -80,7 +80,7 @@ def test_macros_name_every_registered_quantity(tmp_path):
     res = C.analyze(tmp_path, n_boot=200)
     res["exploratory_robustness"] = {"x": {"a": {"V_share": 0.81}, "b": {"V_share": 0.86}}}
     out = C.emit(res)
-    assert {k for k in C.MACROS if not k.startswith("DecRob")} <= set(out)
+    assert {k for k in C.MACROS if not k.startswith(("DecRob", "DecSec"))} <= set(out)
     assert out["DecGrpoDH"] == "-40.0" and out["DecGrpoV"] == "-10.0"
     assert out["DecGrpoShare"] == "0.25" and out["DecNprompts"] == "40"
     assert out["DecPermdL"] == "20.0" and out["DecPermdV"] == "-2.0"

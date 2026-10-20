@@ -251,57 +251,68 @@ def cmd_analyze(a) -> None:
 # emitters, so a name the manuscript asks for has to be here.
 _I = {"Grpo": "base->grpo100", "Perm": "base->perm100", "Signed": "base->signed100"}
 MACROS = {
-    "DecGrpoHa":        (("intervals", _I["Grpo"], "H_a"), "1f"),
-    "DecGrpoHb":        (("intervals", _I["Grpo"], "H_b"), "1f"),
-    "DecGrpoDH":        (("intervals", _I["Grpo"], "dH", "mean"), "1f"),
-    "DecGrpoDHLo":      (("intervals", _I["Grpo"], "dH", "ci", 0), "1f"),
-    "DecGrpoDHHi":      (("intervals", _I["Grpo"], "dH", "ci", 1), "1f"),
-    "DecGrpoL":         (("intervals", _I["Grpo"], "L", "mean"), "1f"),
-    "DecGrpoLLo":       (("intervals", _I["Grpo"], "L", "ci", 0), "1f"),
-    "DecGrpoLHi":       (("intervals", _I["Grpo"], "L", "ci", 1), "1f"),
-    "DecGrpoV":         (("intervals", _I["Grpo"], "V", "mean"), "1f"),
-    "DecGrpoVLo":       (("intervals", _I["Grpo"], "V", "ci", 0), "1f"),
-    "DecGrpoVHi":       (("intervals", _I["Grpo"], "V", "ci", 1), "1f"),
-    "DecGrpoShare":     (("intervals", _I["Grpo"], "V_share", "mean"), "2f"),
-    "DecGrpoShareLo":   (("intervals", _I["Grpo"], "V_share", "ci", 0), "2f"),
-    "DecGrpoShareHi":   (("intervals", _I["Grpo"], "V_share", "ci", 1), "2f"),
-    "DecPermHb":        (("intervals", _I["Perm"], "H_b"), "1f"),
-    "DecPermDH":        (("intervals", _I["Perm"], "dH", "mean"), "1f"),
-    "DecPermL":         (("intervals", _I["Perm"], "L", "mean"), "1f"),
-    "DecPermV":         (("intervals", _I["Perm"], "V", "mean"), "1f"),
-    "DecPermShare":     (("intervals", _I["Perm"], "V_share", "mean"), "2f"),
-    "DecPermShareLo":   (("intervals", _I["Perm"], "V_share", "ci", 0), "2f"),
-    "DecPermShareHi":   (("intervals", _I["Perm"], "V_share", "ci", 1), "2f"),
-    "DecSignedHb":      (("intervals", _I["Signed"], "H_b"), "1f"),
-    "DecSignedDH":      (("intervals", _I["Signed"], "dH", "mean"), "1f"),
-    "DecSignedL":       (("intervals", _I["Signed"], "L", "mean"), "1f"),
-    "DecSignedV":       (("intervals", _I["Signed"], "V", "mean"), "1f"),
-    "DecSignedShare":   (("intervals", _I["Signed"], "V_share", "mean"), "2f"),
-    "DecSignedShareLo": (("intervals", _I["Signed"], "V_share", "ci", 0), "2f"),
-    "DecSignedShareHi": (("intervals", _I["Signed"], "V_share", "ci", 1), "2f"),
-    "DecPermdL":        (("contrasts", "perm100-grpo100", "L", "mean"), "1f"),
-    "DecPermdLLo":      (("contrasts", "perm100-grpo100", "L", "ci", 0), "1f"),
-    "DecPermdLHi":      (("contrasts", "perm100-grpo100", "L", "ci", 1), "1f"),
-    "DecPermdV":        (("contrasts", "perm100-grpo100", "V", "mean"), "1f"),
-    "DecPermdVLo":      (("contrasts", "perm100-grpo100", "V", "ci", 0), "1f"),
-    "DecPermdVHi":      (("contrasts", "perm100-grpo100", "V", "ci", 1), "1f"),
-    "DecSigneddL":      (("contrasts", "signed100-grpo100", "L", "mean"), "1f"),
-    "DecSigneddLLo":    (("contrasts", "signed100-grpo100", "L", "ci", 0), "1f"),
-    "DecSigneddLHi":    (("contrasts", "signed100-grpo100", "L", "ci", 1), "1f"),
-    "DecSigneddV":      (("contrasts", "signed100-grpo100", "V", "mean"), "1f"),
-    "DecSigneddVLo":    (("contrasts", "signed100-grpo100", "V", "ci", 0), "1f"),
-    "DecSigneddVHi":    (("contrasts", "signed100-grpo100", "V", "ci", 1), "1f"),
-    "DecGrpoLgap":      (("intervals", _I["Grpo"], "L_ordering_gap"), "1f"),
+    "DecGrpoHa":        (("intervals", _I["Grpo"], "H_a"), ".1f"),
+    "DecGrpoHb":        (("intervals", _I["Grpo"], "H_b"), ".1f"),
+    "DecGrpoDH":        (("intervals", _I["Grpo"], "dH", "mean"), ".1f"),
+    "DecGrpoDHLo":      (("intervals", _I["Grpo"], "dH", "ci", 0), ".1f"),
+    "DecGrpoDHHi":      (("intervals", _I["Grpo"], "dH", "ci", 1), ".1f"),
+    "DecGrpoL":         (("intervals", _I["Grpo"], "L", "mean"), ".1f"),
+    "DecGrpoLLo":       (("intervals", _I["Grpo"], "L", "ci", 0), ".1f"),
+    "DecGrpoLHi":       (("intervals", _I["Grpo"], "L", "ci", 1), ".1f"),
+    "DecGrpoV":         (("intervals", _I["Grpo"], "V", "mean"), ".1f"),
+    "DecGrpoVLo":       (("intervals", _I["Grpo"], "V", "ci", 0), ".1f"),
+    "DecGrpoVHi":       (("intervals", _I["Grpo"], "V", "ci", 1), ".1f"),
+    "DecGrpoShare":     (("intervals", _I["Grpo"], "V_share", "mean"), ".2f"),
+    "DecGrpoShareLo":   (("intervals", _I["Grpo"], "V_share", "ci", 0), ".2f"),
+    "DecGrpoShareHi":   (("intervals", _I["Grpo"], "V_share", "ci", 1), ".2f"),
+    "DecPermHb":        (("intervals", _I["Perm"], "H_b"), ".1f"),
+    "DecPermDH":        (("intervals", _I["Perm"], "dH", "mean"), ".1f"),
+    "DecPermL":         (("intervals", _I["Perm"], "L", "mean"), ".1f"),
+    "DecPermV":         (("intervals", _I["Perm"], "V", "mean"), ".1f"),
+    "DecPermShare":     (("intervals", _I["Perm"], "V_share", "mean"), ".2f"),
+    "DecPermShareLo":   (("intervals", _I["Perm"], "V_share", "ci", 0), ".2f"),
+    "DecPermShareHi":   (("intervals", _I["Perm"], "V_share", "ci", 1), ".2f"),
+    "DecSignedHb":      (("intervals", _I["Signed"], "H_b"), ".1f"),
+    "DecSignedDH":      (("intervals", _I["Signed"], "dH", "mean"), ".1f"),
+    "DecSignedL":       (("intervals", _I["Signed"], "L", "mean"), ".1f"),
+    "DecSignedV":       (("intervals", _I["Signed"], "V", "mean"), ".1f"),
+    "DecSignedShare":   (("intervals", _I["Signed"], "V_share", "mean"), ".2f"),
+    "DecSignedShareLo": (("intervals", _I["Signed"], "V_share", "ci", 0), ".2f"),
+    "DecSignedShareHi": (("intervals", _I["Signed"], "V_share", "ci", 1), ".2f"),
+    "DecPermdL":        (("contrasts", "perm100-grpo100", "L", "mean"), ".1f"),
+    "DecPermdLLo":      (("contrasts", "perm100-grpo100", "L", "ci", 0), ".1f"),
+    "DecPermdLHi":      (("contrasts", "perm100-grpo100", "L", "ci", 1), ".1f"),
+    "DecPermdV":        (("contrasts", "perm100-grpo100", "V", "mean"), ".1f"),
+    "DecPermdVLo":      (("contrasts", "perm100-grpo100", "V", "ci", 0), ".1f"),
+    "DecPermdVHi":      (("contrasts", "perm100-grpo100", "V", "ci", 1), ".1f"),
+    "DecSigneddL":      (("contrasts", "signed100-grpo100", "L", "mean"), ".1f"),
+    "DecSigneddLLo":    (("contrasts", "signed100-grpo100", "L", "ci", 0), ".1f"),
+    "DecSigneddLHi":    (("contrasts", "signed100-grpo100", "L", "ci", 1), ".1f"),
+    "DecSigneddV":      (("contrasts", "signed100-grpo100", "V", "mean"), ".1f"),
+    "DecSigneddVLo":    (("contrasts", "signed100-grpo100", "V", "ci", 0), ".1f"),
+    "DecSigneddVHi":    (("contrasts", "signed100-grpo100", "V", "ci", 1), ".1f"),
+    "DecGrpoLgap":      (("intervals", _I["Grpo"], "L_ordering_gap"), ".1f"),
 }
+# The secondary intervals, registered without a rule and reported descriptively.
+_S = {"GrpoLate": "grpo80->grpo110", "PermLate": "perm80->perm110",
+      "SignedA": "base->signed50", "SignedB": "signed50->signed100",
+      "SignedC": "signed100->signed150", "SignedD": "signed150->signed200"}
+for _n, _ik in _S.items():
+    for _q, _path, _f in (("Ha", ("H_a",), ".1f"), ("Hb", ("H_b",), ".1f"),
+                          ("DH", ("dH", "mean"), "+.1f"), ("L", ("L", "mean"), "+.1f"),
+                          ("V", ("V", "mean"), "+.1f"), ("Share", ("V_share", "mean"), ".2f"),
+                          ("ShareLo", ("V_share", "ci", 0), ".2f"),
+                          ("ShareHi", ("V_share", "ci", 1), ".2f")):
+        MACROS[f"DecSec{_n}{_q}"] = (("intervals", _ik) + _path, _f)
 # The exploratory robustness rows (robust()), one share and one prompt count
 # per variant and interval.
 _R = {"Drop": "drop_truncated", "Tok": "per_token", "Both": "drop_truncated_per_token"}
 for _v, _rk in _R.items():
     for _arm, _ik in _I.items():
-        MACROS[f"DecRob{_v}{_arm}"] = (("exploratory_robustness", _rk, _ik, "V_share"), "2f")
-        MACROS[f"DecRob{_v}{_arm}Lo"] = (("exploratory_robustness", _rk, _ik, "ci", 0), "2f")
-        MACROS[f"DecRob{_v}{_arm}Hi"] = (("exploratory_robustness", _rk, _ik, "ci", 1), "2f")
-        MACROS[f"DecRob{_v}{_arm}N"] = (("exploratory_robustness", _rk, _ik, "n"), "0f")
+        MACROS[f"DecRob{_v}{_arm}"] = (("exploratory_robustness", _rk, _ik, "V_share"), ".2f")
+        MACROS[f"DecRob{_v}{_arm}Lo"] = (("exploratory_robustness", _rk, _ik, "ci", 0), ".2f")
+        MACROS[f"DecRob{_v}{_arm}Hi"] = (("exploratory_robustness", _rk, _ik, "ci", 1), ".2f")
+        MACROS[f"DecRob{_v}{_arm}N"] = (("exploratory_robustness", _rk, _ik, "n"), ".0f")
 
 
 def names() -> set[str]:
@@ -320,7 +331,7 @@ def emit(res: dict) -> dict[str, str]:
     out = {}
     for name, (path, how) in MACROS.items():
         try:
-            out[name] = f"{float(_get(res, path)):.{how}}"
+            out[name] = format(float(_get(res, path)), how)
         except (KeyError, IndexError, TypeError):
             continue
     first = next(iter(res["intervals"].values()), None)
