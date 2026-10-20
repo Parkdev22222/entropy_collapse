@@ -181,6 +181,19 @@ what is called entropy collapse is therefore not sharpening at fixed states but 
 policy settling on paths along which the base model was already confident --- the part
 token-level control does not touch.
 
+Within the scope of what we measured, this has three practical consequences. First,
+finer per-token weights are the wrong lever: the two damping variants we tested leave
+the split where GRPO puts it ($\num{DecPermShare}$ and $\num{DecSignedShare}$ against
+$\num{DecGrpoShare}$), so preserving diversity calls for objectives that act on which
+paths are sampled and reinforced, such as outcome-level exploration
+\citep{song2025outcome} or rollouts that diversify prefixes \citep{cao2026treeadv}.
+Second, timing matters: by step $50$ the run we followed had already lost
+$\num{DecSecSignedADH}$ of the $\num{DecSignedDH}$ nats it lost by step $100$, so an
+intervention switched on once entropy looks low arrives after most of the collapse.
+Third, mean token entropy is the wrong monitor: it cannot register a change in which
+paths are visited (Section~\ref{sec:zerosum}), whereas the split needs only samples
+and forward passes at two checkpoints and can be run alongside training.
+
 The missing term is also estimable during training. Causality turns it into a
 REINFORCE estimator whose reward-to-go is the remaining conditional entropy $\Htogo$,
 and a baseline from rollouts that share a prefix, scheduled with a fixed tree, turns
