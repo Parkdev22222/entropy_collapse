@@ -95,3 +95,17 @@ def test_macros_leave_missing_intervals_pending(tmp_path):
     _write(tmp_path, "grpo100", "grpo100", [[70.0] * 4] * n)
     out = C.emit(C.analyze(tmp_path, n_boot=100))
     assert "DecGrpoDH" in out and "DecPermDH" not in out and "DecRobustMin" not in out
+
+
+def test_named_intervals_and_rule_per_interval(tmp_path):
+    """Amendment 2: replication checkpoints carry their own labels."""
+    n = 30
+    _write(tmp_path, "base", "base", [[100.0 + (i % 3)] * 4 for i in range(n)])
+    _write(tmp_path, "base", "grpos2at80", [[95.0 + (i % 3)] * 4 for i in range(n)])
+    _write(tmp_path, "grpos2at80", "base", [[60.0 + (i % 3)] * 4 for i in range(n)])
+    _write(tmp_path, "grpos2at80", "grpos2at80", [[55.0 + (i % 3)] * 4 for i in range(n)])
+    assert C.analyze(tmp_path, n_boot=200)["intervals"] == {}
+    res = C.analyze(tmp_path, n_boot=200,
+                    intervals=C.parse_intervals("base:grpos2at80"))
+    r = res["intervals"]["base->grpos2at80"]
+    assert abs(r["V_share"]["mean"] - 40 / 45) < 1e-9 and r["q1_rule_holds"] is True

@@ -91,3 +91,23 @@ seed; the rule below is fixed before any sample of that seed is drawn.
   on its size is set.
 - **Reported either way**, including the case where no other seed has a
   step-100 checkpoint and nothing is run.
+
+## Amendment 2 — what the replication can use (2026-10-20, before sampling)
+
+A listing of both Hub repositories found no step-100 checkpoint of GRPO or
+`permuted` on seed 3 or 4, so Amendment 1 cannot run as written. Of what the
+Hub holds on seeds other than 1, two checkpoints match an arm of the primary
+analysis:
+
+| label | checkpoint | why |
+|---|---|---|
+| `grpos2at80` | `grpo-Qwen2.5-Math-1.5B-s2/global_step_80` | GRPO, seed 2; the only GRPO checkpoint off seed 1 |
+| `signeds3at100` | `steer-f-Qwen2.5-Math-1.5B-s3-tree-rollout/global_step_100` | the campaign's own `signed` run, seed 3, step 100 |
+
+Intervals: base -> `grpos2at80` and base -> `signeds3at100`. The GRPO
+interval ends at step 80, not 100; the seed-1 secondary intervals put most of
+the loss before step 50, so the comparison is still of the same phase, and
+the step is reported with the number. Everything else is as in Amendment 1:
+the seed-1 Q1 rule, applied to each interval, decides "replicated"; the share
+and its interval are reported whatever they are. Output
+`results/decomp_rep/`, `results/channel_decomp_rep.json`.

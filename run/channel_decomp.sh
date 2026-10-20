@@ -11,6 +11,12 @@
 # and runs base -> {grpo,perm}100 of that seed; SIGNED_RUN=<hub run> adds
 # base -> signed100 from that run. INTERVALS overrides the list.
 #
+# Any Hub checkpoint can be given a label with HUB_CKPTS="label=run@step ...",
+# then used in INTERVALS (Amendment 2, docs/channel_decomposition.md):
+#   OUT_DIR=results/decomp_rep RESULT=results/channel_decomp_rep.json \
+#   HUB_CKPTS="grpos2at80=grpo-Qwen2.5-Math-1.5B-s2@80" \
+#   INTERVALS="base:grpos2at80" bash run/channel_decomp.sh
+#
 # One GPU. Every stage is skipped when its output exists AND was made from the
 # same checkpoint, so a rerun resumes and a changed path is redone.
 # Hub checkpoints missing on disk are fetched (EVAL_REPOS) into checkpoints/_manip
@@ -50,6 +56,10 @@ declare -A SPEC=(
   [signed150]="${PILOT}/global_step_150/actor/huggingface||"
   [signed200]="${PILOT}/global_step_200/actor/huggingface||"
 )
+for e in ${HUB_CKPTS:-}; do
+    l="${e%%=*}"; rs="${e#*=}"; r="${rs%@*}"; st="${rs##*@}"
+    SPEC[$l]="checkpoints/_manip/${r}/global_step_${st}|${r}|${st}"
+done
 if [ "${SEED}" != "1" ]; then
     # The pilot is seed 1; another seed's signed arm comes only from SIGNED_RUN.
     if [ -n "${SIGNED_RUN}" ]; then
@@ -61,7 +71,8 @@ fi
 PRIMARY="base:grpo100 base:perm100"
 [ -n "${SPEC[signed100]+x}" ] && PRIMARY="${PRIMARY} base:signed100"
 SECONDARY="grpo80:grpo110 perm80:perm110 base:signed50 signed50:signed100 signed100:signed150 signed150:signed200"
-if [ -n "${INTERVALS:-}" ]; then :
+NAMED="${INTERVALS:-}"
+if [ -n "${NAMED}" ]; then :
 else case "${SET}" in
   primary) INTERVALS="${PRIMARY}" ;;
   all)     [ "${SEED}" = "1" ] || { echo "SET=all is seed 1 only" >&2; exit 2; }
@@ -98,7 +109,7 @@ if [ "${DRY}" = "1" ]; then exit 0; fi
 mkdir -p "${OUT}"
 # The base model's samples and self-entropies do not depend on the seed under
 # study: same prompts, same sampler seed. Reuse them rather than redraw.
-if [ "${SEED}" != "1" ] && [ -s results/decomp/samples/base.json ]; then
+if [ "${OUT}" != "results/decomp" ] && [ -s results/decomp/samples/base.json ]; then
     mkdir -p "${OUT}/samples" "${OUT}/ent"
     cp -n results/decomp/prompts.json "${OUT}/"
     cp -n results/decomp/samples/base.json "${OUT}/samples/"
@@ -125,4 +136,5 @@ for iv in ${INTERVALS}; do
     done
 done
 # 3) decomposition
-${PY} analyze --out "${OUT}" --result "${RESULT}"
+# Named intervals are analysed alone; otherwise every registered interval on disk.
+${PY} analyze --out "${OUT}" --result "${RESULT}" ${NAMED:+--intervals "${NAMED}"}

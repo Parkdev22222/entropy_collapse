@@ -132,14 +132,19 @@ def boot(stat, data: list[list[float]], n_boot: int = 10000, seed: int = 0):
 def mean(x): return sum(x) / len(x)
 
 
-def analyze(out: Path, n_boot: int = 10000) -> dict:
+def parse_intervals(spec: str | None) -> list[tuple[str, str]] | None:
+    """'a:b c:d' -> [(a, b), (c, d)]; None keeps the registered lists."""
+    return [tuple(iv.split(":")) for iv in spec.split()] if spec else None
+
+
+def analyze(out: Path, n_boot: int = 10000, intervals=None) -> dict:
     E = {}
     for f in sorted((out / "ent").glob("*.json")):
         r = json.loads(f.read_text())
         E[(r["samples"], r["under"])] = per_prompt(r["sums"])
     res = {"intervals": {}, "contrasts": {}}
     terms = {}
-    for a, b in PRIMARY + SECONDARY:
+    for a, b in intervals or PRIMARY + SECONDARY:
         if not all(k in E for k in [(a, a), (a, b), (b, a), (b, b)]):
             continue
         t = interval_terms(E, a, b)
@@ -153,6 +158,10 @@ def analyze(out: Path, n_boot: int = 10000) -> dict:
         row["H_a"], row["H_b"] = mean(E[(a, a)]), mean(E[(b, b)])
         row["n_prompts"] = len(t["dH"])
         row["L_ordering_gap"] = mean(t["L_b_states"]) - mean(t["L_a_states"])
+        # The registered Q1 rule, applied to every interval (Amendment 2 uses it
+        # on the replication intervals).
+        row["q1_rule_holds"] = bool((row["V"]["ci"][0] > 0 or row["V"]["ci"][1] < 0)
+                                    and (row["V"]["mean"] > 0) == (row["dH"]["mean"] > 0))
         res["intervals"][f"{a}->{b}"] = row
 
     ref = ("base", "grpo100")
@@ -179,7 +188,7 @@ def analyze(out: Path, n_boot: int = 10000) -> dict:
     return res
 
 
-def robust(out: Path, max_len: int = 3072, n_boot: int = 4000) -> dict:
+def robust(out: Path, max_len: int = 3072, n_boot: int = 4000, intervals=None) -> dict:
     """Exploratory, added after the registered result was seen: the primary
     intervals recomputed (i) without responses truncated at max_len, whose
     rambling could carry the visitation term on its own, and (ii) per token,
@@ -197,7 +206,7 @@ def robust(out: Path, max_len: int = 3072, n_boot: int = 4000) -> dict:
                                   ("per_token", lambda n: True, True),
                                   ("drop_truncated_per_token", lambda n: n < max_len, True)]:
         res[name] = {}
-        for a, b in PRIMARY:
+        for a, b in intervals or PRIMARY:
             if not all(k in S for k in [(a, a), (a, b), (b, a), (b, b)]):
                 continue
             rows = []
@@ -222,9 +231,10 @@ def robust(out: Path, max_len: int = 3072, n_boot: int = 4000) -> dict:
 
 
 def cmd_analyze(a) -> None:
-    res = analyze(Path(a.out), a.n_boot)
+    ivs = parse_intervals(a.intervals)
+    res = analyze(Path(a.out), a.n_boot, ivs)
     if (Path(a.out) / "samples").is_dir():
-        res["exploratory_robustness"] = robust(Path(a.out))
+        res["exploratory_robustness"] = robust(Path(a.out), intervals=ivs)
     Path(a.result).write_text(json.dumps(res, indent=2))
     f = lambda r: f"{r['mean']:+9.2f} [{r['ci'][0]:+8.2f}, {r['ci'][1]:+8.2f}]"
     print(f"{'interval':22s} {'H_a':>7s} {'H_b':>7s}   {'dH':>27s}   {'L (local)':>27s}"
@@ -395,6 +405,8 @@ def main(argv=None) -> int:
     z.add_argument("--out", required=True)
     z.add_argument("--result", required=True)
     z.add_argument("--n-boot", type=int, default=10000)
+    z.add_argument("--intervals", default=None,
+                   help="'a:b c:d'; default: the registered primary and secondary")
     m = sub.add_parser("macros")
     m.add_argument("--git-ref", default="origin/paper")
     m.add_argument("--path", default="results/decomp")
