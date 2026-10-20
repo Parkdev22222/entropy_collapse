@@ -224,7 +224,7 @@ Our contributions are:
 \end{itemize}
 We do not establish an accuracy gain from the correction: the pre-registered test of
 the $\AH$ signal against a signal-free control is not supported
-(Section~\ref{sec:res:contrasts}).
+(Appendix~\ref{sec:res:contrasts}).
 
 \section{Background and Related Work}
 \label{sec:prelim}
@@ -547,8 +547,8 @@ every figure is recomputed from the training logs by one script.
 The results are ordered by what the analysis predicts. The first measures how much
 of the entropy that training loses goes through each channel
 (Section~\ref{sec:res:decomp}); the second is the dissociation the zero sum implies
-(Section~\ref{sec:res:entropy}); the per-arm numbers, accuracy included, come after
-them as the material the contrasts are built from.
+(Section~\ref{sec:res:entropy}). Accuracy is summarized in Section~\ref{sec:res:acc}
+and reported in full, with the ablations, in Appendix~\ref{sec:accuracy}.
 
 \subsection{Where measured collapse goes}
 \label{sec:res:decomp}
@@ -588,6 +588,28 @@ prompt-bootstrap interval.}
 \label{tab:decomp}
 \end{table}
 
+\begin{table}[t]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{2.5pt}
+\resizebox{\ifdim\width>\linewidth\linewidth\else\width\fi}{!}{%
+\begin{tabular}{@{}lrrrc@{}}
+\toprule
+interval & $\Delta H$ & $L$ & $V$ & $V/\Delta H$ \\
+\midrule
+GRPO $80 \to 110$ & $\num{DecSecGrpoLateDH}$ & $\num{DecSecGrpoLateL}$ & $\num{DecSecGrpoLateV}$ & \num{DecSecGrpoLateShare} [\num{DecSecGrpoLateShareLo}, \num{DecSecGrpoLateShareHi}] \\
+\textsc{perm.} $80 \to 110$ & $\num{DecSecPermLateDH}$ & $\num{DecSecPermLateL}$ & $\num{DecSecPermLateV}$ & \num{DecSecPermLateShare} [\num{DecSecPermLateShareLo}, \num{DecSecPermLateShareHi}] \\
+\textsc{signed} $0 \to 50$ & $\num{DecSecSignedADH}$ & $\num{DecSecSignedAL}$ & $\num{DecSecSignedAV}$ & \num{DecSecSignedAShare} [\num{DecSecSignedAShareLo}, \num{DecSecSignedAShareHi}] \\
+\textsc{signed} $50 \to 100$ & $\num{DecSecSignedBDH}$ & $\num{DecSecSignedBL}$ & $\num{DecSecSignedBV}$ & \num{DecSecSignedBShare} [\num{DecSecSignedBShareLo}, \num{DecSecSignedBShareHi}] \\
+\textsc{signed} $100 \to 150$ & $\num{DecSecSignedCDH}$ & $\num{DecSecSignedCL}$ & $\num{DecSecSignedCV}$ & \num{DecSecSignedCShare} [\num{DecSecSignedCShareLo}, \num{DecSecSignedCShareHi}] \\
+\textsc{signed} $150 \to 200$ & $\num{DecSecSignedDDH}$ & $\num{DecSecSignedDL}$ & $\num{DecSecSignedDV}$ & \num{DecSecSignedDShare} [\num{DecSecSignedDShareLo}, \num{DecSecSignedDShareHi}] \\
+\bottomrule
+\end{tabular}}
+\caption{Secondary intervals, seed $1$, nats per response, with 95\% prompt-bootstrap
+intervals for the share; registered without a decision rule.}
+\label{tab:decompsec}
+\end{table}
+
 GRPO loses $\num{DecGrpoDH}$ nats per response, and the visitation channel carries
 $\num{DecGrpoShare}$ of it, which meets the registered criterion for a measurable
 visitation share (Table~\ref{tab:decomp}). Most of the measured collapse is therefore
@@ -600,7 +622,7 @@ visitation. Between later checkpoints the changes are much smaller and the local
 channel's part is larger (visitation share $\num{DecSecSignedBShare}$ from step $50$
 to $100$), and where entropy rises late --- \textsc{signed} after step $100$, GRPO from
 step $80$ to $110$ --- the rise again goes mostly through visitation
-(Appendix~\ref{sec:decomp}). Because $\Htraj$ grows with response length and long responses
+(Table~\ref{tab:decompsec}). Because $\Htraj$ grows with response length and long responses
 are cut at $3072$ tokens, we checked after seeing the result whether truncation or
 length carries the share; without truncated responses, per token, or both, it stays
 between $\num{DecRobustMin}$ and $\num{DecRobustMax}$ (exploratory,
@@ -671,161 +693,15 @@ a large $t$, as the \textsc{permuted} row does. The positive prediction --- that
 spread across siblings widens --- is not measured; a registered condition on the ordering of arm means was
 retired rather than scored, for reasons given in Appendix~\ref{sec:res:entropy-app}.
 
-\subsection{Accuracy and entropy by arm}
-\label{sec:res:main}
+\subsection{Accuracy}
+\label{sec:res:acc}
 
-\begin{table}[t]
-\centering
-\scriptsize
-\setlength{\tabcolsep}{2.6pt}
-\begin{tabular}{@{}lcr@{\,$\pm$\,}lr@{\,$\pm$\,}lcc@{}}
-\toprule
-arm & $n$ & \multicolumn{2}{c}{acc@32} & \multicolumn{2}{c}{maj@32} & uplift & entropy \\
-\midrule
-GRPO             & \num{Ngrpo}     & \num{Rgrpoacc}     & \num{Egrpoacc}     & \num{Rgrpomaj}     & \num{Egrpomaj}     & \num{Rgrpouplift}     & \num{Rgrpoentropy}     \\
-\textsc{steer}   & \num{Nsteer}    & \num{Rsteeracc}    & \num{Esteeracc}    & \num{Rsteermaj}    & \num{Esteermaj}    & \num{Rsteeruplift}    & \num{Rsteerentropy}    \\
-\textsc{uniform} & \num{Nuniform}  & \num{Runiformacc}  & \num{Euniformacc}  & \num{Runiformmaj}  & \num{Euniformmaj}  & \num{Runiformuplift}  & \num{Runiformentropy}  \\
-\textsc{permuted}& \num{Npermuted} & \num{Rpermutedacc} & \num{Epermutedacc} & \num{Rpermutedmaj} & \num{Epermutedmaj} & \num{Rpermuteduplift} & \num{Rpermutedentropy} \\
-\textsc{signed} & \num{Nsigned}   & \num{Rsignedacc}   & \num{Esignedacc}   & \num{Rsignedmaj}   & \num{Esignedmaj}   & \num{Rsigneduplift}   & \num{Rsignedentropy}   \\
-\bottomrule
-\end{tabular}
-\caption{Means over steps $40$--$110$ on seeds $\num{Seedset}$, $\pm$ the standard
-error across seeds. Because the seed set is shared, a difference of two rows is the
-paired contrast of Table~\ref{tab:entropy}. Entropy is the token-mean quantity.}
-\label{tab:plateau}
-\end{table}
-
-Table~\ref{tab:plateau} averages each arm over the converged window, and
-Table~\ref{tab:curve} gives one seed's full trajectory. The three arms without the
-$\AH$ signal --- \textsc{steer}, \textsc{uniform}, \textsc{permuted} --- sit below
-GRPO on accuracy and \textsc{signed} above it, by less than GRPO's standard error across
-seeds. On entropy GRPO holds the most and the four damped arms sit close together. The
-two columns are neither aligned nor reversed; read as the contrasts of
-Section~\ref{sec:res:entropy}, they separate.
-
-\begin{table}[t]
-\centering
-\footnotesize
-\setlength{\tabcolsep}{2.6pt}
-\begin{tabular}{@{}rccccc@{}}
-\toprule
-step & GRPO & \textsc{steer} & \textsc{unif} & \textsc{perm} & \textsc{signed} \\
-\midrule
-0   & .039/.035 & .043/.040 & .039/.035 & .039/.035 & .039/.035 \\
-10  & .075/.127 & .064/.109 & .070/.124 & .062/.126 & .078/.148 \\
-20  & .120/.176 & .114/.195 & .102/.171 & .087/.155 & .103/.181 \\
-30  & .108/.195 & .135/.215 & .121/.223 & .099/.178 & .113/.211 \\
-\midrule
-40  & .144/.236 & .115/.187 & .119/.201 & .116/.197 & .141/.230 \\
-50  & .120/.204 & .125/.196 & .121/.216 & .153/.224 & .145/.258 \\
-60  & .126/.178 & .139/.202 & .125/.203 & .135/.190 & .145/.237 \\
-70  & .130/.200 & .128/.200 & .129/.197 & .132/.227 & .147/.257 \\
-80  & .135/.182 & .135/.202 & .140/.204 & .134/.197 & .144/.206 \\
-90  & .136/.191 & .144/.212 & .142/.178 & .130/.210 & \textbf{.166}/.239 \\
-100 & .132/.171 & .146/.207 & .134/.192 & .144/.212 & .157/.222 \\
-110 & .157/.208 & .132/.181 & .140/.171 & .152/.218 & .151/.230 \\
-\bottomrule
-\end{tabular}
-\caption{AIME24 $\mathrm{acc@}32/\mathrm{maj@}32$ at every validation point, seed
-$1$. Rows below the rule are the converged window used for all subsequent
-statistics. One seed is one trajectory: the across-seed statistics are in
-Tables~\ref{tab:plateau} and~\ref{tab:contrast}.}
-\label{tab:curve}
-\end{table}
-
-\subsection{Does the branch-specific $\AH$ signal matter for accuracy?}
-\label{sec:res:contrasts}
-
-\paragraph{The pre-registered test.} The registration made \textsc{signed} $-$
-\textsc{uniform} the accuracy test: \emph{if it straddles zero across seeds, the $\AH$
-signal does not matter}. It straddles: over $\num{Nsigneduniform}$ paired seeds it runs
-from $\num{CLosigneduniformacc}$ to $\num{CHisigneduniformacc}$, with
-$\num{CNegsigneduniformacc}$ negative, and we do not rescue it with the mean or with
-majority vote. The pre-registered accuracy hypothesis is therefore not supported, and
-we make no claim that $\AH$ improves accuracy. The other three registered conditions
-did not trigger: \textsc{signed} $-$ \textsc{permuted}, which keeps the magnitudes and destroys
-only the branch--score assignment, does not straddle ($\num{CLosignedpermutedacc}$ to
-$\num{CHisignedpermutedacc}$); the arms are not ordered alike by entropy and accuracy;
-and the mean token weight stays at $\num{Rsignedtwmean}$.
-
-\paragraph{The remaining gaps.} Against \textsc{steer} the gap is
-$\num{Csignedsteeracc}$ ($p = \num{Psignedsteeracc}$), but \textsc{steer} lands below
-GRPO here although its paper places it above, a discrepancy we could not attribute
-(Appendix~\ref{sec:res:ablate}). Against GRPO the gap of $\num{Csignedgrpoacc}$ is a
-fraction of GRPO's spread across seeds, $\num{Sgrpoacc}$, and is $\num{Cmhisignedgrpoacc}$
-on the seeds where equal steps are equal compute (Appendix~\ref{sec:res:compute}). On
-six benchmarks the registered secondary check counts \textsc{signed} above \textsc{uniform} on
-$\num{Dirconsistency}$ of six, which its thresholds call
-\emph{\num{Dirverdict}} (Appendix~\ref{sec:res:bench}).
-
-\subsection{What the sampler and the forecaster contribute}
-\label{sec:res:apparatus}
-
-\begin{table}[t]
-\centering
-\scriptsize
-\setlength{\tabcolsep}{3pt}
-\begin{tabular}{@{}llcc@{}}
-\toprule
-arm & what changes & acc@32 & maj@32 \\
-\midrule
-\multicolumn{4}{@{}l}{\emph{the damping coefficient}} \\
-$\lambda = 0.1$  & weaker  & \num{Rlamloacc}  & \num{Rlamlomaj}  \\
-$\lambda = 0.25$ & as used & \num{Rsignedacc} & \num{Rsignedmaj} \\
-$\lambda = 0.5$  & stronger& \num{Rlamhiacc}  & \num{Rlamhimaj}  \\
-\midrule
-\multicolumn{4}{@{}l}{\emph{the sampler, with the forecast switched off}} \\
-$\lambda = 0$, tree & tree only & \num{Rlamzeroacc} & \num{Rlamzeromaj} \\
-\textsc{steer}      & neither   & \num{Rsteeracc}   & \num{Rsteermaj}   \\
-\midrule
-\multicolumn{4}{@{}l}{\emph{the forecaster, replaced by what the trainer already has}} \\
-\textsc{oracle} & no heads & \num{Roracleacc} & \num{Roraclemaj} \\
-\midrule
-\multicolumn{4}{@{}l}{\emph{relaxed ratio clipping} ($\epsilon_{\mathrm{hi}}{=}5$, $\epsilon_{\mathrm{lo}}{=}0.99$)} \\
-\textsc{signed}        & --- & \num{Rxclipsignedacc} & \num{Rxclipsignedmaj} \\
-\bottomrule
-\end{tabular}
-\caption{Follow-up ablations, converged window, one seed per row and no error bar.
-The seed is whichever one the arm was run at, and our analysis emits it with the row;
-the \textsc{oracle} arm is seed $\num{Roracleseed}$, run there so that it shares a
-seed with the \textsc{signed} and \textsc{uniform} runs the six-benchmark evaluation pairs.
-The $\lambda = 0.25$ line is the reference and is Table~\ref{tab:plateau}'s
-across-seed mean rather than one run. Every row but \textsc{oracle} ran on the
-$\num{Rlamzerogpus}$-GPU box while the seed-1 \textsc{signed} reference ran on the smaller
-one, so those rows carry the machine effect of Appendix~\ref{sec:res:seeds}
-($\num{Boxdelta}$, in the direction that flatters them) on top of whatever the
-ablation does. Our analysis emits a same-seed contrast for \textsc{oracle} alone,
-because it is the one row whose box matches its reference's. Each block isolates one
-element of the design. The relaxed-clipping block has no \textsc{steer} control: that
-run stopped at training step $\num{Rxclipsteerlaststep}$, before the converged window
-closes, and a mean over the part of the window it reached is not the quantity the
-other rows report. Arms that were planned and did not produce a finished run are
-listed in Appendix~\ref{sec:appendix-prereg}.}
-\label{tab:followups}
-\end{table}
-
-Single-seed follow-ups (Table~\ref{tab:followups}) locate the rest of the effect.
-\emph{The sampler:} the tree with the forecast switched off ($\lambda = 0$) reaches
-$\num{Rlamzeroacc}$ against \textsc{steer}'s $\num{Rsteeracc}$ and \textsc{signed}'s
-$\num{Rsignedacc}$, and an uplift of $\num{Rlamzerouplift}$ against \textsc{signed}'s
-$\num{Rsigneduplift}$, so most of the majority-vote structure belongs to the sampler;
-we report this and leave it to work on structured sampling, since the tree is here
-only to give $\AH$ siblings. \emph{The forecaster:} on a frozen policy, the same
-sibling operator applied to the policy's own next-token entropy reproduces $\AH$ at
-$R^2 = \num{Locrsq}$ (Appendix~\ref{sec:res:locality}); an \textsc{oracle} arm reading
-$\Htogo$ from realized entropy is $\num{Fsignedoraclesaving}\%$ cheaper per step and
-$\num{Fsignedoracleacc}$ behind at one seed, so we keep the heads without claiming they
-are necessary. \emph{The support:} the tree arms carry a non-zero $\AH$ on
-$\num{Rsignedbranchfrac}$ of positions against a ceiling of $\num{Supportbound}$. On
-the four-GPU box a \textsc{signed} step costs $\num{Costoverheadhi}\%$ more than
-\textsc{steer}'s (Appendix~\ref{sec:res:cost}).
-
-\paragraph{Calibration against published numbers.} Run under the base method's own
-protocol (two $200$-step runs, the AIME24-best checkpoint, six benchmarks), the
-\textsc{signed} configuration averages $\num{ProtobestMeanAvg}$, against
-$\num{ProtorefSteerAvg}$ for the base method and $\num{ProtorefGrpoAvg}$ for GRPO as
-that method's paper reports them. The quoted rows were not re-run, so this places the
-corrected arm between the two without ranking it (Appendix~\ref{sec:reported}).
+The correction is an instrument here, so its accuracy is reported in full in
+Appendix~\ref{sec:accuracy} and summarized in one line: the registered accuracy test,
+\textsc{signed} $-$ \textsc{uniform}, straddles zero across seeds
+($\num{CLosigneduniformacc}$ to $\num{CHisigneduniformacc}$), and the gaps between arms
+are smaller than GRPO's own spread across seeds, $\num{Sgrpoacc}$, so we make no
+accuracy claim.
 
 \section{Conclusion}
 \label{sec:conclusion}
@@ -858,7 +734,7 @@ across-problem standard error of $\num{SEaime}$. The seed count bounds effect si
 rather than the structural result, which is a comparison between groups of contrasts;
 but the accuracy gaps are inside the spread across seeds --- GRPO's converged accuracy
 moves by $\num{Sgrpoacc}$ across its seeds --- and the pre-registered accuracy test of
-the $\AH$ signal is not supported (Section~\ref{sec:res:contrasts}). The six-benchmark
+the $\AH$ signal is not supported (Appendix~\ref{sec:res:contrasts}). The six-benchmark
 check covers one seed per arm. The base method lands below GRPO in our runs, where its
 paper reports it above; we ran it at its paper's $\lambda_{\min} = 0.7$ rather than its
 launcher's $0.8$, on $110$ rather than $200$ steps, and cannot separate these causes
@@ -1803,6 +1679,163 @@ same direction on every seed; the signal contrasts do not.}
 \end{table}
 
 
+\section{Accuracy and the Elements of the Design}
+\label{sec:accuracy}
+
+This section collects what the arms do to accuracy, the registered accuracy test, and
+single-seed ablations of the sampler, the forecaster and the damping coefficient. None
+of it bears on where entropy collapse goes (Section~\ref{sec:res:decomp}); it is
+reported because the correction was run and registered.
+
+\subsection{Accuracy and entropy by arm}
+\label{sec:res:main}
+
+\begin{table}[t]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{2.6pt}
+\begin{tabular}{@{}lcr@{\,$\pm$\,}lr@{\,$\pm$\,}lcc@{}}
+\toprule
+arm & $n$ & \multicolumn{2}{c}{acc@32} & \multicolumn{2}{c}{maj@32} & uplift & entropy \\
+\midrule
+GRPO             & \num{Ngrpo}     & \num{Rgrpoacc}     & \num{Egrpoacc}     & \num{Rgrpomaj}     & \num{Egrpomaj}     & \num{Rgrpouplift}     & \num{Rgrpoentropy}     \\
+\textsc{steer}   & \num{Nsteer}    & \num{Rsteeracc}    & \num{Esteeracc}    & \num{Rsteermaj}    & \num{Esteermaj}    & \num{Rsteeruplift}    & \num{Rsteerentropy}    \\
+\textsc{uniform} & \num{Nuniform}  & \num{Runiformacc}  & \num{Euniformacc}  & \num{Runiformmaj}  & \num{Euniformmaj}  & \num{Runiformuplift}  & \num{Runiformentropy}  \\
+\textsc{permuted}& \num{Npermuted} & \num{Rpermutedacc} & \num{Epermutedacc} & \num{Rpermutedmaj} & \num{Epermutedmaj} & \num{Rpermuteduplift} & \num{Rpermutedentropy} \\
+\textsc{signed} & \num{Nsigned}   & \num{Rsignedacc}   & \num{Esignedacc}   & \num{Rsignedmaj}   & \num{Esignedmaj}   & \num{Rsigneduplift}   & \num{Rsignedentropy}   \\
+\bottomrule
+\end{tabular}
+\caption{Means over steps $40$--$110$ on seeds $\num{Seedset}$, $\pm$ the standard
+error across seeds. Because the seed set is shared, a difference of two rows is the
+paired contrast of Table~\ref{tab:entropy}. Entropy is the token-mean quantity.}
+\label{tab:plateau}
+\end{table}
+
+Table~\ref{tab:plateau} averages each arm over the converged window, and
+Table~\ref{tab:curve} gives one seed's full trajectory. The three arms without the
+$\AH$ signal --- \textsc{steer}, \textsc{uniform}, \textsc{permuted} --- sit below
+GRPO on accuracy and \textsc{signed} above it, by less than GRPO's standard error across
+seeds. On entropy GRPO holds the most and the four damped arms sit close together. The
+two columns are neither aligned nor reversed; read as the contrasts of
+Section~\ref{sec:res:entropy}, they separate.
+
+\begin{table}[t]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{2.6pt}
+\begin{tabular}{@{}rccccc@{}}
+\toprule
+step & GRPO & \textsc{steer} & \textsc{unif} & \textsc{perm} & \textsc{signed} \\
+\midrule
+0   & .039/.035 & .043/.040 & .039/.035 & .039/.035 & .039/.035 \\
+10  & .075/.127 & .064/.109 & .070/.124 & .062/.126 & .078/.148 \\
+20  & .120/.176 & .114/.195 & .102/.171 & .087/.155 & .103/.181 \\
+30  & .108/.195 & .135/.215 & .121/.223 & .099/.178 & .113/.211 \\
+\midrule
+40  & .144/.236 & .115/.187 & .119/.201 & .116/.197 & .141/.230 \\
+50  & .120/.204 & .125/.196 & .121/.216 & .153/.224 & .145/.258 \\
+60  & .126/.178 & .139/.202 & .125/.203 & .135/.190 & .145/.237 \\
+70  & .130/.200 & .128/.200 & .129/.197 & .132/.227 & .147/.257 \\
+80  & .135/.182 & .135/.202 & .140/.204 & .134/.197 & .144/.206 \\
+90  & .136/.191 & .144/.212 & .142/.178 & .130/.210 & \textbf{.166}/.239 \\
+100 & .132/.171 & .146/.207 & .134/.192 & .144/.212 & .157/.222 \\
+110 & .157/.208 & .132/.181 & .140/.171 & .152/.218 & .151/.230 \\
+\bottomrule
+\end{tabular}
+\caption{AIME24 $\mathrm{acc@}32/\mathrm{maj@}32$ at every validation point, seed
+$1$. Rows below the rule are the converged window used for all subsequent
+statistics. One seed is one trajectory: the across-seed statistics are in
+Tables~\ref{tab:plateau} and~\ref{tab:contrast}.}
+\label{tab:curve}
+\end{table}
+
+\subsection{Does the branch-specific $\AH$ signal matter for accuracy?}
+\label{sec:res:contrasts}
+
+\paragraph{The pre-registered test.} The registration made \textsc{signed} $-$
+\textsc{uniform} the accuracy test: \emph{if it straddles zero across seeds, the $\AH$
+signal does not matter}. It straddles: over $\num{Nsigneduniform}$ paired seeds it runs
+from $\num{CLosigneduniformacc}$ to $\num{CHisigneduniformacc}$, with
+$\num{CNegsigneduniformacc}$ negative, and we do not rescue it with the mean or with
+majority vote. The pre-registered accuracy hypothesis is therefore not supported, and
+we make no claim that $\AH$ improves accuracy. The other three registered conditions
+did not trigger: \textsc{signed} $-$ \textsc{permuted}, which keeps the magnitudes and destroys
+only the branch--score assignment, does not straddle ($\num{CLosignedpermutedacc}$ to
+$\num{CHisignedpermutedacc}$); the arms are not ordered alike by entropy and accuracy;
+and the mean token weight stays at $\num{Rsignedtwmean}$.
+
+\paragraph{The remaining gaps.} Against \textsc{steer} the gap is
+$\num{Csignedsteeracc}$ ($p = \num{Psignedsteeracc}$), but \textsc{steer} lands below
+GRPO here although its paper places it above, a discrepancy we could not attribute
+(Appendix~\ref{sec:res:ablate}). Against GRPO the gap of $\num{Csignedgrpoacc}$ is a
+fraction of GRPO's spread across seeds, $\num{Sgrpoacc}$, and is $\num{Cmhisignedgrpoacc}$
+on the seeds where equal steps are equal compute (Appendix~\ref{sec:res:compute}). On
+six benchmarks the registered secondary check counts \textsc{signed} above \textsc{uniform} on
+$\num{Dirconsistency}$ of six, which its thresholds call
+\emph{\num{Dirverdict}} (Appendix~\ref{sec:res:bench}).
+
+\subsection{What the sampler and the forecaster contribute}
+\label{sec:res:apparatus}
+
+\begin{table}[t]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}llcc@{}}
+\toprule
+arm & what changes & acc@32 & maj@32 \\
+\midrule
+\multicolumn{4}{@{}l}{\emph{the damping coefficient}} \\
+$\lambda = 0.1$  & weaker  & \num{Rlamloacc}  & \num{Rlamlomaj}  \\
+$\lambda = 0.25$ & as used & \num{Rsignedacc} & \num{Rsignedmaj} \\
+$\lambda = 0.5$  & stronger& \num{Rlamhiacc}  & \num{Rlamhimaj}  \\
+\midrule
+\multicolumn{4}{@{}l}{\emph{the sampler, with the forecast switched off}} \\
+$\lambda = 0$, tree & tree only & \num{Rlamzeroacc} & \num{Rlamzeromaj} \\
+\textsc{steer}      & neither   & \num{Rsteeracc}   & \num{Rsteermaj}   \\
+\midrule
+\multicolumn{4}{@{}l}{\emph{the forecaster, replaced by what the trainer already has}} \\
+\textsc{oracle} & no heads & \num{Roracleacc} & \num{Roraclemaj} \\
+\midrule
+\multicolumn{4}{@{}l}{\emph{relaxed ratio clipping} ($\epsilon_{\mathrm{hi}}{=}5$, $\epsilon_{\mathrm{lo}}{=}0.99$)} \\
+\textsc{signed}        & --- & \num{Rxclipsignedacc} & \num{Rxclipsignedmaj} \\
+\bottomrule
+\end{tabular}
+\caption{Follow-up ablations, converged window, one seed per row and no error bar.
+The seed is whichever one the arm was run at, and our analysis emits it with the row;
+the \textsc{oracle} arm is seed $\num{Roracleseed}$, run there so that it shares a
+seed with the \textsc{signed} and \textsc{uniform} runs the six-benchmark evaluation pairs.
+The $\lambda = 0.25$ line is the reference and is Table~\ref{tab:plateau}'s
+across-seed mean rather than one run. Every row but \textsc{oracle} ran on the
+$\num{Rlamzerogpus}$-GPU box while the seed-1 \textsc{signed} reference ran on the smaller
+one, so those rows carry the machine effect of Appendix~\ref{sec:res:seeds}
+($\num{Boxdelta}$, in the direction that flatters them) on top of whatever the
+ablation does. Our analysis emits a same-seed contrast for \textsc{oracle} alone,
+because it is the one row whose box matches its reference's. Each block isolates one
+element of the design. The relaxed-clipping block has no \textsc{steer} control: that
+run stopped at training step $\num{Rxclipsteerlaststep}$, before the converged window
+closes, and a mean over the part of the window it reached is not the quantity the
+other rows report. Arms that were planned and did not produce a finished run are
+listed in Appendix~\ref{sec:appendix-prereg}.}
+\label{tab:followups}
+\end{table}
+
+Single-seed follow-ups (Table~\ref{tab:followups}) locate the rest of the effect.
+\emph{The sampler:} the tree with the forecast switched off ($\lambda = 0$) reaches
+$\num{Rlamzeroacc}$ against \textsc{steer}'s $\num{Rsteeracc}$ and \textsc{signed}'s
+$\num{Rsignedacc}$, and an uplift of $\num{Rlamzerouplift}$ against \textsc{signed}'s
+$\num{Rsigneduplift}$, so most of the majority-vote structure belongs to the sampler;
+we report this and leave it to work on structured sampling, since the tree is here
+only to give $\AH$ siblings. \emph{The forecaster:} on a frozen policy, the same
+sibling operator applied to the policy's own next-token entropy reproduces $\AH$ at
+$R^2 = \num{Locrsq}$ (Appendix~\ref{sec:res:locality}); an \textsc{oracle} arm reading
+$\Htogo$ from realized entropy is $\num{Fsignedoraclesaving}\%$ cheaper per step and
+$\num{Fsignedoracleacc}$ behind at one seed, so we keep the heads without claiming they
+are necessary. \emph{The support:} the tree arms carry a non-zero $\AH$ on
+$\num{Rsignedbranchfrac}$ of positions against a ceiling of $\num{Supportbound}$. On
+the four-GPU box a \textsc{signed} step costs $\num{Costoverheadhi}\%$ more than
+\textsc{steer}'s (Appendix~\ref{sec:res:cost}).
+
 \section{Additional Results}
 \label{sec:results-app}
 All numbers below come from the runs described in Section~\ref{sec:setup}:
@@ -1834,7 +1867,7 @@ marginal, and the headline gap against GRPO is smaller than GRPO's own spread ac
 its seeds (Appendix~\ref{sec:res:seeds}), does not, and is close to zero on the
 seeds where equal steps mean equal compute (Appendix~\ref{sec:res:compute}). One pre-registered
 falsification condition is met at this seed count, on the contrast that isolates
-$\AH$'s value; Section~\ref{sec:res:contrasts} states which and what it leaves
+$\AH$'s value; Appendix~\ref{sec:res:contrasts} states which and what it leaves
 standing. A reader who wants one result from this section should take the
 dissociation, not the gap.
 
@@ -2444,7 +2477,7 @@ sampler's share is an upper bound, not an estimate. We
 report the block as measured and do not reconcile it. Whether the sampler or the
 forecast carries the structural term needs these arms at more seeds, which this
 paper does not have. Nothing here establishes that the tree does not carry it, and
-Section~\ref{sec:res:contrasts} is explicit that the forecast's \emph{value} does
+Appendix~\ref{sec:res:contrasts} is explicit that the forecast's \emph{value} does
 not survive its own registered test. We do not turn this cell into a claim about the
 sampler either: the schedule was fixed in advance to give $\AH$ its siblings, it was
 not designed or tuned as a sampler, and whether structured sampling improves RLVR
@@ -2612,28 +2645,6 @@ arm $-$ GRPO & $\Delta L$ & $\Delta V$ \\
 \caption{Each damping arm against GRPO in the two channels, base $\to$ step $100$,
 nats per response, prompt-paired 95\% intervals.}
 \label{tab:decompcontrast}
-\end{table}
-
-\begin{table}[h]
-\centering
-\footnotesize
-\setlength{\tabcolsep}{2.5pt}
-\resizebox{\ifdim\width>\linewidth\linewidth\else\width\fi}{!}{%
-\begin{tabular}{@{}lrrrc@{}}
-\toprule
-interval & $\Delta H$ & $L$ & $V$ & $V/\Delta H$ \\
-\midrule
-GRPO $80 \to 110$ & $\num{DecSecGrpoLateDH}$ & $\num{DecSecGrpoLateL}$ & $\num{DecSecGrpoLateV}$ & \num{DecSecGrpoLateShare} [\num{DecSecGrpoLateShareLo}, \num{DecSecGrpoLateShareHi}] \\
-\textsc{perm.} $80 \to 110$ & $\num{DecSecPermLateDH}$ & $\num{DecSecPermLateL}$ & $\num{DecSecPermLateV}$ & \num{DecSecPermLateShare} [\num{DecSecPermLateShareLo}, \num{DecSecPermLateShareHi}] \\
-\textsc{signed} $0 \to 50$ & $\num{DecSecSignedADH}$ & $\num{DecSecSignedAL}$ & $\num{DecSecSignedAV}$ & \num{DecSecSignedAShare} [\num{DecSecSignedAShareLo}, \num{DecSecSignedAShareHi}] \\
-\textsc{signed} $50 \to 100$ & $\num{DecSecSignedBDH}$ & $\num{DecSecSignedBL}$ & $\num{DecSecSignedBV}$ & \num{DecSecSignedBShare} [\num{DecSecSignedBShareLo}, \num{DecSecSignedBShareHi}] \\
-\textsc{signed} $100 \to 150$ & $\num{DecSecSignedCDH}$ & $\num{DecSecSignedCL}$ & $\num{DecSecSignedCV}$ & \num{DecSecSignedCShare} [\num{DecSecSignedCShareLo}, \num{DecSecSignedCShareHi}] \\
-\textsc{signed} $150 \to 200$ & $\num{DecSecSignedDDH}$ & $\num{DecSecSignedDL}$ & $\num{DecSecSignedDV}$ & \num{DecSecSignedDShare} [\num{DecSecSignedDShareLo}, \num{DecSecSignedDShareHi}] \\
-\bottomrule
-\end{tabular}}
-\caption{Secondary intervals, seed $1$, nats per response, with 95\% prompt-bootstrap
-intervals for the share; registered without a decision rule.}
-\label{tab:decompsec}
 \end{table}
 
 \paragraph{Robustness (exploratory).} This check was added after the registered
@@ -2947,7 +2958,7 @@ spread.
 Earlier drafts of this work paired the arms at each of the eight validation steps in
 the converged window and reported a paired $t$ over those eight points. That
 statistic answers a narrower question than the one in
-Section~\ref{sec:res:contrasts}: it asks whether a gap is stable along a single
+Appendix~\ref{sec:res:contrasts}: it asks whether a gap is stable along a single
 trajectory, not whether it reappears when the run is repeated. Its $n$ counts
 validation points, which are serially correlated within a run, so it is not an
 estimate of run-to-run uncertainty and cannot be read as one.
