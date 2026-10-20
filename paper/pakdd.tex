@@ -13,6 +13,9 @@
 \usepackage{booktabs}
 \usepackage{xcolor}
 \usepackage{tikz}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usepackage{array}
 \usepackage[hidelinks]{hyperref}
 
 % ---- macros -----------------------------------------------------------
@@ -177,9 +180,17 @@ resets~\cite{liu2025bprorl}, or by selective entropy regularization, since a nai
 tends to explode~\cite{rethinkingentropyreg}. Training on a minority of high-entropy
 ``forking'' tokens suffices~\cite{wang2025dbeyond}, and several schemes shape advantages
 or rewards with token entropy~\cite{cheng2025reasoning,tan2025gtpo,zhang2025dedge}.
-STEER~\cite{steer} multiplies each token's surrogate loss by a weight in
-$[\lambda_{\min}, 1]$ derived from a first-order estimate $\Om$ of the change in
-conditional entropy at a fixed state. All of these act on conditional distributions at
+STEER~\cite{steer} leaves the advantage untouched and multiplies each token's
+clipped surrogate by a weight derived from the first-order change in the conditional
+entropy at a \emph{fixed} state after one step,
+\begin{equation}
+\Om(s) \propto -\,\E_{a}\Bigl[\tfrac{\mathbb{I}_{\mathrm{clip}} A}{\pi_{\mathrm{old}}}\,
+  \pit(a)\bigl(1-\pit(a)\bigr)\bigl(\log \pit(a) + H\bigr)\Bigr],
+\label{eq:omega}
+\end{equation}
+evaluated at the sampled token and mapped into a weight $\alpha_u \in
+[\lambda_{\min}, 1]$ that decreases exponentially in $|\Om_u|$ relative to its batch
+maximum, so the weight can only attenuate. All of these act on conditional distributions at
 visited states, that is, on the local channel.
 
 \paragraph{Trajectory-level diversity.} Token-level entropy can stay high while the
@@ -319,9 +330,39 @@ GRPO $80 \to 110$ & $\num{DecSecGrpoLateDH}$ & $\num{DecSecGrpoLateL}$ & $\num{D
 \end{tabular}
 \end{table}
 
+\begin{figure}[t]
+\centering
+\ifcsname DecRepSignedV\endcsname
+\begin{tikzpicture}
+\begin{axis}[
+  xbar stacked, scale only axis, width=0.58\linewidth, height=3.6cm, bar width=8pt,
+  xmin=-650, xmax=0, axis x line*=bottom, axis y line*=left,
+  xlabel={change in trajectory entropy, nats per response},
+  ytick=data, y dir=reverse, enlarge y limits=0.15,
+  yticklabels={{GRPO, seed 1, 100}, {\textsc{permuted}, seed 1, 100},
+               {\textsc{signed}, seed 1, 100}, {GRPO, seed 2, 80},
+               {\textsc{signed}, seed 3, 100}},
+  yticklabel style={font=\footnotesize}, xticklabel style={font=\footnotesize},
+  legend style={at={(0.5,1.03)}, anchor=south, font=\footnotesize, draw=none,
+                legend columns=2},
+  every axis plot/.append style={draw=none}]
+\addplot[fill=black!25] coordinates {(\DecGrpoL,1) (\DecPermL,2) (\DecSignedL,3)
+  (\DecRepGrpoL,4) (\DecRepSignedL,5)};
+\addplot[fill=blue!55!black] coordinates {(\DecGrpoV,1) (\DecPermV,2) (\DecSignedV,3)
+  (\DecRepGrpoV,4) (\DecRepSignedV,5)};
+\legend{local $L$, visitation $V$}
+\end{axis}
+\end{tikzpicture}
+\else \PENDING \fi
+\caption{The entropy lost from the base model to the given step, split into the two
+channels of Eq.~\eqref{eq:split} (values of Table~\ref{tab:decomp}). The local channel,
+the only one a token-level estimator sees, is the short grey segment in every run.}
+\label{fig:split}
+\end{figure}
+
 \paragraph{Result.} GRPO loses $\num{DecGrpoDH}$ nats per response, and the visitation
 channel carries $\num{DecGrpoShare}$ of it, which meets the registered criterion
-(Table~\ref{tab:decomp}). The replication meets the same criterion: GRPO on seed $2$
+(Table~\ref{tab:decomp}, Fig.~\ref{fig:split}). The replication meets the same criterion: GRPO on seed $2$
 gives $\num{DecRepGrpoShare}$ and the campaign's \textsc{signed} run on seed $3$ gives
 $\num{DecRepSignedShare}$. Most of the measured collapse is therefore not sharpening at
 the states the policy already visited: the trained policy moves to states where the
@@ -339,13 +380,48 @@ rise again goes mostly through visitation.
 \paragraph{Checks.} Because $\Htraj$ grows with response length and long responses are
 cut at $3072$ tokens, we checked, after seeing the result, whether truncation or length
 carries the share: without truncated responses, per token, or both, it stays between
-$\num{DecRobustMin}$ and $\num{DecRobustMax}$ on seed $1$ and between
-$\num{DecRepRobustMin}$ and $\num{DecRepRobustMax}$ on the replication (exploratory).
-The second registered prediction is not borne out: relative to GRPO the damping arms
-change $V$ more than $L$ (\textsc{permuted} $\num{DecPermdV}$ against
-$\num{DecPermdL}$, \textsc{signed} $\num{DecSigneddV}$ against $\num{DecSigneddL}$
-nats), so the difference damping makes, integrated over training, is also mostly a
-difference in where the policy goes.
+$\num{DecRobustMin}$ and $\num{DecRobustMax}$ on seed $1$ (Table~\ref{tab:robust}) and
+between $\num{DecRepRobustMin}$ and $\num{DecRepRobustMax}$ on the replication. These
+variants were added after the result was seen and are exploratory. The second
+registered prediction is not borne out (Table~\ref{tab:q2}): relative to GRPO the
+damping arms change $V$ more than $L$, so the difference damping makes, integrated over
+training, is also mostly a difference in where the policy goes.
+
+\begin{table}[t]
+\begin{minipage}[t]{0.47\linewidth}
+\caption{Exploratory variants of the visitation share, seed $1$, base $\to$ step $100$.}
+\label{tab:robust}
+\centering
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+$V/\Delta H$ & GRPO & \textsc{perm.} & \textsc{signed} \\
+\midrule
+registered & \num{DecGrpoShare} & \num{DecPermShare} & \num{DecSignedShare} \\
+no truncated & \num{DecRobDropGrpo} & \num{DecRobDropPerm} & \num{DecRobDropSigned} \\
+per token & \num{DecRobTokGrpo} & \num{DecRobTokPerm} & \num{DecRobTokSigned} \\
+both & \num{DecRobBothGrpo} & \num{DecRobBothPerm} & \num{DecRobBothSigned} \\
+\bottomrule
+\end{tabular}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\linewidth}
+\caption{Each damping arm minus GRPO in the two channels, base $\to$ step $100$, seed
+$1$; nats per response, prompt-paired 95\% intervals.}
+\label{tab:q2}
+\centering
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}lcc@{}}
+\toprule
+arm & $\Delta L$ & $\Delta V$ \\
+\midrule
+\textsc{perm.} & $\num{DecPermdL}$ & $\num{DecPermdV}$ \\
+ & {\scriptsize [$\num{DecPermdLLo}$, $\num{DecPermdLHi}$]} & {\scriptsize [$\num{DecPermdVLo}$, $\num{DecPermdVHi}$]} \\
+\textsc{signed} & $\num{DecSigneddL}$ & $\num{DecSigneddV}$ \\
+ & {\scriptsize [$\num{DecSigneddLLo}$, $\num{DecSigneddLHi}$]} & {\scriptsize [$\num{DecSigneddVLo}$, $\num{DecSigneddVHi}$]} \\
+\bottomrule
+\end{tabular}
+\end{minipage}
+\end{table}
 
 % =====================================================================
 \section{Why Aggregate Entropy Cannot See It}
@@ -374,11 +450,52 @@ positions carry $\AH \ne 0$ under any sampler.
 On each sibling set $\sum_j \AH(s_u, y^{(j)}_u) = 0$. A correction built on $\AH$ can
 therefore change which sibling is damped but not how much damping there is on
 average, and an average over all response tokens should barely register it: aggregate
-token entropy is not a diagnostic for whether the visitation channel is acted on. We
-turn $\AH$ into a bounded adjustment of STEER's token weight, forecasting $\Htogo$ with
-two multi-token-prediction heads (details in the supplementary material). The
-correction is an instrument for testing this prediction, not a proposed training
-method.
+token entropy is not a diagnostic for whether the visitation channel is acted on. The
+prediction it does make is that the spread \emph{across siblings} widens.
+
+\paragraph{From $\AH$ to a token weight.} $\Htogo$ involves states the update has not
+visited, so we forecast it from the hidden state with $\kappa = 2$ parallel
+multi-token-prediction heads~\cite{medusa}, each calibrated by an affine map and summed
+with discount $\gamma_H$. Under the base method's assumption that one step moves only the sampled
+logit, the step changes the sampled token's log-probability by $\eta w_u (1 - \pi_u)$,
+with $w_u$ the clipped advantage coefficient, which gives the visitation prediction
+$\mathrm{visit}_u = \eta w_u (1-\pi_u)\,\mathrm{clip}(\AH, \pm c)$. Because $\Om$ is
+heavy-tailed, the visitation term is added \emph{after} the base map, as a bounded
+adjustment on the support $\mathcal{S} = \{u : \mathrm{visit}_u \ne 0\}$,
+\begin{equation}
+\alpha^{\mathrm{f}}_u = \mathrm{clamp}\bigl(\alpha_u
+  + \lambda\, b\, \tanh(\mathrm{visit}_u / \rho),\ \lambda_{\min}, 1\bigr),
+\label{eq:combine}
+\end{equation}
+with $b$ the band width and $\rho$ the RMS of $\mathrm{visit}$ over $\mathcal{S}$; at
+$\lambda = 0$ the pipeline is exactly the base method. Table~\ref{tab:ledger} lists
+every approximation between the exact identities and this weight. The correction is an
+instrument for testing the zero-sum prediction, not a proposed training method.
+
+\begin{table}[t]
+\caption{Every approximation between the exact decomposition and the implemented weight.
+A1--A4 are introduced by this work; B1--B4 are shared with the token-level method it
+extends. Derivations are in the supplementary material.}
+\label{tab:ledger}
+\centering
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}l>{\raggedright}p{2.4cm}>{\raggedright}p{3.4cm}>{\raggedright}p{1.8cm}>{\raggedright\arraybackslash}p{2.9cm}@{}}
+\toprule
+& approximation & what it discards & sign / bound & mitigation \\
+\midrule
+--- & Eqs.~\eqref{eq:twochannel}--\eqref{eq:togo}, $\AH$ & nothing --- identities & --- & --- \\
+A1 & horizon $\kappa$, discount $\gamma_H$ & the tail beyond $\kappa$ steps & under-estimate & common part cancels between siblings \\
+A2 & realized future $\to$ head marginal & mutual information with intervening tokens & over-estimate, monotone in $k$ & A3 \\
+A3 & per-head affine calibration & non-affine residual of A2 & least squares & realized-entropy control arm \\
+A4 & clip $\AH$ to $\pm c$ & extreme branch scores & bounded by $c$ & saturation logged \\
+B1 & first order in $\eta$ & $O(\eta^2)$ & --- & small learning rate \\
+B2 & only the sampled logit moves & cross-position effects of shared weights & --- & inherited \\
+B3 & rollouts from $\pi_{\mathrm{old}}$ & mismatch with $\pit$ & --- & importance ratio \\
+B4 & self in the sibling set & $O(1/m)$ vs.\ leave-one-out & --- & as in GRPO \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \subsection{A test: aggregate entropy tracks the mechanism, not the signal}
 \label{sec:dissoc}
@@ -458,6 +575,41 @@ the spread across siblings widens, is not measured.
 $\num{CHisigneduniformacc}$), and the gaps between arms are smaller than GRPO's own
 spread across seeds, $\num{Sgrpoacc}$, so we make no accuracy claim. Per-arm results,
 ablations and the full registration are in the supplementary material.
+
+% =====================================================================
+\section{Discussion}
+\label{sec:discussion}
+
+\paragraph{What the split says about entropy control.} Token-level methods damp the
+update at the sampled token in proportion to how much it sharpens that state. The
+measured split says that, over the first hundred steps, this is the smaller part of
+what is lost. The larger part is that the policy concentrates on prefixes along which
+the base model's own conditionals were already sharp. This is consistent with the
+observation that answer-level diversity can fall while token-level entropy stays
+high~\cite{wu2025ainvisible}: per-state entropies say little about how concentrated the
+trajectory distribution has become, and an intervention that protects them leaves the
+larger part untouched.
+
+\paragraph{Why damping moves $V$.} Damping is applied token by token, yet its
+integrated effect relative to GRPO was larger in $V$ than in $L$ (Table~\ref{tab:q2}).
+One reading is that a token weight changes which updates are made, and the trajectory
+distribution compounds those changes along the response, so a local intervention can
+act mostly through visitation over training. We did not test this mechanism, and the
+registered prediction that damping acts on the local channel is reported as not borne
+out.
+
+\paragraph{Measuring it in practice.} The split needs only responses sampled from two
+checkpoints and a forward pass of each model over both response sets --- no gradients
+and no access to the training run --- so it applies to any pair of checkpoints,
+including released ones. It separates two changes that an aggregate entropy curve
+conflates, and with prompt-paired intervals its share is well resolved at a few hundred
+prompts (Table~\ref{tab:decomp}).
+
+\paragraph{What it does not show.} The split is descriptive: it says where entropy went,
+not whether keeping it would have helped. Accuracy did not respond to the visitation
+signal in our arms (Section~\ref{sec:dissoc}). Whether objectives that act on which
+paths are reinforced slow the visitation part of collapse, and whether that improves
+reasoning, is the question this measurement makes testable.
 
 % =====================================================================
 \section{Limitations and Conclusion}
