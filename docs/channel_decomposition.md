@@ -73,3 +73,21 @@ base -> signed50 -> signed100 -> signed150 -> signed200.
 - The decomposition is finite-difference, between checkpoints tens of steps
   apart; it is the integrated version of the gradient split, not the gradient.
 - 512 prompts x 4 responses; a share near zero may be below resolution.
+
+## Amendment 1 — replication on another seed (2026-10-20, before sampling)
+
+Decided after the seed-1 result was seen, to test whether it holds on a second
+seed; the rule below is fixed before any sample of that seed is drawn.
+
+- **What:** base -> grpo100 (and base -> perm100 where that checkpoint exists)
+  for seed 3 or 4, whichever has a step-100 checkpoint on the Hub; both if both
+  do. Same prompts, sampler and analysis as above; the base model's samples
+  and self-entropies are reused from seed 1, since they do not depend on the
+  seed under study. Launcher: `SEED=<s> bash run/channel_decomp.sh`, output
+  `results/decomp_s<s>/`, `results/channel_decomp_s<s>.json`.
+- **Rule:** the seed-1 Q1 claim counts as replicated on seed s if the same Q1
+  rule holds there (the 95% interval of V excludes zero with the sign of dH).
+  The share V/dH and its interval are reported whatever they are; no threshold
+  on its size is set.
+- **Reported either way**, including the case where no other seed has a
+  step-100 checkpoint and nothing is run.

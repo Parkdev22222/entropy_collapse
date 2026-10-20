@@ -4,6 +4,12 @@
 #   DRY=1 bash run/channel_decomp.sh            # where every checkpoint is
 #         bash run/channel_decomp.sh            # primary: base -> {grpo,perm,signed}100
 #   SET=all bash run/channel_decomp.sh          # + the secondary intervals
+#   SEED=3 bash run/channel_decomp.sh           # replication on another seed
+#
+# SEED other than 1 writes to results/decomp_s<SEED>, reuses the base model's
+# samples and entropies from results/decomp (same prompts, same sampler seed),
+# and runs base -> {grpo,perm}100 of that seed; SIGNED_RUN=<hub run> adds
+# base -> signed100 from that run. INTERVALS overrides the list.
 #
 # One GPU. Every stage is skipped when its output exists AND was made from the
 # same checkpoint, so a rerun resumes and a changed path is redone.
@@ -17,15 +23,18 @@ source run/_arms.sh
 
 BASE=${BASE_MODEL:-Qwen/Qwen2.5-Math-1.5B}
 DATA=${DATA:-datasets/DAPO-Math-17k.parquet}
-OUT=${OUT_DIR:-results/decomp}
-RESULT=${RESULT:-results/channel_decomp.json}
+SEED=${SEED:-1}
+if [ "${SEED}" = "1" ]; then SFX=""; else SFX="_s${SEED}"; fi
+OUT=${OUT_DIR:-results/decomp${SFX}}
+RESULT=${RESULT:-results/channel_decomp${SFX}.json}
 PILOT=${PILOT:-/workspace/entropy_lora/checkpoints/STEER-F/pilot-steer-f-1p5b-s1-150}
 EVAL_REPOS=${EVAL_REPOS:-"DSDSh/steer-f_2 DSDSh/sssss"}
 SET=${SET:-primary}
 DRY=${DRY:-0}
 PY="python3 scripts/channel_decomp.py"
-GRPO_RUN=grpo-Qwen2.5-Math-1.5B-s1
-PERM_RUN=steer-f-Qwen2.5-Math-1.5B-s1-tree-rollout-permuted
+GRPO_RUN=grpo-Qwen2.5-Math-1.5B-s${SEED}
+PERM_RUN=steer-f-Qwen2.5-Math-1.5B-s${SEED}-tree-rollout-permuted
+SIGNED_RUN=${SIGNED_RUN:-}
 
 # label -> "path|hub-run|step"; hub-run empty for checkpoints that are local.
 declare -A SPEC=(
@@ -41,13 +50,24 @@ declare -A SPEC=(
   [signed150]="${PILOT}/global_step_150/actor/huggingface||"
   [signed200]="${PILOT}/global_step_200/actor/huggingface||"
 )
-PRIMARY="base:grpo100 base:perm100 base:signed100"
+if [ "${SEED}" != "1" ]; then
+    # The pilot is seed 1; another seed's signed arm comes only from SIGNED_RUN.
+    if [ -n "${SIGNED_RUN}" ]; then
+        SPEC[signed100]="checkpoints/_manip/${SIGNED_RUN}/global_step_100|${SIGNED_RUN}|100"
+    else
+        unset 'SPEC[signed100]'
+    fi
+fi
+PRIMARY="base:grpo100 base:perm100"
+[ -n "${SPEC[signed100]+x}" ] && PRIMARY="${PRIMARY} base:signed100"
 SECONDARY="grpo80:grpo110 perm80:perm110 base:signed50 signed50:signed100 signed100:signed150 signed150:signed200"
-case "${SET}" in
+if [ -n "${INTERVALS:-}" ]; then :
+else case "${SET}" in
   primary) INTERVALS="${PRIMARY}" ;;
-  all)     INTERVALS="${PRIMARY} ${SECONDARY}" ;;
+  all)     [ "${SEED}" = "1" ] || { echo "SET=all is seed 1 only" >&2; exit 2; }
+           INTERVALS="${PRIMARY} ${SECONDARY}" ;;
   *) echo "SET must be primary or all" >&2; exit 2 ;;
-esac
+esac; fi
 LABELS=$(for iv in ${INTERVALS}; do echo "${iv%%:*}"; echo "${iv##*:}"; done | awk '!s[$0]++')
 
 path_of () { local s="${SPEC[$1]}"; echo "${s%%|*}"; }
@@ -62,7 +82,7 @@ sys.exit(any(r.get(k) != v for k, v in (a.split("=", 1) for a in sys.argv[2:])))
 PY
 }
 
-echo "set=${SET}  out=${OUT}"
+echo "seed=${SEED}  set=${SET}  out=${OUT}"
 echo "intervals: ${INTERVALS}"
 echo "checkpoints:"
 missing=0
@@ -76,6 +96,14 @@ done
 if [ "${DRY}" = "1" ]; then exit 0; fi
 
 mkdir -p "${OUT}"
+# The base model's samples and self-entropies do not depend on the seed under
+# study: same prompts, same sampler seed. Reuse them rather than redraw.
+if [ "${SEED}" != "1" ] && [ -s results/decomp/samples/base.json ]; then
+    mkdir -p "${OUT}/samples" "${OUT}/ent"
+    cp -n results/decomp/prompts.json "${OUT}/"
+    cp -n results/decomp/samples/base.json "${OUT}/samples/"
+    [ -s results/decomp/ent/base__base.json ] && cp -n results/decomp/ent/base__base.json "${OUT}/ent/"
+fi
 # 1) fetch and sample every checkpoint once
 for l in ${LABELS}; do
     p="$(path_of "$l")"; rest="${SPEC[$l]#*|}"; run="${rest%%|*}"; step="${rest##*|}"
