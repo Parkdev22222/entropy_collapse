@@ -174,8 +174,52 @@ def analyze(out: Path, n_boot: int = 10000) -> dict:
     return res
 
 
+def robust(out: Path, max_len: int = 3072, n_boot: int = 4000) -> dict:
+    """Exploratory, added after the registered result was seen: the primary
+    intervals recomputed (i) without responses truncated at max_len, whose
+    rambling could carry the visitation term on its own, and (ii) per token,
+    sum of entropies over sum of lengths, so a change in length cannot."""
+    samples = {}
+    for f in (out / "samples").glob("*.json"):
+        r = json.loads(f.read_text())
+        samples[r["label"]] = [[len(x) for x in rs] for rs in r["responses"]]
+    S = {}
+    for f in (out / "ent").glob("*.json"):
+        r = json.loads(f.read_text())
+        S[(r["samples"], r["under"])] = r["sums"]
+    res = {}
+    for name, keep, per_token in [("drop_truncated", lambda n: n < max_len, False),
+                                  ("per_token", lambda n: True, True),
+                                  ("drop_truncated_per_token", lambda n: n < max_len, True)]:
+        res[name] = {}
+        for a, b in PRIMARY:
+            if not all(k in S for k in [(a, a), (a, b), (b, a), (b, b)]):
+                continue
+            rows = []
+            for i in range(len(samples[a])):
+                def E(x, m):
+                    v = [(e, n) for e, n in zip(S[(x, m)][i], samples[x][i]) if keep(n)]
+                    if not v:
+                        return None
+                    return (sum(e for e, _ in v) / sum(n for _, n in v) if per_token
+                            else sum(e for e, _ in v) / len(v))
+                aa, ab, ba, bb = E(a, a), E(a, b), E(b, a), E(b, b)
+                if None in (aa, ab, ba, bb):
+                    continue
+                dH, Lc = bb - aa, ((bb - ba) + (ab - aa)) / 2
+                rows.append((dH, Lc, dH - Lc))
+            dH, V = [r[0] for r in rows], [r[2] for r in rows]
+            lo, hi = boot(lambda v, d: mean(v) / mean(d), [V, dH], n_boot)
+            res[name][f"{a}->{b}"] = {"n": len(rows), "dH": mean(dH),
+                                      "L": mean([r[1] for r in rows]), "V": mean(V),
+                                      "V_share": mean(V) / mean(dH), "ci": [lo, hi]}
+    return res
+
+
 def cmd_analyze(a) -> None:
     res = analyze(Path(a.out), a.n_boot)
+    if (Path(a.out) / "samples").is_dir():
+        res["exploratory_robustness"] = robust(Path(a.out))
     Path(a.result).write_text(json.dumps(res, indent=2))
     f = lambda r: f"{r['mean']:+9.2f} [{r['ci'][0]:+8.2f}, {r['ci'][1]:+8.2f}]"
     print(f"{'interval':22s} {'H_a':>7s} {'H_b':>7s}   {'dH':>27s}   {'L (local)':>27s}"
@@ -189,6 +233,10 @@ def cmd_analyze(a) -> None:
         print(f"{k:18s} dL {f(c['L'])}   dV {f(c['V'])}   "
               f"consistent with local-channel prediction: {c['consistent_with_local']}")
     print(f"\nQ1 (base->grpo100): {res.get('q1_verdict', 'not computed')}")
+    for name, rows in res.get("exploratory_robustness", {}).items():
+        for k, r in rows.items():
+            print(f"[exploratory {name}] {k}: V/dH {r['V_share']:.2f} "
+                  f"[{r['ci'][0]:.2f}, {r['ci'][1]:.2f}]  n={r['n']}")
     print(f"wrote {a.result}")
 
 
