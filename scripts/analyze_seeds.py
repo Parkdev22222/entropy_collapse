@@ -110,7 +110,7 @@ MAIN_ARMS = ["grpo", "steer", "uniform", "permuted", "signed"]
 # would be a second thing to keep in step.
 ARM_LABEL = {"grpo": "GRPO", "steer": "\\textsc{steer}",
              "uniform": "\\textsc{uniform}", "permuted": "\\textsc{permuted}",
-             "signed": "\\textbf{STEER-F}",
+             "signed": "\\textsc{signed}",
              # A follow-up arm, not a MAIN_ARM, but the six-benchmark table and
              # Benchmissing both name it: Table 10's caption says it was run at
              # the seed the evaluation pairs, so its row belongs beside theirs.

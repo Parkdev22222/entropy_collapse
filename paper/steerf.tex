@@ -401,7 +401,7 @@ $2(n-1)/T$ under \emph{any} sampler --- about one percent at $T \approx 10^3$.
 On each sibling set $\sum_j \AH(s_u, y^{(j)}_u) = 0$. A correction built on $\AH$
 therefore cannot change the average weight at branch tokens, only spread siblings
 apart; this is forced by unbiasedness, not a defect. ``Mean entropy at branch points
-rose'' is \emph{not} a prediction of this method, and an average over all response
+rose'' is \emph{not} a prediction of this correction, and an average over all response
 tokens should barely register it: aggregate token entropy is not a diagnostic for
 whether the correction acts. The prediction it does make is that the spread
 \emph{across siblings} widens. A hypothesis that raises the mean is different and
@@ -471,22 +471,22 @@ DAPO-Math-17k \citep{yu2025dapo} for $110$ steps of $512$ prompts with GRPO, $n 
 constant learning rate $1\mathrm{e}{-6}$, responses up to $3072$ tokens, no entropy
 bonus or KL loss, and an asymmetric clip ($\varepsilon_{\mathrm{low}} = 0.2$,
 $\varepsilon_{\mathrm{high}} = 0.28$). The base method's map uses $\lambda_{\min} =
-0.7$, its paper's value \citep[App.~F.1]{steer}. STEER-F uses $\kappa = 2$, $\gamma_H =
+0.7$, its paper's value \citep[App.~F.1]{steer}. The correction uses $\kappa = 2$, $\gamma_H =
 0.7$, $\lambda = 0.25$, $c = 1$, and a tree cut at depths $\{64, 192, 384\}$. Every arm
 shares the data seed per run and the initial checkpoint. Appendix~\ref{sec:setup-app}
 lists the rest.
 
 \paragraph{Five arms.} We call everything except the content of $\AH$ --- the tree
 sampler, the support $\mathcal{S}$ and the token-weight damping --- the \emph{damping
-mechanism}. Comparing the base method with the full method changes the mechanism and
+mechanism}. Comparing the base method with the arm that applies the full correction changes the mechanism and
 the signal at once, so we add two arms that keep the whole mechanism and remove only
 the branch-specific $\AH$ signal (Table~\ref{tab:arms}). \textsc{uniform} applies the
 same attenuation to every position in the support: it removes the $\AH$ signal while
 preserving its support, which implements the ``raise the mean'' hypothesis.
 \textsc{permuted} shuffles $\AH$ within each sibling set: it preserves the distribution
-of $\AH$ magnitudes and the zero sum but destroys the branch--score assignment. We
-call the arm that carries the correction STEER-F; it is the instrument with which the
-analysis's predictions are tested, not a method proposed for adoption.
+of $\AH$ magnitudes and the zero sum but destroys the branch--score assignment.
+\textsc{signed} applies the correction as derived. It is the instrument with which the
+analysis's predictions are tested; we do not propose it as a training method.
 
 \begin{table}[t]
 \centering
@@ -500,7 +500,7 @@ GRPO      & ---   & plain & none \\
 STEER     & $0$   & plain & local $\Om$ only \\
 uniform   & $.25$ & tree  & support only \\
 permuted  & $.25$ & tree  & $\AH$ shuffled \\
-STEER-F & $.25$ & tree & $\AH$ as derived \\
+signed  & $.25$ & tree & $\AH$ as derived \\
 \bottomrule
 \end{tabular}
 \caption{The five arms. \textsc{uniform} and \textsc{permuted} keep the damping
@@ -543,12 +543,12 @@ contrast & $n$ & $\Delta$ent. & $t$ & $\Delta$acc & $t$ \\
 \textsc{unif} $-$ \textsc{steer} & \num{Nuniformsteer} & $\num{Cuniformsteerentropy}$ & $\num{Tuniformsteerentropy}$ & $\num{Cuniformsteeracc}$ & $\num{Tuniformsteeracc}$ \\
 \midrule
 \multicolumn{6}{@{}l}{\emph{the $\AH$ signal changes, the damping mechanism does not}} \\
-STEER-F $-$ \textsc{unif} & \num{Nsigneduniform} & $\num{Csigneduniformentropy}$ & $\num{Tsigneduniformentropy}$ & $\num{Csigneduniformacc}$ & $\num{Tsigneduniformacc}$ \\
-STEER-F $-$ \textsc{perm} & \num{Nsignedpermuted} & $\num{Csignedpermutedentropy}$ & \num{Tsignedpermutedentropy} & $\num{Csignedpermutedacc}$ & \num{Tsignedpermutedacc} \\
+\textsc{signed} $-$ \textsc{unif} & \num{Nsigneduniform} & $\num{Csigneduniformentropy}$ & $\num{Tsigneduniformentropy}$ & $\num{Csigneduniformacc}$ & $\num{Tsigneduniformacc}$ \\
+\textsc{signed} $-$ \textsc{perm} & \num{Nsignedpermuted} & $\num{Csignedpermutedentropy}$ & \num{Tsignedpermutedentropy} & $\num{Csignedpermutedacc}$ & \num{Tsignedpermutedacc} \\
 \midrule
 \multicolumn{6}{@{}l}{\emph{both change}} \\
-STEER-F $-$ \textsc{steer} & \num{Nsignedsteer} & $\num{Csignedsteerentropy}$ & $\num{Tsignedsteerentropy}$ & $\num{Csignedsteeracc}$ & $\num{Tsignedsteeracc}$ \\
-STEER-F $-$ GRPO & \num{Nsignedgrpo} & $\num{Csignedgrpoentropy}$ & $\num{Tsignedgrpoentropy}$ & $\num{Csignedgrpoacc}$ & $\num{Tsignedgrpoacc}$ \\
+\textsc{signed} $-$ \textsc{steer} & \num{Nsignedsteer} & $\num{Csignedsteerentropy}$ & $\num{Tsignedsteerentropy}$ & $\num{Csignedsteeracc}$ & $\num{Tsignedsteeracc}$ \\
+\textsc{signed} $-$ GRPO & \num{Nsignedgrpo} & $\num{Csignedgrpoentropy}$ & $\num{Tsignedgrpoentropy}$ & $\num{Csignedgrpoacc}$ & $\num{Tsignedgrpoacc}$ \\
 \bottomrule
 \end{tabular}
 \caption{Converged entropy and accuracy, paired within a seed ($\mathrm{df} = n-1$)
@@ -603,7 +603,7 @@ GRPO             & \num{Ngrpo}     & \num{Rgrpoacc}     & \num{Egrpoacc}     & \
 \textsc{steer}   & \num{Nsteer}    & \num{Rsteeracc}    & \num{Esteeracc}    & \num{Rsteermaj}    & \num{Esteermaj}    & \num{Rsteeruplift}    & \num{Rsteerentropy}    \\
 \textsc{uniform} & \num{Nuniform}  & \num{Runiformacc}  & \num{Euniformacc}  & \num{Runiformmaj}  & \num{Euniformmaj}  & \num{Runiformuplift}  & \num{Runiformentropy}  \\
 \textsc{permuted}& \num{Npermuted} & \num{Rpermutedacc} & \num{Epermutedacc} & \num{Rpermutedmaj} & \num{Epermutedmaj} & \num{Rpermuteduplift} & \num{Rpermutedentropy} \\
-STEER-F & \num{Nsigned}   & \num{Rsignedacc}   & \num{Esignedacc}   & \num{Rsignedmaj}   & \num{Esignedmaj}   & \num{Rsigneduplift}   & \num{Rsignedentropy}   \\
+\textsc{signed} & \num{Nsigned}   & \num{Rsignedacc}   & \num{Esignedacc}   & \num{Rsignedmaj}   & \num{Esignedmaj}   & \num{Rsigneduplift}   & \num{Rsignedentropy}   \\
 \bottomrule
 \end{tabular}
 \caption{Means over steps $40$--$110$ on seeds $\num{Seedset}$, $\pm$ the standard
@@ -615,7 +615,7 @@ paired contrast of Table~\ref{tab:entropy}. Entropy is the token-mean quantity.}
 Table~\ref{tab:plateau} averages each arm over the converged window, and
 Table~\ref{tab:curve} gives one seed's full trajectory. The three arms without the
 $\AH$ signal --- \textsc{steer}, \textsc{uniform}, \textsc{permuted} --- sit below
-GRPO on accuracy and STEER-F above it, by less than GRPO's standard error across
+GRPO on accuracy and \textsc{signed} above it, by less than GRPO's standard error across
 seeds. On entropy GRPO holds the most and the four damped arms sit close together. The
 two columns are neither aligned nor reversed; read as the contrasts of
 Section~\ref{sec:res:entropy}, they separate.
@@ -626,7 +626,7 @@ Section~\ref{sec:res:entropy}, they separate.
 \setlength{\tabcolsep}{2.6pt}
 \begin{tabular}{@{}rccccc@{}}
 \toprule
-step & GRPO & \textsc{steer} & \textsc{unif} & \textsc{perm} & STEER-F \\
+step & GRPO & \textsc{steer} & \textsc{unif} & \textsc{perm} & \textsc{signed} \\
 \midrule
 0   & .039/.035 & .043/.040 & .039/.035 & .039/.035 & .039/.035 \\
 10  & .075/.127 & .064/.109 & .070/.124 & .062/.126 & .078/.148 \\
@@ -653,14 +653,14 @@ Tables~\ref{tab:plateau} and~\ref{tab:contrast}.}
 \subsection{Does the branch-specific $\AH$ signal matter for accuracy?}
 \label{sec:res:contrasts}
 
-\paragraph{The pre-registered test.} The registration made STEER-F $-$
+\paragraph{The pre-registered test.} The registration made \textsc{signed} $-$
 \textsc{uniform} the accuracy test: \emph{if it straddles zero across seeds, the $\AH$
 signal does not matter}. It straddles: over $\num{Nsigneduniform}$ paired seeds it runs
 from $\num{CLosigneduniformacc}$ to $\num{CHisigneduniformacc}$, with
 $\num{CNegsigneduniformacc}$ negative, and we do not rescue it with the mean or with
 majority vote. The pre-registered accuracy hypothesis is therefore not supported, and
 we make no claim that $\AH$ improves accuracy. The other three registered conditions
-did not trigger: STEER-F $-$ \textsc{permuted}, which keeps the magnitudes and destroys
+did not trigger: \textsc{signed} $-$ \textsc{permuted}, which keeps the magnitudes and destroys
 only the branch--score assignment, does not straddle ($\num{CLosignedpermutedacc}$ to
 $\num{CHisignedpermutedacc}$); the arms are not ordered alike by entropy and accuracy;
 and the mean token weight stays at $\num{Rsignedtwmean}$.
@@ -671,7 +671,7 @@ GRPO here although its paper places it above, a discrepancy we could not attribu
 (Appendix~\ref{sec:res:ablate}). Against GRPO the gap of $\num{Csignedgrpoacc}$ is a
 fraction of GRPO's spread across seeds, $\num{Sgrpoacc}$, and is $\num{Cmhisignedgrpoacc}$
 on the seeds where equal steps are equal compute (Appendix~\ref{sec:res:compute}). On
-six benchmarks the registered secondary check counts STEER-F above \textsc{uniform} on
+six benchmarks the registered secondary check counts \textsc{signed} above \textsc{uniform} on
 $\num{Dirconsistency}$ of six, which its thresholds call
 \emph{\num{Dirverdict}} (Appendix~\ref{sec:res:bench}).
 
@@ -699,16 +699,16 @@ $\lambda = 0$, tree & tree only & \num{Rlamzeroacc} & \num{Rlamzeromaj} \\
 \textsc{oracle} & no heads & \num{Roracleacc} & \num{Roraclemaj} \\
 \midrule
 \multicolumn{4}{@{}l}{\emph{relaxed ratio clipping} ($\epsilon_{\mathrm{hi}}{=}5$, $\epsilon_{\mathrm{lo}}{=}0.99$)} \\
-STEER-F        & --- & \num{Rxclipsignedacc} & \num{Rxclipsignedmaj} \\
+\textsc{signed}        & --- & \num{Rxclipsignedacc} & \num{Rxclipsignedmaj} \\
 \bottomrule
 \end{tabular}
 \caption{Follow-up ablations, converged window, one seed per row and no error bar.
 The seed is whichever one the arm was run at, and our analysis emits it with the row;
 the \textsc{oracle} arm is seed $\num{Roracleseed}$, run there so that it shares a
-seed with the STEER-F and \textsc{uniform} runs the six-benchmark evaluation pairs.
+seed with the \textsc{signed} and \textsc{uniform} runs the six-benchmark evaluation pairs.
 The $\lambda = 0.25$ line is the reference and is Table~\ref{tab:plateau}'s
 across-seed mean rather than one run. Every row but \textsc{oracle} ran on the
-$\num{Rlamzerogpus}$-GPU box while the seed-1 STEER-F reference ran on the smaller
+$\num{Rlamzerogpus}$-GPU box while the seed-1 \textsc{signed} reference ran on the smaller
 one, so those rows carry the machine effect of Appendix~\ref{sec:res:seeds}
 ($\num{Boxdelta}$, in the direction that flatters them) on top of whatever the
 ablation does. Our analysis emits a same-seed contrast for \textsc{oracle} alone,
@@ -723,8 +723,8 @@ listed in Appendix~\ref{sec:appendix-prereg}.}
 
 Single-seed follow-ups (Table~\ref{tab:followups}) locate the rest of the effect.
 \emph{The sampler:} the tree with the forecast switched off ($\lambda = 0$) reaches
-$\num{Rlamzeroacc}$ against \textsc{steer}'s $\num{Rsteeracc}$ and STEER-F's
-$\num{Rsignedacc}$, and an uplift of $\num{Rlamzerouplift}$ against STEER-F's
+$\num{Rlamzeroacc}$ against \textsc{steer}'s $\num{Rsteeracc}$ and \textsc{signed}'s
+$\num{Rsignedacc}$, and an uplift of $\num{Rlamzerouplift}$ against \textsc{signed}'s
 $\num{Rsigneduplift}$, so most of the majority-vote structure belongs to the sampler;
 we report this and leave it to work on structured sampling, since the tree is here
 only to give $\AH$ siblings. \emph{The forecaster:} on a frozen policy, the same
@@ -734,13 +734,14 @@ $\Htogo$ from realized entropy is $\num{Fsignedoraclesaving}\%$ cheaper per step
 $\num{Fsignedoracleacc}$ behind at one seed, so we keep the heads without claiming they
 are necessary. \emph{The support:} the tree arms carry a non-zero $\AH$ on
 $\num{Rsignedbranchfrac}$ of positions against a ceiling of $\num{Supportbound}$. On
-the four-GPU box a STEER-F step costs $\num{Costoverheadhi}\%$ more than
+the four-GPU box a \textsc{signed} step costs $\num{Costoverheadhi}\%$ more than
 \textsc{steer}'s (Appendix~\ref{sec:res:cost}).
 
-\subsection{Against the published numbers}
+\subsection{Calibration against published numbers}
 \label{sec:res:published}
 
-We also ran STEER-F under the base method's own protocol \citep[App.~E]{steer}: two
+To check that our pipeline lands in the range the base method's paper reports, we also
+ran the \textsc{signed} configuration under that paper's protocol \citep[App.~E]{steer}: two
 independent $200$-step runs (data seeds $1$, $2$), AIME24 validation every $10$ steps,
 and the AIME24-best checkpoint of each run evaluated on six benchmarks and averaged.
 The tree uses two roots cut at $\{64, 192\}$, chosen after the five-arm campaign on
@@ -763,8 +764,8 @@ GRPO & \num{ProtorefGrpoAime} & \num{ProtorefGrpoAimefive} & \num{ProtorefGrpoAm
 STEER & \num{ProtorefSteerAime} & \num{ProtorefSteerAimefive} & \num{ProtorefSteerAmc} & \num{ProtorefSteerMathfive} & \num{ProtorefSteerMinerva} & \num{ProtorefSteerOly} & \num{ProtorefSteerAvg} \\
 \midrule
 \multicolumn{8}{@{}l}{\emph{ours, mean of the two runs}} \\
-STEER-F, selected & \num{ProtobestMeanAime} & \num{ProtobestMeanAimefive} & \num{ProtobestMeanAmc} & \num{ProtobestMeanMathfive} & \num{ProtobestMeanMinerva} & \num{ProtobestMeanOly} & \num{ProtobestMeanAvg} \\
-STEER-F, step $200$ & \num{ProtolastMeanAime} & \num{ProtolastMeanAimefive} & \num{ProtolastMeanAmc} & \num{ProtolastMeanMathfive} & \num{ProtolastMeanMinerva} & \num{ProtolastMeanOly} & \num{ProtolastMeanAvg} \\
+\textsc{signed}, selected & \num{ProtobestMeanAime} & \num{ProtobestMeanAimefive} & \num{ProtobestMeanAmc} & \num{ProtobestMeanMathfive} & \num{ProtobestMeanMinerva} & \num{ProtobestMeanOly} & \num{ProtobestMeanAvg} \\
+\textsc{signed}, step $200$ & \num{ProtolastMeanAime} & \num{ProtolastMeanAimefive} & \num{ProtolastMeanAmc} & \num{ProtolastMeanMathfive} & \num{ProtolastMeanMinerva} & \num{ProtolastMeanOly} & \num{ProtolastMeanAvg} \\
 \midrule
 \multicolumn{8}{@{}l}{\emph{ours, each run's selected checkpoint}} \\
 seed $1$ & \num{ProtobestOneAime} & \num{ProtobestOneAimefive} & \num{ProtobestOneAmc} & \num{ProtobestOneMathfive} & \num{ProtobestOneMinerva} & \num{ProtobestOneOly} & \num{ProtobestOneAvg} \\
@@ -786,7 +787,7 @@ attempt stopped before producing a metric; the sampling settings are the same.}
 \label{tab:reported}
 \end{table}
 
-STEER-F's two-run mean is $\num{ProtobestMeanAvg}$,
+The \textsc{signed} arm's two-run mean is $\num{ProtobestMeanAvg}$,
 against $\num{ProtorefSteerAvg}$ for the base method and $\num{ProtorefGrpoAvg}$ for
 GRPO as reported: lower than the former on $\num{ProtocmpSteerBelow}$ of six benchmarks
 (not on \num{ProtocmpSteerNotbelow}, the selection column) and higher than the latter
@@ -827,7 +828,7 @@ the $\AH$ signal is not supported (Section~\ref{sec:res:contrasts}). The six-ben
 check covers one seed per arm. The base method lands below GRPO in our runs, where its
 paper reports it above; we ran it at its paper's $\lambda_{\min} = 0.7$ rather than its
 launcher's $0.8$, on $110$ rather than $200$ steps, and cannot separate these causes
-(Appendix~\ref{sec:res:ablate}). This reaches STEER-F $-$ \textsc{steer} and
+(Appendix~\ref{sec:res:ablate}). This reaches \textsc{signed} $-$ \textsc{steer} and
 \textsc{steer} $-$ GRPO, not the contrasts against \textsc{uniform} and
 \textsc{permuted}, which hold every setting fixed. The comparison with published
 numbers (Section~\ref{sec:res:published}) is uncontrolled: the quoted rows were not
@@ -870,8 +871,8 @@ and the evaluation set is a public examination.
 The main foreseeable risk is indirect. Methods that preserve diversity during RL
 fine-tuning are not specific to mathematics, and the same mechanism would apply to a
 reward model encoding any objective, including a harmful one; we note that our
-method inherits, and does not mitigate, whatever the reward function encodes. The
-computational cost of the method (a forward pass through a set of small prediction
+correction inherits, and does not mitigate, whatever the reward function encodes. The
+computational cost of the correction (a forward pass through a set of small prediction
 heads at every optimization step) is a real environmental cost, which we quantify in
 Appendix~\ref{sec:res:cost} so that it can be weighed against the benefit.
 
@@ -1596,8 +1597,8 @@ forces the mean to zero.
 
 The consequence for evaluation is direct, and we state it before presenting any
 experiment. ``Mean entropy at branch points increased'' is \emph{not} a prediction of
-this method and cannot serve as evidence that it works; the corresponding prediction
-is that the \emph{variance across siblings} widens. A method designed to raise the
+this correction and cannot serve as evidence that it acts; the corresponding prediction
+is that the \emph{variance across siblings} widens. A correction designed to raise the
 mean is a different and weaker hypothesis --- it does not need a forecast at all,
 only a support --- and we include it below as a control arm.
 
@@ -1627,7 +1628,7 @@ decomposition and every ablation are run on it. We run no second backbone, and t
 Limitations say what that leaves open. All runs train on the same $17$k-problem
 competition-mathematics set, DAPO-Math-17k \citep{yu2025dapo}. With a training batch of $512$ prompts,
 $110$ optimization steps correspond to about $3.2$ epochs. Two further runs of the
-full method at $200$ steps, under the base method's own protocol, are described
+\textsc{signed} configuration at $200$ steps, under the base method's own protocol, are described
 separately in Appendix~\ref{sec:reported}.
 Licenses: Qwen2.5-Math-1.5B, DAPO-Math-17k and verl are released under Apache-2.0;
 MATH (from which MATH500 is drawn), GSM8K and OlympiadBench under MIT; the Minerva
@@ -1659,13 +1660,13 @@ the dual-clip lower bound at $c = 10$; we state this because ``GRPO'' with a
 symmetric $\varepsilon = 0.2$ and a KL term is a different baseline, and because
 the follow-up arm of Appendix~\ref{sec:res:ablate} is defined by moving these two
 numbers. Every arm, the baseline included, uses the same three values: the
-only configuration difference between the GRPO arm and STEER-F is the loss mode and
-the method hyperparameters listed next. Rollouts are sampled at temperature $1.0$ with no nucleus
+only configuration difference between the GRPO arm and \textsc{signed} is the loss mode and
+the correction hyperparameters listed next. Rollouts are sampled at temperature $1.0$ with no nucleus
 truncation; validation uses temperature $1.0$ and $\mathrm{top\text{-}}p = 0.7$.
 Every arm uses the same data seed and the same initial checkpoint, which we verify by
 requiring the step-$0$ validation scores to agree.
 
-\subsection{Method hyperparameters}
+\subsection{Correction hyperparameters}
 
 The forecaster uses $\kappa = 2$ heads with discount $\gamma_H = 0.7$ and the
 per-head calibration of Eq.~\eqref{eq:a3}. The combination uses $\lambda = 0.25$,
@@ -1685,8 +1686,8 @@ $\{64, 192, 384\}$, and branching factor $2$ at each cut, giving $n = 8$ leaves.
 \subsection{Five arms}
 
 The design isolates one question: does the \emph{value} of the forecast matter, or
-only the apparatus that carries it? A comparison between the base method and the
-full method changes two things at once ($\lambda$ and the sampler), so it cannot
+only the apparatus that carries it? A comparison between the base method and
+\textsc{signed} changes two things at once ($\lambda$ and the sampler), so it cannot
 answer this. We therefore add two arms that keep the entire apparatus --- the tree,
 the forecaster, the support, the weight mapping --- and destroy only the information
 in $\AH$.
@@ -1748,12 +1749,12 @@ contrast & $n$ & $\Delta\Htraj$ (nats) & $t$ & seeds $<0$ \\
 \textsc{unif} $-$ \textsc{steer} & \num{Nuniformsteer} & $\num{Cuniformsteerhtraj}$ & $\num{Tuniformsteerhtraj}$ & \num{CNeguniformsteerhtraj} \\
 \midrule
 \multicolumn{5}{@{}l}{\emph{the $\AH$ signal changes, the damping mechanism does not}} \\
-STEER-F $-$ \textsc{unif} & \num{Nsigneduniform} & $\num{Csigneduniformhtraj}$ & $\num{Tsigneduniformhtraj}$ & \num{CNegsigneduniformhtraj} \\
-STEER-F $-$ \textsc{perm} & \num{Nsignedpermuted} & $\num{Csignedpermutedhtraj}$ & $\num{Tsignedpermutedhtraj}$ & \num{CNegsignedpermutedhtraj} \\
+\textsc{signed} $-$ \textsc{unif} & \num{Nsigneduniform} & $\num{Csigneduniformhtraj}$ & $\num{Tsigneduniformhtraj}$ & \num{CNegsigneduniformhtraj} \\
+\textsc{signed} $-$ \textsc{perm} & \num{Nsignedpermuted} & $\num{Csignedpermutedhtraj}$ & $\num{Tsignedpermutedhtraj}$ & \num{CNegsignedpermutedhtraj} \\
 \midrule
 \multicolumn{5}{@{}l}{\emph{both change}} \\
-STEER-F $-$ \textsc{steer} & \num{Nsignedsteer} & $\num{Csignedsteerhtraj}$ & $\num{Tsignedsteerhtraj}$ & \num{CNegsignedsteerhtraj} \\
-STEER-F $-$ GRPO & \num{Nsignedgrpo} & $\num{Csignedgrpohtraj}$ & $\num{Tsignedgrpohtraj}$ & \num{CNegsignedgrpohtraj} \\
+\textsc{signed} $-$ \textsc{steer} & \num{Nsignedsteer} & $\num{Csignedsteerhtraj}$ & $\num{Tsignedsteerhtraj}$ & \num{CNegsignedsteerhtraj} \\
+\textsc{signed} $-$ GRPO & \num{Nsignedgrpo} & $\num{Csignedgrpohtraj}$ & $\num{Tsignedgrpohtraj}$ & \num{CNegsignedgrpohtraj} \\
 \bottomrule
 \end{tabular}
 \caption{The contrasts of Table~\ref{tab:entropy} on the length-corrected
@@ -1776,7 +1777,7 @@ that does.
 Every statistic is over the same $\num{Nseedsused}$ seeds, $\num{Seedset}$ --- the
 seeds on which all five arms finished --- so a difference of two rows of
 Table~\ref{tab:plateau} is the corresponding paired entry of
-Table~\ref{tab:contrast}. Seed $2$ is excluded because its STEER-F run did not
+Table~\ref{tab:contrast}. Seed $2$ is excluded because its \textsc{signed} run did not
 complete; its other four arms did, and every run, excluded or not, is in the
 \texttt{per\_seed.tsv} of the supplementary material. Appendix~\ref{sec:res:seeds} reports what the
 repeats measure --- the run-to-run spread, and the machine each seed ran on.
@@ -1823,11 +1824,11 @@ Table~\ref{tab:plateau} averages each arm over steps $40$--$110$.
 
 Two orderings are worth stating before anything is subtracted. On accuracy all
 three arms that do not carry $\AH$'s value --- \textsc{steer}, \textsc{uniform},
-\textsc{permuted} --- sit \emph{below} plain GRPO, and STEER-F is the only one
+\textsc{permuted} --- sit \emph{below} plain GRPO, and \textsc{signed} is the only one
 above it. It is above by less than GRPO's own standard error across seeds, which is
 why the ordering and not the size is what we take from this table. On entropy GRPO
 holds the most by a clear margin and the four intervened arms sit close to one
-another, STEER-F among them, so the two columns are neither aligned nor
+another, \textsc{signed} among them, so the two columns are neither aligned nor
 reversed. Neither ordering is the instrument for either question at this seed count,
 and the next section says why: read as contrasts rather than as a ranking, the
 entropy column tracks the damping apparatus and the accuracy column tracks $\AH$.
@@ -1836,7 +1837,7 @@ entropy column tracks the damping apparatus and the accuracy column tracks $\AH$
 \label{sec:res:entropy-app}
 
 
-\paragraph{What the method predicts here, fixed in advance.} This method does not
+\paragraph{What the analysis predicts here, fixed in advance.} The correction does not
 set out to hold the aggregate entropy up, and two facts already established above
 say it cannot. Appendix~\ref{sec:tree} bounds the positions at which $\AH$ can be
 non-zero at $2(n-1)/T$, about one in eighty; Section~\ref{sec:zerosum} shows $\AH$
@@ -1941,10 +1942,10 @@ separate from run-to-run spread (Appendix~\ref{sec:res:seeds}).
 \toprule
 contrast & $n$ & $\Delta$acc & $t$ & $\Delta$maj & $t$ \\
 \midrule
-STEER-F $-$ GRPO           & \num{Nsignedgrpo}     & $\num{Csignedgrpoacc}$     & $\num{Tsignedgrpoacc}$     & $\num{Csignedgrpomaj}$     & $\num{Tsignedgrpomaj}$ \\
-STEER-F $-$ \textsc{steer} & \num{Nsignedsteer}    & $\num{Csignedsteeracc}$    & $\num{Tsignedsteeracc}$    & $\num{Csignedsteermaj}$    & $\num{Tsignedsteermaj}$ \\
-STEER-F $-$ \textsc{unif}  & \num{Nsigneduniform}  & $\num{Csigneduniformacc}$  & $\num{Tsigneduniformacc}$  & $\num{Csigneduniformmaj}$  & $\num{Tsigneduniformmaj}$ \\
-STEER-F $-$ \textsc{perm}  & \num{Nsignedpermuted} & $\num{Csignedpermutedacc}$ & $\num{Tsignedpermutedacc}$ & $\num{Csignedpermutedmaj}$ & $\num{Tsignedpermutedmaj}$ \\
+\textsc{signed} $-$ GRPO           & \num{Nsignedgrpo}     & $\num{Csignedgrpoacc}$     & $\num{Tsignedgrpoacc}$     & $\num{Csignedgrpomaj}$     & $\num{Tsignedgrpomaj}$ \\
+\textsc{signed} $-$ \textsc{steer} & \num{Nsignedsteer}    & $\num{Csignedsteeracc}$    & $\num{Tsignedsteeracc}$    & $\num{Csignedsteermaj}$    & $\num{Tsignedsteermaj}$ \\
+\textsc{signed} $-$ \textsc{unif}  & \num{Nsigneduniform}  & $\num{Csigneduniformacc}$  & $\num{Tsigneduniformacc}$  & $\num{Csigneduniformmaj}$  & $\num{Tsigneduniformmaj}$ \\
+\textsc{signed} $-$ \textsc{perm}  & \num{Nsignedpermuted} & $\num{Csignedpermutedacc}$ & $\num{Tsignedpermutedacc}$ & $\num{Csignedpermutedmaj}$ & $\num{Tsignedpermutedmaj}$ \\
 \midrule
 \textsc{steer} $-$ GRPO    & \num{Nsteergrpo}      & $\num{Csteergrpoacc}$      & $\num{Tsteergrpoacc}$      & $\num{Csteergrpomaj}$      & $\num{Tsteergrpomaj}$ \\
 \textsc{unif} $-$ \textsc{steer} & \num{Nuniformsteer} & $\num{Cuniformsteeracc}$ & $\num{Tuniformsteeracc}$ & $\num{Cuniformsteermaj}$ & $\num{Tuniformsteermaj}$ \\
@@ -1964,7 +1965,7 @@ sampler, forecaster, support, weight map --- and differs from \textsc{steer} by
 $\num{Cuniformsteeracc}$ ($t = \num{Tuniformsteeracc}$ over
 $\num{Nseedsused}$ seeds): turning the machinery on and feeding it a constant
 buys nothing. \textsc{permuted} keeps the machinery \emph{and} the magnitudes of
-$\AH$ and destroys only the pairing between a branch and its score, and STEER-F
+$\AH$ and destroys only the pairing between a branch and its score, and \textsc{signed}
 still exceeds it by $\num{Csignedpermutedacc}$.
 
 Every contrast here now rests on $\num{Nsignedgrpo}$ paired seeds, and they do not
@@ -1982,7 +1983,7 @@ the next paragraph is about the one place they part.
 (Appendix~\ref{sec:appendix-prereg}) named four things that would count against this
 paper, before any of these runs existed. One of them has happened, and it is the one
 that clause calls the claim of the paper: \emph{if
-$\text{STEER-F} - \textsc{uniform}$ straddles zero across seeds, the forecast's value
+$\textsc{signed} - \textsc{uniform}$ straddles zero across seeds, the forecast's value
 does not matter and the apparatus explains the effect.} On accuracy it straddles.
 Across the $\num{Nsigneduniform}$ paired seeds the difference runs from
 $\num{CLosigneduniformacc}$ to $\num{CHisigneduniformacc}$, with
@@ -1993,11 +1994,11 @@ the majority-vote column, where the same contrast happens not to straddle
 primary endpoint is converged-window accuracy.
 
 The other three conditions did not trigger, and the contrast between the first and
-the second is the informative part. $\text{STEER-F} - \textsc{permuted}$, which
+the second is the informative part. $\textsc{signed} - \textsc{permuted}$, which
 holds the magnitudes of $\AH$ and destroys only the pairing, does \emph{not} straddle:
 $\num{CLosignedpermutedacc}$ to $\num{CHisignedpermutedacc}$,
 $\num{CNegsignedpermutedacc}$ negative. Aggregate entropy does not order the arms the
-way accuracy does --- STEER-F is third from the top on one column and first on the
+way accuracy does --- \textsc{signed} is third from the top on one column and first on the
 other in Table~\ref{tab:plateau} --- so the dissociation argument of
 Section~\ref{sec:res:entropy} stands. And the mean token weight stays at
 $\num{Rsignedtwmean}$, so $\AH$ is sum-zero over sibling sets as derived.
@@ -2016,7 +2017,7 @@ accuracy claim as refuted at this seed count.
 \paragraph{The same contrast on questions the checkpoints were not chosen on.} The
 registered secondary check of this reading is the six-benchmark evaluation of
 Appendix~\ref{sec:res:bench}. On the evaluated seed (\num{Dirnseeds}) it counts
-STEER-F above \textsc{uniform} on \num{Dirconsistency} of six benchmarks, which the
+\textsc{signed} above \textsc{uniform} on \num{Dirconsistency} of six benchmarks, which the
 pre-registered thresholds call \emph{\num{Dirverdict}}, and on
 \num{Dirconsistencyheld} of the \num{Dirheldtotal} that played no part in selection;
 paired over $\num{Pairn}$ problems, the difference is
@@ -2025,7 +2026,7 @@ $\num{Pairsigneduniform} \pm \num{Pairsigneduniformse}$
 defined on converged-window accuracy across the training seeds. It is the registered
 check on other questions, reported because it was registered and not as a rescue.
 
-This is the contrast the design was built for. A comparison of STEER-F against
+This is the contrast the design was built for. A comparison of \textsc{signed} against
 \textsc{steer} alone changes two things at once, and cannot separate the forecast
 from the sampler that delivers it; the two destroyed-forecast arms do separate them.
 
@@ -2057,7 +2058,7 @@ gain, which reads as though the structure belonged to $\AH$. It does not: the
 $\lambda = 0$ tree arm --- the sampler with the future channel off, \textsc{steer}'s
 local damping still in place --- reaches an uplift
 of $\num{Rlamzerouplift}$, against $\num{Rsteeruplift}$ for \textsc{steer} and
-$\num{Rsigneduplift}$ for STEER-F. On this evidence most of the structural gain is
+$\num{Rsigneduplift}$ for \textsc{signed}. On this evidence most of the structural gain is
 the sampler's, and Appendix~\ref{sec:res:ablate} reports it that way. The
 decomposition above is unaffected --- it is measured against GRPO, which has no tree
 --- but the attribution is not what the five-arm design alone could see. A gain that
@@ -2073,7 +2074,7 @@ $\AH$ at $2(n-1)/T$ for any sampler. With $n = 8$ and the tree arms' mean respon
 length of $\num{Treelen}$ tokens over the converged window the bound is
 $\num{Supportbound}$. Measured over the same window and seeds, the three tree arms
 sit at $\num{Runiformbranchfrac}$ (\textsc{uniform}), $\num{Rpermutedbranchfrac}$
-(\textsc{permuted}) and $\num{Rsignedbranchfrac}$ (STEER-F), i.e.\ at
+(\textsc{permuted}) and $\num{Rsignedbranchfrac}$ (\textsc{signed}), i.e.\ at
 $\num{Supportpctlo}$--$\num{Supportpcthi}\%$ of a ceiling that no sampler can
 exceed. A plain-rollout pilot with the same $\lambda$ (seed $1$, included with the
 supplementary logs) reaches $.003$. As Appendix~\ref{sec:combine} notes, this
@@ -2154,7 +2155,7 @@ Table~\ref{tab:followups} is the direct test, and it has now been run.
 \textsc{oracle} reads $\Htogo$ from the policy's realised entropy, which verl
 \citep{sheng2025hybridflow} computes in the same pass, so it carries none of the MTP overhead of
 Appendix~\ref{sec:res:cost} --- $\num{Roraclecost}$\,s per optimization step
-against STEER-F's $\num{Fsignedoracleref}$ at the same seed on the four-GPU box,
+against \textsc{signed}'s $\num{Fsignedoracleref}$ at the same seed on the four-GPU box,
 $\num{Fsignedoraclesaving}\%$ less. It is also
 behind it on accuracy. Appendix~\ref{sec:res:ablate} reports both numbers and what
 one seed of each can carry.
@@ -2178,9 +2179,9 @@ Appendix~\ref{sec:appendix-within} so the two are not confused.
 
 \paragraph{Mechanical failures, and what replaced them.} The pre-registration
 (Appendix~\ref{sec:appendix-prereg}) excludes a run for mechanical failure and
-relaunches it with the same seed. STEER-F at seed $4$ stopped at training step $91$
+relaunches it with the same seed. \textsc{signed} at seed $4$ stopped at training step $91$
 when its machine lost a GPU; it was relaunched at seed $4$ and the relaunch, which
-reached step $110$, is the run reported. STEER-F at seed $2$ failed at start-up on a
+reached step $110$, is the run reported. \textsc{signed} at seed $2$ failed at start-up on a
 missing module and was not relaunched within this campaign's budget, which is why
 seed $2$ is outside the seed set. Both failed runs are in the supplementary logs,
 flagged rather than deleted.
@@ -2210,14 +2211,14 @@ mix on every run.
 \paragraph{Run-to-run spread, and it is the number that governs this section.}
 Every arm has now finished more than once. GRPO's converged-window accuracy moves
 from \num{Logrpoacc} to \num{Higrpoacc} across its \num{Nallgrpo} seeds, a spread
-of \num{Sgrpoacc}; STEER-F moves from \num{Losignedacc} to \num{Hisignedacc} across
+of \num{Sgrpoacc}; \textsc{signed} moves from \num{Losignedacc} to \num{Hisignedacc} across
 its \num{Nallsigned} seeds, a spread of \num{Ssignedacc}; \textsc{permuted}
 moves only \num{Spermutedacc} across \num{Nallpermuted}. Both extremes are
 measured on the same benchmark with the same protocol, and they differ by more than
 an order of magnitude.
 
 Set the headline gap of \num{Csignedgrpoacc} against those. \textbf{It is a fraction
-of GRPO's own spread across seeds and several times STEER-F's}, so the two arms it
+of GRPO's own spread across seeds and several times \textsc{signed}'s}, so the two arms it
 compares do not even agree on how large a seed-to-seed difference is, and each is
 observed a handful of times. That is the regime in which a single paired difference
 cannot decide the question, and we do not claim it does. A range between three draws
@@ -2293,9 +2294,9 @@ The quantity fixed in advance as the headline here is not any single cell but
 \emph{direction consistency}: in how many of the six benchmarks the ordering observed
 on AIME24 is preserved. Four or better of six we declared support, three equivocal,
 two or fewer evidence against. The observed count is \num{Dirconsistency} of six for
-$\text{STEER-F} > \textsc{uniform}$, which those thresholds call
+$\textsc{signed} > \textsc{uniform}$, which those thresholds call
 \emph{\num{Dirverdict}}, over the seeds the two arms share (\num{Dirnseeds}). The
-$\text{STEER-F} > \textsc{permuted}$ count is not reported: a count needs the two
+$\textsc{signed} > \textsc{permuted}$ count is not reported: a count needs the two
 arms evaluated at a common seed, and the evaluations that passed the coherence check
 do not include one. Counting the benchmarks on the \num{Dirheldtotal} that played
 no part in selection gives \num{Dirconsistencyheld}: the registered six-count is the decision rule, and the
@@ -2320,7 +2321,7 @@ of the \emph{paired} difference. This evaluation records one row per generated
 sample, so on the three $\mathrm{avg@}1$ benchmarks with enough problems to support
 it --- MATH500, OlympiadBench and Minerva, $\num{Pairn}$ problems together, over the
 seeds the arms share ($\num{Pairnseeds}$) --- the paired quantity is computed rather
-than asserted. $\text{STEER-F} - \textsc{uniform}$ is $\num{Pairsigneduniform} \pm
+than asserted. $\textsc{signed} - \textsc{uniform}$ is $\num{Pairsigneduniform} \pm
 \num{Pairsigneduniformse}$ ($t = \num{Pairsigneduniformt}$) against an unpaired error
 of $\num{Pairsigneduniformunpse}$; the \textsc{permuted} contrast has no common
 seed and so no paired figure. How much pairing buys is decided by how often the two
@@ -2332,7 +2333,7 @@ difficulty spread; and pooling problems across seeds treats a (seed, problem) pa
 one observation, which ignores the clustering by seed that
 Appendix~\ref{sec:res:seeds} shows is real. GSM8K is computed the same way and left
 out of the pool: at $\mathrm{avg@}1$ it sits near saturation, where a paired
-difference measures the ceiling rather than the method.
+difference measures the ceiling rather than the correction.
 
 \subsection{How much of the design is load-bearing}
 \label{sec:res:ablate}
@@ -2347,7 +2348,7 @@ Table~\ref{tab:plateau}'s across-seed mean.
 \paragraph{The coefficient.} $\lambda$ scales the visitation term before the two
 channels are combined in Eq.~\eqref{eq:combine}. The value used throughout was not
 tuned on these runs, and the sweep exists to say whether the result rests on a knife
-edge. A flat response across $0.1$--$0.5$ would say the method is insensitive to it;
+edge. A flat response across $0.1$--$0.5$ would say the correction is insensitive to it;
 a peak at $0.25$ with both neighbours below would say it is a tuned quantity and must
 be reported as one.
 
@@ -2367,13 +2368,13 @@ is left open rather than attributed.
 
 What this discrepancy can reach is bounded, and by the design rather than by
 luck. All four damped arms share $\lambda_{\min} = 0.7$ exactly, so the setting
-cancels in any contrast between two of them. STEER-F $-$ \textsc{uniform} and STEER-F $-$
+cancels in any contrast between two of them. \textsc{signed} $-$ \textsc{uniform} and \textsc{signed} $-$
 \textsc{permuted} --- the pair that carries this paper's central claim, that the
 forecast's \emph{value} is what matters --- hold $\lambda_{\min}$, $\lambda$,
 the sampler and the weight map all fixed and vary only what $\AH$ contains. Those
 two do not depend on whatever puts the base method below GRPO here. What it does
 reach is how two other contrasts read. \textsc{steer} $-$ GRPO is the discrepancy
-itself. STEER-F $-$ \textsc{steer} is measured against a base method that is not
+itself. \textsc{signed} $-$ \textsc{steer} is measured against a base method that is not
 showing its reported gain over GRPO, so it is not a measurement of improvement on
 top of that gain. We report both with this stated rather than resolved.
 
@@ -2384,12 +2385,12 @@ and so cannot separate the sampler from the correction. The $\lambda = 0$ tree a
 switches the forecast off while leaving the sampler in place, and is the direct
 answer to ``is tree rollout simply a better sampler''. Read against \textsc{steer},
 which has neither, its difference is the sampler's own contribution; read against
-STEER-F, what remains is the forecast's.
+\textsc{signed}, what remains is the forecast's.
 
 The answer is not the one the rest of this paper was written expecting. The sampler
 alone reaches $\num{Rlamzeroacc}$ against \textsc{steer}'s $\num{Rsteeracc}$, and
-$\num{Rlamzeromaj}$ against $\num{Rsteermaj}$ --- a little over half of STEER-F's
-accuracy margin over \textsc{steer} and all of its majority-vote margin. Its uplift, $\num{Rlamzerouplift}$, is not below STEER-F's
+$\num{Rlamzeromaj}$ against $\num{Rsteermaj}$ --- a little over half of \textsc{signed}'s
+accuracy margin over \textsc{steer} and all of its majority-vote margin. Its uplift, $\num{Rlamzerouplift}$, is not below \textsc{signed}'s
 $\num{Rsigneduplift}$. What remains for the forecast is the accuracy gap between
 $\num{Rlamzeroacc}$ and $\num{Rsignedacc}$.
 
@@ -2423,36 +2424,36 @@ the head substitution and the affine calibration --- are the only things it remo
 and removing them is the whole of its cost difference.
 
 It is cheaper, and by the amount the forward pass costs: $\num{Roraclecost}$\,s per
-optimization step against STEER-F's $\num{Fsignedoracleref}$ at the same seed, a
+optimization step against \textsc{signed}'s $\num{Fsignedoracleref}$ at the same seed, a
 saving of $\num{Fsignedoraclesaving}\%$. Both are the window's training steps on the
 four-GPU box, where every arm is substantially faster than on the two-GPU seeds, so
 neither is comparable to a step time quoted for a different box.
 
 It is also behind on accuracy. Over the
-$\num{Fnsignedoracle}$ validation points of the converged window, STEER-F at seed
+$\num{Fnsignedoracle}$ validation points of the converged window, \textsc{signed} at seed
 $\num{Roracleseed}$ leads it by $\num{Fsignedoracleacc}$ on the endpoint this
 campaign reports and by $\num{Fsignedoraclemaj}$ under majority vote. We therefore
 keep A2 and A3 rather than replacing the forecaster with the realised value, and we
 state the weight of that decision exactly: one run on each side, one seed. The gap is
-larger than STEER-F's own range across seeds, $\num{Ssignedacc}$, and smaller than
+larger than \textsc{signed}'s own range across seeds, $\num{Ssignedacc}$, and smaller than
 GRPO's, $\num{Sgrpoacc}$. It orders the two arms on this seed; it does not measure
 the difference between them, and the measurement that would is this arm at more
 seeds.
 
 \paragraph{Clipping.} The relaxed-clipping setting is where entropy interventions
 are supposed to matter most, because ratio clipping otherwise removes much of the
-update a token weight would have scaled. The row is one STEER-F run with no
+update a token weight would have scaled. The row is one \textsc{signed} run with no
 finished control under the same clipping, and it ran on a different machine from the
-seed-$\num{Rxclipsignedseed}$ STEER-F reference, so it carries no contrast in either
-direction. It shows that the method trains to the end of the schedule with the clip
-relaxed; it does not say whether relaxing the clip changes what the method does.
+seed-$\num{Rxclipsignedseed}$ \textsc{signed} reference, so it carries no contrast in either
+direction. It shows that the \textsc{signed} configuration trains to the end of the schedule with
+the clip relaxed; it does not say whether relaxing the clip changes what the correction does.
 
 \subsection{Compute-matched comparison}
 \label{sec:res:compute}
 
 An equal-step comparison is compute-fair only if the two arms cost the same per
 step, and here that depends on the machine. On the $\num{Costgpushi}$-GPU box
-(seeds $\num{Cmhiseeds}$) STEER-F's step costs $\num{Cmhiratio}$ times GRPO's,
+(seeds $\num{Cmhiseeds}$) \textsc{signed}'s step costs $\num{Cmhiratio}$ times GRPO's,
 so equal steps is equal compute to within the seed spread of either arm
 (Appendix~\ref{sec:res:cost}). On the $\num{Costgpuslo}$-GPU box (seed
 $\num{Cmloseeds}$) it costs $\num{Cmloratio}$ times as much, and a GRPO run given
@@ -2461,16 +2462,16 @@ past step $110$, so that point is not measured, and we do not extrapolate a
 trajectory to it.
 
 What the split does measure is where the headline gap comes from, and it is not
-evenly spread. $\text{STEER-F} - \text{GRPO}$ is $\num{Cmlosignedgrpoacc}$ on the
-seed where STEER-F also had the larger compute budget, and $\num{Cmhisignedgrpoacc}$
+evenly spread. $\textsc{signed} - \text{GRPO}$ is $\num{Cmlosignedgrpoacc}$ on the
+seed where \textsc{signed} also had the larger compute budget, and $\num{Cmhisignedgrpoacc}$
 averaged over the $\num{Cmhin}$ seeds where the comparison is compute-fair. The
 across-seed mean of $\num{Csignedgrpoacc}$ in Table~\ref{tab:contrast} is
 therefore carried mostly by a seed on which the treatment was also granted about
 half as much again in wall clock, and on the compute-fair seeds the gap is not
 distinguishable from zero. We report this as the reading the evidence supports:
-this paper does not show that STEER-F buys accuracy over GRPO at equal compute.
+this paper does not show that \textsc{signed} buys accuracy over GRPO at equal compute.
 None of this touches the contrasts that carry the structural claim ---
-$\text{STEER-F} - \textsc{uniform}$ and $\text{STEER-F} - \textsc{permuted}$ ---
+$\textsc{signed} - \textsc{uniform}$ and $\textsc{signed} - \textsc{permuted}$ ---
 whose arms share the tree sampler and cost $\num{Costsignedhi}$,
 $\num{Costuniformhi}$ and $\num{Costpermutedhi}$\,s per step on the larger box.
 
@@ -2483,9 +2484,9 @@ are, so a mean over both measures the campaign's scheduling.
 
 On the $\num{Costgpushi}$-GPU box, where every arm has finished
 $\num{Costnsignedhi}$ seeds, one optimization step takes $\num{Coststeerhi}$\,s for
-\textsc{steer}, $\num{Costsignedhi}$ for STEER-F, $\num{Costuniformhi}$ for
+\textsc{steer}, $\num{Costsignedhi}$ for \textsc{signed}, $\num{Costuniformhi}$ for
 \textsc{uniform}, $\num{Costpermutedhi}$ for \textsc{permuted} and
-$\num{Costgrpohi}$ for GRPO. STEER-F's overhead over \textsc{steer} there is
+$\num{Costgrpohi}$ for GRPO. \textsc{signed}'s overhead over \textsc{steer} there is
 $\num{Costoverheadhi}\%$. The three tree arms take $\num{Costsignedhi}$, $\num{Costuniformhi}$ and
 $\num{Costpermutedhi}$\,s while \textsc{steer}, which has neither the tree nor the
 heads, sits below all three: the cost is the rollout and the forward
@@ -2494,16 +2495,16 @@ pass, not the $\AH$ computation, which is a subtraction over a mask.
 On the $\num{Costgpuslo}$-GPU box the same overhead reads
 $\num{Costoverheadlo}\%$. That is not a disagreement to average away. The tree
 rollout and the MTP forward are a larger share of a step when fewer GPUs serve it, so
-the overhead is a property of the deployment as much as of the method, and a single
+the overhead is a property of the deployment as much as of the correction, and a single
 figure quoted without its box --- as earlier drafts of this section quoted the smaller
 one --- reports the machine.
 
 Neither figure is resolved to better than the spread underneath it. On the larger box
 \textsc{steer}'s $\num{Costnsteerhi}$ seeds differ by $\num{Costrsteerhi}$\,s and
-STEER-F's by $\num{Costrsignedhi}$, against a gap between their means of the same
+\textsc{signed}'s by $\num{Costrsignedhi}$, against a gap between their means of the same
 order. On the smaller box every arm has $\num{Costnsteerlo}$ seed inside
 $\num{Seedset}$, so there is no spread to put beside it at all. We therefore
-report these as the cost of the runs we made and not as a coefficient of the method.
+report these as the cost of the runs we made and not as a coefficient of the correction.
 What does isolate the heads from the tree is the \textsc{oracle} arm of
 Appendix~\ref{sec:res:ablate}, which removes the heads at fixed tree and fixed seed.
 
@@ -2515,7 +2516,7 @@ cosmetic. Selecting the maximum over the twelve validation points inflates every
 averaged over the $\num{Nseedsused}$ seeds: by $\num{Rgrposellift}$ for GRPO,
 $\num{Rsteersellift}$ for \textsc{steer}, $\num{Runiformsellift}$ for
 \textsc{uniform}, $\num{Rpermutedsellift}$ for \textsc{permuted} and
-$\num{Rsignedsellift}$ for STEER-F, relative to the window mean.
+$\num{Rsignedsellift}$ for \textsc{signed}, relative to the window mean.
 Since a single AIME24 measurement carries a standard error of $\num{SEaime}$ across
 problems, a maximum over a dozen noisy points is a biased statistic whose bias grows
 with the number of checkpoints compared, and it is not the same for every arm: the
@@ -2526,13 +2527,13 @@ Appendix~\ref{sec:reported}, which uses the maximum on purpose, because that is 
 rule of the table it is compared against.
 
 
-\section{Against the Reported Numbers}
+\section{Calibration Against the Reported Numbers}
 \label{sec:reported}
 
 Every number before this section is our own measurement under the schedule of
 Section~\ref{sec:setup}, which differs from the base method's in length, checkpoint
 rule and number of runs (Appendix~\ref{sec:res:ablate}). This section is the one place
-a figure is taken from prior work. It runs the full method under the base method's own
+a figure is taken from prior work. It runs the \textsc{signed} configuration under the base method's own
 protocol and sets the result beside that method's published $1.5$B table
 \citep[Table~12]{steer}, which also reports GRPO and the untrained model. It is a
 second kind of evidence, not a sixth arm, and we say below what it cannot show.
@@ -2561,7 +2562,7 @@ value; the other columns pass the coherence check of Appendix~\ref{sec:res:bench
 (\texttt{scripts/emit\_r2\_numbers.py}). The two-run AIME24 mean is averaged over
 correct-sample counts rather than over two rounded fractions.
 
-\paragraph{Reading the table.} Averaged over the two runs, STEER-F's six-benchmark
+\paragraph{Reading the table.} Averaged over the two runs, the \textsc{signed} arm's six-benchmark
 mean is \num{ProtobestMeanAvg}, against \num{ProtorefSteerAvg} for the base method and
 \num{ProtorefGrpoAvg} for GRPO as reported; on AIME24 the same three figures are
 \num{ProtobestMeanAime}, \num{ProtorefSteerAime} and \num{ProtorefGrpoAime}. One
@@ -2572,8 +2573,8 @@ state. Against the base method's reported row the two-run mean is lower on
 \num{ProtocmpSteerBelow} of the six columns and not lower on
 \num{ProtocmpSteerNotbelow}, the column the selection itself used; against the
 reported GRPO row it is higher on \num{ProtocmpGrpoAbove}. We therefore read the
-table as placing the method between the two reported rows and below the base method
-as reported, not level with it; how much of that gap belongs to the method and how
+table as placing the \textsc{signed} arm between the two reported rows and below the base method
+as reported, not level with it; how much of that gap belongs to the correction and how
 much to the environment, an uncontrolled comparison cannot say. The step-$200$ row is
 printed because the selected checkpoint is chosen on AIME24 and so flatters its own
 row; the last checkpoint is chosen by nobody.
@@ -2582,7 +2583,7 @@ row; the last checkpoint is chosen by nobody.
 with the authors' code on different hardware (a cluster of H20 GPUs, against our four
 H100s), and the base method under this protocol in our environment is a run this
 paper does not have. The controlled comparison with the base method is the five-arm
-campaign, where $\text{STEER-F} - \textsc{steer}$ is \num{Csignedsteeracc} over
+campaign, where $\textsc{signed} - \textsc{steer}$ is \num{Csignedsteeracc} over
 \num{Nsignedsteer} paired seeds at $110$ steps (Table~\ref{tab:contrast}), with the
 caveats of Appendix~\ref{sec:res:ablate}. Nor does the table speak to the visitation
 channel: like every comparison between the full and the base method
@@ -2660,15 +2661,16 @@ The analysis plan below was committed, with a timestamp, to the project reposito
 (to be made public with the code) before any run of
 the multi-seed campaign was launched, so that the statistics could not be chosen to
 fit the outcome. It is reproduced here in full; the file is
-\texttt{docs/preregistration\_5seed.md} in that repository.
+\texttt{docs/preregistration\_5seed.md} in that repository. Arm names follow the main
+text; the registration's wording is otherwise unchanged.
 
 \paragraph{Unit and primary endpoint.} The unit of analysis is the seed, not the
 validation step. Each run is reduced to one number --- its mean $\mathrm{acc@}32$ on
 AIME24 over steps $40$--$110$ --- and arms are paired within a seed.
 
-\paragraph{Contrasts, in the order they are reported.} Primary: $\text{STEER-F} -
-\text{GRPO}$. Secondary, in this order: $\text{STEER-F} - \textsc{steer}$,
-$\text{STEER-F} - \textsc{uniform}$, $\text{STEER-F} - \textsc{permuted}$. Secondary
+\paragraph{Contrasts, in the order they are reported.} Primary: $\textsc{signed} -
+\text{GRPO}$. Secondary, in this order: $\textsc{signed} - \textsc{steer}$,
+$\textsc{signed} - \textsc{uniform}$, $\textsc{signed} - \textsc{permuted}$. Secondary
 endpoints: $\mathrm{maj@}32$, uplift, and the six-benchmark mean. Effect sizes are
 reported with intervals rather than significance stars, and all five arms are
 reported whatever the outcome.
@@ -2687,14 +2689,14 @@ biased upward --- in the single-seed data by $+.011$ to $+.017$ per arm --- whic
 why the primary endpoint is a window mean rather than a maximum.
 
 \paragraph{What would falsify the central claim.} Stated in advance so it cannot be
-renegotiated afterwards. If $\text{STEER-F} - \textsc{uniform}$ straddles zero across
+renegotiated afterwards. If $\textsc{signed} - \textsc{uniform}$ straddles zero across
 seeds, the forecast's \emph{value} does not matter and the apparatus explains the
-effect; that is the claim of this paper and it would be refuted. If $\text{STEER-F} -
+effect; that is the claim of this paper and it would be refuted. If $\textsc{signed} -
 \textsc{permuted}$ straddles zero, the pairing between a branch and its score does
 not matter, which the derivation says it must. If aggregate entropy orders the arms
 the same way accuracy does, the dissociation argument of
 Section~\ref{sec:res:entropy} fails, since it depends on the two orderings coming
-apart. And if the mean token weight in the STEER-F arm departs from $\approx 0.999$,
+apart. And if the mean token weight in the \textsc{signed} arm departs from $\approx 0.999$,
 then $\AH$ is not sum-zero over sibling sets as derived and the implementation is
 wrong rather than the theory.
 
@@ -2706,7 +2708,7 @@ recorded here rather than silently absorbed.
 
 \paragraph{Deviations as executed.} Recorded here because the plan above was
 not carried out in full. (i) Seeds: every arm completed seeds $1$--$4$ except
-STEER-F at seed $2$, which failed at start-up and was not relaunched; the seed-$5$
+\textsc{signed} at seed $2$, which failed at start-up and was not relaunched; the seed-$5$
 runs were started and not completed. The analysis therefore uses the seeds on which
 all five arms finished, $\num{Seedset}$, and the other runs are in the supplementary
 logs but enter
@@ -2718,7 +2720,7 @@ comparison was not completed; Appendix~\ref{sec:res:compute} reports what the st
 costs support instead. (v) The planned second backbones were not run. (vi) The
 support-restricted split registered below is instrumented but carried by no run
 reported here. (vii) Follow-up arms: the four advantage-estimator runs (RLOO and
-OPO, each with STEER-F and \textsc{steer}) failed at start-up on infrastructure
+OPO, each with \textsc{signed} and \textsc{steer}) failed at start-up on infrastructure
 errors and completed no training step; the base method at the released
 $\lambda_{\min} = 0.8$ was not launched; the relaxed-clipping \textsc{steer} control
 stopped at step $\num{Rxclipsteerlaststep}$. None of them enters
@@ -2745,11 +2747,11 @@ the support (Appendix~\ref{sec:res:diag}).
 \emph{Registered now, before the runs that can answer it.} The quantity is
 \texttt{steerf/support\_entropy} and its gap, the entropy split on $\AH \ne 0$ ---
 the same predicate the correction itself applies, so the split covers the positions
-the method touches and no others. The primary contrast is
-$\text{STEER-F} - \textsc{permuted}$, paired by seed, because that pair shares
+the correction touches and no others. The primary contrast is
+$\textsc{signed} - \textsc{permuted}$, paired by seed, because that pair shares
 $\lambda$, $\lambda_{\min}$, the sampler and the magnitudes of $\AH$, and differs
 only in whether a branch is paired with its own score;
-$\text{STEER-F} - \textsc{uniform}$ is secondary. The claim under test is that a
+$\textsc{signed} - \textsc{uniform}$ is secondary. The claim under test is that a
 support-restricted entropy contrast near zero can accompany an accuracy contrast away
 from zero.
 
@@ -2796,10 +2798,10 @@ text.
 \toprule
 contrast & $\Delta$acc@32 & paired $t_{7}$ \\
 \midrule
-STEER-F $-$ GRPO       & \num{Wsignedgrpoacc}     & \num{WTsignedgrpoacc}     \\
-STEER-F $-$ \textsc{steer}    & \num{Wsignedsteeracc}    & \num{WTsignedsteeracc}    \\
-STEER-F $-$ \textsc{uniform}  & \num{Wsigneduniformacc}  & \num{WTsigneduniformacc}  \\
-STEER-F $-$ \textsc{permuted} & \num{Wsignedpermutedacc} & \num{WTsignedpermutedacc} \\
+\textsc{signed} $-$ GRPO       & \num{Wsignedgrpoacc}     & \num{WTsignedgrpoacc}     \\
+\textsc{signed} $-$ \textsc{steer}    & \num{Wsignedsteeracc}    & \num{WTsignedsteeracc}    \\
+\textsc{signed} $-$ \textsc{uniform}  & \num{Wsigneduniformacc}  & \num{WTsigneduniformacc}  \\
+\textsc{signed} $-$ \textsc{permuted} & \num{Wsignedpermutedacc} & \num{WTsignedpermutedacc} \\
 \bottomrule
 \end{tabular}
 \caption{Within-run stability over the eight converged-window validation points of
