@@ -64,7 +64,7 @@ mechanism moves aggregate entropy, changing only the visitation signal barely do
 We make no accuracy claim; the paper is an account of where entropy collapse happens
 and of what aggregate entropy curves cannot show.
 \keywords{Large language models \and Reinforcement learning \and Entropy collapse
-\and Reasoning \and Analysis}
+\and Training diagnostics \and Reasoning}
 \end{abstract}
 
 % =====================================================================
@@ -146,14 +146,15 @@ followed had already lost $\num{DecSecSignedADH}$ of the $\num{DecSignedDH}$ nat
 lost by step $100$, so an intervention switched on once entropy looks low arrives after
 most of the collapse. Third, mean token entropy is the wrong monitor: it cannot
 register a change in which paths are visited (Section~\ref{sec:zerosum}), whereas the
-split needs only samples and forward passes at two checkpoints.
+split needs only samples and forward passes at two checkpoints, so it can serve as a
+data-driven diagnostic for any LLM training run, including released checkpoints.
 
 Our contributions are:
 \begin{itemize}
 \item \textbf{A measurement of where collapse goes}: an exact between-checkpoint split
       of the entropy that training loses, which assigns $\num{DecGrpoShare}$ of GRPO's
-      loss to the visitation channel, replicated on two further seeds
-      (Section~\ref{sec:decomp}).
+      loss to the visitation channel, replicated on two further seeds, and usable as a
+      diagnostic on any two checkpoints (Section~\ref{sec:decomp}).
 \item \textbf{Why token-level control cannot reach it}: the local estimator vanishes
       at flat branch points, where the visitation prefactor is largest
       (Section~\ref{sec:channels}).
@@ -598,18 +599,20 @@ act mostly through visitation over training. We did not test this mechanism, and
 registered prediction that damping acts on the local channel is reported as not borne
 out.
 
-\paragraph{Measuring it in practice.} The split needs only responses sampled from two
-checkpoints and a forward pass of each model over both response sets --- no gradients
-and no access to the training run --- so it applies to any pair of checkpoints,
-including released ones. It separates two changes that an aggregate entropy curve
-conflates, and with prompt-paired intervals its share is well resolved at a few hundred
-prompts (Table~\ref{tab:decomp}).
+\paragraph{A diagnostic for LLM training runs.} Read as data, a training run is a
+sequence of checkpoints, and the split turns any two of them into an attribution of the
+entropy lost between them. It needs only responses sampled from both checkpoints and a
+forward pass of each model over both response sets --- no gradients and no access to the
+training code --- so it applies to logged and released checkpoints alike, and it can be
+tracked alongside reward and loss in place of the mean token entropy that cannot
+register the larger channel. With prompt-paired intervals its share is well resolved at
+a few hundred prompts (Table~\ref{tab:decomp}).
 
 \paragraph{What it does not show.} The split is descriptive: it says where entropy went,
-not whether keeping it would have helped. Accuracy did not respond to the visitation
-signal in our arms (Section~\ref{sec:dissoc}). Whether objectives that act on which
-paths are reinforced slow the visitation part of collapse, and whether that improves
-reasoning, is the question this measurement makes testable.
+not whether keeping it would have helped, and accuracy did not respond to the
+visitation signal in our arms (Section~\ref{sec:dissoc}). Whether path-level objectives
+slow the visitation part of collapse, and whether that improves reasoning, is what this
+measurement makes testable.
 
 % =====================================================================
 \section{Limitations and Conclusion}
