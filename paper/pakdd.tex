@@ -1,15 +1,18 @@
-% PAKDD submission (Springer LNCS). Main paper only; the appendices of
+% PAKDD submission (Springer LNCS, llncs.cls v2.25 of 2026/09/03 and splncs04.bst,
+% both copied from Springer's LaTeX2e proceedings template into paper/). Main paper only; the appendices of
 % steerf.tex are paper/pakdd_supp.tex, submitted as supplementary material.
 % Every measured number is a \num{} slot filled from results/*.tex, exactly as
 % in steerf.tex: no number in this file is typed by hand.
 \documentclass[runningheads]{llncs}
 \usepackage[T1]{fontenc}
-\usepackage{lmodern}
 \usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+% Times text and math, as in Springer's sample paper (newtxmath supplies the AMS
+% symbols, so amssymb is not loaded).
+\usepackage{newtxtext}
+\usepackage[varvw]{newtxmath}
 \usepackage{microtype}
 \usepackage{graphicx}
-\usepackage{amsmath}
-\usepackage{amssymb}
 \usepackage{booktabs}
 \usepackage{xcolor}
 \usepackage{tikz}
@@ -17,6 +20,10 @@
 \pgfplotsset{compat=1.18}
 \usepackage{array}
 \usepackage[hidelinks]{hyperref}
+% URLs in blue roman, Springer's eBook style (from the template).
+\usepackage{color}
+\renewcommand\UrlFont{\color{blue}\rmfamily}
+\urlstyle{rm}
 
 % ---- macros -----------------------------------------------------------
 \newcommand{\Htraj}{\mathcal{H}}
@@ -116,6 +123,8 @@ which branch is visited is not.
 \node at (-1.6,-2.6) {rich sub-tree};
 \node at (1.6,-2.6) {dead end};
 \end{tikzpicture}
+\Description{A branch point s with two equally likely continuations: A leads to a rich
+sub-tree with nine leaves, B to a dead end with one leaf.}
 \caption{At $s$ the conditional entropy is maximal and its first-order change is $0$
 (local channel), yet moving mass from $A$ to $B$ removes $A$'s downstream diversity
 (visitation channel). Token-level entropy control sees only the first.}
@@ -355,6 +364,9 @@ GRPO $80 \to 110$ & $\num{DecSecGrpoLateDH}$ & $\num{DecSecGrpoLateL}$ & $\num{D
 \end{axis}
 \end{tikzpicture}
 \else \PENDING \fi
+\Description{Horizontal stacked bars for five runs, each split into a short local
+segment and a long visitation segment; the visitation segment is about nine tenths of
+each bar.}
 \caption{The entropy lost from the base model to the given step, split into the two
 channels of Eq.~\eqref{eq:split} (values of Table~\ref{tab:decomp}). The local channel,
 the only one a token-level estimator sees, is the short grey segment in every run.}
@@ -637,11 +649,16 @@ cannot register it, and the experiment observes that dissociation. Whether the s
 holds across model scales, and which path-level objectives preserve diversity best, are
 open.
 
-\subsubsection*{Disclosure of AI use.} An AI assistant was used for writing code, running
-and checking analyses, literature search, and drafting and editing the text; the
-authors evaluated its suggestions, reviewed the code, checked every claim and citation,
-and take full responsibility for the content. Every number is emitted by a script from
-the training and evaluation logs.
+\begin{credits}
+\subsubsection{\ackname} An AI assistant was used for writing code, running and checking
+analyses, literature search, and drafting and editing the text; the authors evaluated
+its suggestions, reviewed the code, checked every claim and citation, and take full
+responsibility for the content. Every number is emitted by a script from the training
+and evaluation logs.
+
+\subsubsection{\discintname} The authors have no competing interests to declare that
+are relevant to the content of this article.
+\end{credits}
 
 \bibliographystyle{splncs04}
 \bibliography{custom}

@@ -19,3 +19,6 @@ artifacts/
 results/*.tsv
 results/tables.tex
 paper/arr_supplement.zip
+
+# written by llncs.cls (v2.25) on every build: the figures' \\Description alt texts
+paper/DescriptionTexts.txt
