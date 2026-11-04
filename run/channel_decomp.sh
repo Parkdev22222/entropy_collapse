@@ -17,6 +17,13 @@
 #   HUB_CKPTS="grpos2at80=grpo-Qwen2.5-Math-1.5B-s2@80" \
 #   INTERVALS="base:grpos2at80" bash run/channel_decomp.sh
 #
+# A checkpoint on local disk is named the same way with LOCAL_CKPTS="label=dir ...",
+# and BASE_MODEL changes the base (Amendment 3, another backbone):
+#   BASE_MODEL=meta-llama/Llama-3.2-3B-Instruct OUT_DIR=results/decomp_llama \
+#   RESULT=results/channel_decomp_llama.json \
+#   LOCAL_CKPTS="llama50=checkpoints/STEER-F/grpo-Llama-3.2-3B-Instruct-s1/global_step_50/actor/huggingface" \
+#   INTERVALS="base:llama50" bash run/channel_decomp.sh
+#
 # One GPU. Every stage is skipped when its output exists AND was made from the
 # same checkpoint, so a rerun resumes and a changed path is redone.
 # Hub checkpoints missing on disk are fetched (EVAL_REPOS) into checkpoints/_manip
@@ -56,6 +63,9 @@ declare -A SPEC=(
   [signed150]="${PILOT}/global_step_150/actor/huggingface||"
   [signed200]="${PILOT}/global_step_200/actor/huggingface||"
 )
+for e in ${LOCAL_CKPTS:-}; do
+    SPEC[${e%%=*}]="${e#*=}||"
+done
 for e in ${HUB_CKPTS:-}; do
     l="${e%%=*}"; rs="${e#*=}"; r="${rs%@*}"; st="${rs##*@}"
     SPEC[$l]="checkpoints/_manip/${r}/global_step_${st}|${r}|${st}"
@@ -108,8 +118,10 @@ if [ "${DRY}" = "1" ]; then exit 0; fi
 
 mkdir -p "${OUT}"
 # The base model's samples and self-entropies do not depend on the seed under
-# study: same prompts, same sampler seed. Reuse them rather than redraw.
-if [ "${OUT}" != "results/decomp" ] && [ -s results/decomp/samples/base.json ]; then
+# study: same prompts, same sampler seed. Reuse them rather than redraw -- but
+# only for the same base model; another backbone has its own prompts and samples.
+if [ "${OUT}" != "results/decomp" ] && [ "${BASE}" = "Qwen/Qwen2.5-Math-1.5B" ] \
+   && [ -s results/decomp/samples/base.json ]; then
     mkdir -p "${OUT}/samples" "${OUT}/ent"
     cp -n results/decomp/prompts.json "${OUT}/"
     cp -n results/decomp/samples/base.json "${OUT}/samples/"

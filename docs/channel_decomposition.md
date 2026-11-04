@@ -111,3 +111,31 @@ the step is reported with the number. Everything else is as in Amendment 1:
 the seed-1 Q1 rule, applied to each interval, decides "replicated"; the share
 and its interval are reported whatever they are. Output
 `results/decomp_rep/`, `results/channel_decomp_rep.json`.
+
+## Amendment 3 — another backbone (2026-11-04, before training)
+
+Decided after the seed-1 result and its replication were seen, to test whether
+the visitation share is specific to Qwen2.5-Math-1.5B. Fixed before the run is
+started:
+
+- **Backbone:** `meta-llama/Llama-3.2-3B-Instruct`, another model family. The
+  instruction-tuned checkpoint, because the base one answers almost none of these
+  problems under a chat template (run/_arms.sh, backbone_profile).
+- **Training:** plain GRPO with `run/run_grpo.sh` and every hyperparameter of the
+  1.5B GRPO runs (512 prompts x 8, mini-batch 32, 3072 response tokens, lr 1e-6,
+  clip 0.2/0.28, no KL, no entropy bonus), seed 1, 100 steps, checkpoints at
+  steps 50 and 100. Validation on MATH500 (mean@1) every 25 steps, because
+  AIME24 is near zero for this model; validation plays no part in the
+  decomposition.
+- **Decomposition:** base -> step 50 and base -> step 100, on the same 512
+  DAPO-Math-17k prompt indices (seed 20261020) under Llama's own chat template,
+  four responses each, the same sampler, entropy computation and bootstrap.
+  Launcher: `BASE_MODEL=meta-llama/Llama-3.2-3B-Instruct OUT_DIR=results/decomp_llama
+  RESULT=results/channel_decomp_llama.json LOCAL_CKPTS=... INTERVALS=...
+  bash run/channel_decomp.sh`.
+- **Rule:** the Q1 rule, applied to each interval. The share V/dH and its interval
+  are reported whatever they are; no threshold on its size is set.
+- **If the run does not learn:** if the mean training reward over steps 91-100 is
+  not above that over steps 1-10, the decomposition is still reported, but is
+  described as uninformative about RL-driven collapse rather than as a
+  replication or a counterexample.
